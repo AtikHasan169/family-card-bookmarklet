@@ -52,15 +52,15 @@ let nextId = 1, activeCategory = null;
 
 // Native Canvas Crop, Zoom & Rotate state variables
 let rawImage = null;
-let baseScale = 1; // Auto-fit scale to prevent giant pixel blowouts
+let baseScale = 1; 
 let zoomLevel = 1;
-let rotationAngle = 0; // Tracks rotation (0, 90, 180, 270)
+let rotationAngle = 0; 
 let panX = 0;
 let panY = 0;
 let isDragging = false;
 let startX = 0;
 let startY = 0;
-let activeCropItem = null; // Tracks if we are cropping an existing image from the viewer
+let activeCropItem = null; 
 
 // Viewer modal zoom state
 let viewerZoom = 1;
@@ -91,7 +91,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setupNativeCropper();
   setupImageViewerModal();
 
-  // Ping parent page to check if Vue form is ready
   window.parent.postMessage({ action: 'FC_CHECK_STATUS' }, '*');
 });
 
@@ -101,24 +100,18 @@ function setStatus(message, mode = 'idle') {
   $('statusText').textContent = message;
 }
 
-// Convert Bangla digits (০-৯) to English (0-9)
 function toEnglishDigits(str) {
   if (!str) return '';
   return String(str).replace(/[০-৯]/g, (d) => '০১২৩৪৫৬৭৮৯'.indexOf(d));
 }
 
-// Ensure DOB is always formatted as YYYY-MM-DD in English digits
 function normalizeDob(rawDob) {
   let s = toEnglishDigits(rawDob).trim();
   if (!s) return '';
   const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (dmy) {
-    return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-  }
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
   const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-  if (ymd) {
-    return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
-  }
+  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
   return s;
 }
 
@@ -127,7 +120,7 @@ function formatEnglishName(rawName) {
   let s = String(rawName).trim().replace(/\s+/g, ' ');
   s = s.replace(/^(?:mosha|mosa|most|mst|mosammat|musammat|মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?\s+/i, 'MST. ');
   s = s.replace(/^(?:md|mohd|मोঃ|মোঃ|মো)[:.]?\s+/i, 'MD. ');
-  return s.toUpperCase(); // Force all English names to uppercase
+  return s.toUpperCase();
 }
 
 function syncJsonOutput() {
@@ -159,7 +152,6 @@ function moveImage(category, idx, dir) {
   renderPreviews(category);
 }
 
-// Setup full-screen Lightbox viewer modal with live inline editing + photo zoom
 function setupImageViewerModal() {
   if ($('fcViewerModal')) return;
   const modal = document.createElement('div');
@@ -199,9 +191,7 @@ function setupImageViewerModal() {
 
   const closeViewer = () => {
     modal.style.display = 'none';
-    if (state.lastExtracted) {
-      renderExtractedCards(state.lastExtracted);
-    }
+    if (state.lastExtracted) renderExtractedCards(state.lastExtracted);
   };
 
   modal.querySelector('#fcViewerClose').onclick = closeViewer;
@@ -212,7 +202,6 @@ function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
 
-  // Bind the crop button to this specific image
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
 
   viewerZoom = 1;
@@ -225,15 +214,10 @@ function showImageViewer(item) {
 
   if (item.boundRef && state.lastExtracted) {
     const isHead = item.boundRef.type === 'head';
-    const targetObj = isHead
-      ? state.lastExtracted.head
-      : state.lastExtracted.family_members[item.boundRef.index];
+    const targetObj = isHead ? state.lastExtracted.head : state.lastExtracted.family_members[item.boundRef.index];
 
     if (targetObj) {
-      $('fcViewerTitle').textContent = isHead
-        ? 'Primary Applicant (Wife) — Edit'
-        : `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Edit`;
-
+      $('fcViewerTitle').textContent = isHead ? 'Primary Applicant (Wife) — Edit' : `Member #${item.boundRef.index + 2} (${targetObj.relation}) — Edit`;
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
       const headerNote = document.createElement('div');
       headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;';
@@ -265,37 +249,39 @@ function showImageViewer(item) {
           inputEl.addEventListener('change', (e) => {
             targetObj.relation = e.target.value;
             targetObj.relationship_id = RELATION_ID_MAP[e.target.value] || 263;
-            $('fcViewerTitle').textContent = `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Edit`;
+            $('fcViewerTitle').textContent = `Member #${item.boundRef.index + 2} (${targetObj.relation}) — Edit`;
             syncJsonOutput();
           });
         } else {
           inputEl = document.createElement('input');
           inputEl.type = 'text';
           inputEl.value = targetObj[f.key] || '';
-          inputEl.style.cssText = 'width:100%; padding:5px 8px; background:#09090b; color:#fff; border:1px solid #3f3f46; border-radius:5px; font-size:12px;';
-          if (f.key.endsWith('_en')) {
-             inputEl.style.textTransform = 'uppercase';
-          }
-          inputEl.addEventListener('input', (e) => {
-            let val = e.target.value;
-            if (f.key === 'nid' || f.key === 'nid_or_brn') {
-              val = toEnglishDigits(val).replace(/\s+/g, '');
-            } else if (f.key === 'dob') {
-              val = toEnglishDigits(val);
+          inputEl.placeholder = '—';
+          inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
+          
+          if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
+
+          inputEl.addEventListener('focus', () => {
+            inputEl.style.borderColor = '#bfdbfe';
+            inputEl.style.background = '#eff6ff';
+          });
+          
+          inputEl.addEventListener('blur', () => {
+            inputEl.style.borderColor = 'transparent';
+            inputEl.style.background = 'transparent';
+            if (f.key === 'dob') {
+              targetObj.dob = normalizeDob(inputEl.value);
+              inputEl.value = targetObj.dob;
+              syncJsonOutput();
             }
+          });
+          
+          inputEl.addEventListener('input', () => {
+            let val = inputEl.value;
+            if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
+            else if (f.key.endsWith('_en')) val = val.toUpperCase();
             targetObj[f.key] = val;
             syncJsonOutput();
-          });
-          inputEl.addEventListener('blur', (e) => {
-            if (f.key === 'dob') {
-              targetObj.dob = normalizeDob(e.target.value);
-              e.target.value = targetObj.dob;
-              syncJsonOutput();
-            } else if (f.key.endsWith('_en')) {
-              targetObj[f.key] = formatEnglishName(e.target.value);
-              e.target.value = targetObj[f.key];
-              syncJsonOutput();
-            }
           });
         }
 
@@ -432,7 +418,6 @@ async function handleUpload(e, category) {
   setStatus('Images added successfully.', 'ok');
 }
 
-// Native Camera trigger opening custom Zoom/Crop modal
 function openCamera(category) {
   activeCategory = category;
   activeCropItem = null;
@@ -448,10 +433,9 @@ function openCamera(category) {
           const canvas = $('cropCanvas');
           canvas.width = 900;
           canvas.height = 600;
-          // Auto-Fit calculation restored to prevent giant pixel blowouts
           baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
           zoomLevel = 1;
-          rotationAngle = 0; // Reset rotation for new image
+          rotationAngle = 0;
           panX = 0;
           panY = 0;
           $('zoomRange').value = 1;
@@ -466,7 +450,6 @@ function openCamera(category) {
   input.click();
 }
 
-// Opens the crop screen for an existing image in the viewer
 function openCropForImage(item) {
   activeCropItem = item;
   activeCategory = null; 
@@ -476,15 +459,14 @@ function openCropForImage(item) {
     const canvas = $('cropCanvas');
     canvas.width = 900;
     canvas.height = 600;
-    // Auto-Fit calculation restored to prevent giant pixel blowouts
     baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
     zoomLevel = 1;
-    rotationAngle = 0; // Reset rotation for new image
+    rotationAngle = 0;
     panX = 0;
     panY = 0;
     $('zoomRange').value = 1;
     
-    $('fcViewerModal').style.display = 'none'; // Hide viewer
+    $('fcViewerModal').style.display = 'none';
     $('cropModal').classList.add('open');
     drawCropCanvas();
   };
@@ -496,17 +478,16 @@ function drawCropCanvas() {
   if (!rawImage || !canvas) return;
   const ctx = canvas.getContext('2d');
 
-  // Fill canvas with solid black to prevent JPEG transparency glitches
+  // Fill canvas with solid black to prevent JPEG transparency glitches on rotation
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
   
-  // Apply Auto-Fit Scale multiplied by User Zoom Level
   const totalScale = baseScale * zoomLevel;
   ctx.scale(totalScale, totalScale); 
-  ctx.rotate((rotationAngle * Math.PI) / 180); // Apply rotation
+  ctx.rotate((rotationAngle * Math.PI) / 180);
   
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
@@ -569,7 +550,7 @@ function setupNativeCropper() {
   $('cancelCropBtn').addEventListener('click', () => {
     $('cropModal').classList.remove('open');
     if (activeCropItem) {
-      $('fcViewerModal').style.display = 'flex'; // Restore viewer if cancelling edit
+      $('fcViewerModal').style.display = 'flex';
       activeCropItem = null;
     }
   });
@@ -581,12 +562,10 @@ function setupNativeCropper() {
     $('cropModal').classList.remove('open');
     
     if (activeCropItem) {
-      // We cropped an existing image
       activeCropItem.base64 = b64;
       renderPreviews('head');
       renderPreviews('other');
       
-      // Update viewer image instantly
       if ($('fcViewerModal').style.display !== 'none') {
         $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
       } else {
@@ -596,7 +575,6 @@ function setupNativeCropper() {
       setStatus('Image cropped and updated.', 'ok');
       activeCropItem = null;
     } else if (activeCategory) {
-      // We cropped a brand new camera capture
       addImage(activeCategory, b64, 'Live_Zoom_Crop.jpg');
       setStatus('Cropped & zoomed photo added.', 'ok');
       activeCategory = null;
@@ -791,7 +769,6 @@ function bindExtractedDataToThumbnails(data) {
   renderPreviews('other');
 }
 
-// Render interactive, inline-editable cards in the main panel
 function renderExtractedCards(data) {
   const container = $('visualCards');
   container.replaceChildren();
@@ -838,7 +815,7 @@ function renderExtractedCards(data) {
           targetObj.relation = e.target.value;
           targetObj.relationship_id = RELATION_ID_MAP[e.target.value] || 263;
           if (isMember) {
-            titleSpan.textContent = `Member #${memberIdx + 1} — ${targetObj.relation}`;
+            titleSpan.textContent = `Member #${memberIdx + 2} — ${targetObj.relation}`;
             tagSpan.textContent = `ID: ${targetObj.relationship_id}`;
           }
           syncJsonOutput();
@@ -849,30 +826,28 @@ function renderExtractedCards(data) {
         inputEl.value = targetObj[f.key] || '';
         inputEl.placeholder = '—';
         inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
-        if (f.key.endsWith('_en')) {
-           inputEl.style.textTransform = 'uppercase';
-        }
+        
+        if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
+
         inputEl.addEventListener('focus', () => {
           inputEl.style.borderColor = '#bfdbfe';
           inputEl.style.background = '#eff6ff';
         });
+        
         inputEl.addEventListener('blur', () => {
           inputEl.style.borderColor = 'transparent';
           inputEl.style.background = 'transparent';
           if (f.key === 'dob') {
             targetObj.dob = normalizeDob(inputEl.value);
             inputEl.value = targetObj.dob;
-          } else if (f.key.endsWith('_en')) {
-            targetObj[f.key] = formatEnglishName(inputEl.value);
-            inputEl.value = targetObj[f.key];
+            syncJsonOutput();
           }
-          syncJsonOutput();
         });
+        
         inputEl.addEventListener('input', () => {
           let val = inputEl.value;
-          if (f.key === 'nid' || f.key === 'nid_or_brn') {
-            val = toEnglishDigits(val).replace(/\s+/g, '');
-          }
+          if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
+          else if (f.key.endsWith('_en')) val = val.toUpperCase();
           targetObj[f.key] = val;
           syncJsonOutput();
         });
@@ -911,8 +886,7 @@ function renderExtractedCards(data) {
   if (Array.isArray(data.family_members)) {
     data.family_members.forEach((m, i) => {
       container.appendChild(
-        // Shift member visual numbering by +2 because Head is #1
-        buildEditableCard(`Member #${i + 2} — ${m.relation}`, `ID: ${m.relationship_id}`, m, MEMBER_FIELDS, true, i + 1)
+        buildEditableCard(`Member #${i + 2} — ${m.relation}`, `ID: ${m.relationship_id}`, m, MEMBER_FIELDS, true, i)
       );
     });
   }
