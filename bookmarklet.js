@@ -1,6 +1,5 @@
 /* Family Card Pro — bookmarklet edition
  * Host this folder on HTTPS (GitHub Pages, Cloudflare Pages, Netlify, etc.).
- * The script URL determines where sidepanel.html is loaded from.
  */
 (function () {
   'use strict';
@@ -10,40 +9,23 @@
     return;
   }
 
-  // 1. Capture currentScript FIRST before any conditional checks or logic
+  // Foolproof script resolution
+  const fallbackUrl = 'https://atikhasan169.github.io/family-card-bookmarklet/bookmarklet.js';
   const currentScript = document.currentScript;
-  if (!currentScript || !currentScript.src) {
-    alert('Could not determine the hosted Family Card Pro URL.');
-    return;
-  }
-
-  const cleanScriptSrc = currentScript.src.split('?')[0];
-
-  // 2. Auto-restore sidebar state across page refreshes
-  if (localStorage.getItem('fc_session_open') === 'true') {
-     setTimeout(() => {
-       const existingRoot = document.getElementById('fc-floating-root');
-       if (!existingRoot) {
-          const reInject = document.createElement('script');
-          reInject.src = cleanScriptSrc;
-          document.documentElement.appendChild(reInject);
-       }
-     }, 500);
-  }
-
-  // Keep panelUrl completely static so iframe localStorage stays persistent
+  const scriptSrc = (currentScript && currentScript.src) ? currentScript.src : fallbackUrl;
+  
+  const cleanScriptSrc = scriptSrc.split('?')[0];
   const baseUrl = new URL('.', cleanScriptSrc).href;
-  const panelUrl = new URL('sidepanel.html', baseUrl).href;
+  
+  // Cache-buster ensures you NEVER get stuck on broken old versions
+  const panelUrl = new URL('sidepanel.html?t=' + Date.now(), baseUrl).href;
   const panelOrigin = new URL(panelUrl).origin;
 
-  // --- LIVE DEV UPDATE: Destroy old instance and force-fetch latest code ---
   const existingRoot = document.getElementById('fc-floating-root');
-  if (existingRoot) {
-    existingRoot.remove();
-  }
+  if (existingRoot) existingRoot.remove();
   document.querySelectorAll('script[src*="sidepanel"], style[data-fc]').forEach(el => el.remove());
 
-  /* Bundled Vue form injector (adapted from inject.js). */
+  /* Bundled Vue form injector */
   (function () {
     const RELATION_ID_MAP = {
       'Father': 157, 'Mother': 158, 'Husband': 159, 'Son': 160, 'Daughter': 161,
@@ -165,14 +147,13 @@
         if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
         if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
-        // 1. Populate Primary Applicant (Head) in main form
         if (payload.head && vmHead && vmHead.data) {
           const h = payload.head;
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-
           const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
+
           setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
           setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
           setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
@@ -186,7 +167,6 @@
           setReactive(vmHead, vmHead.data, 'mother_name_en', h.mother_name_en);
         }
 
-        // 2. Combine Head as Member 1, then the rest of the family
         const fullFamilyList = [];
         if (payload.head) {
           fullFamilyList.push({
@@ -203,7 +183,6 @@
           fullFamilyList.push(...payload.family_members);
         }
 
-        // 3. Inject into the Member Array with strict field isolation, Gender & Relationship
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
             if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
@@ -311,9 +290,7 @@
         };
 
         const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
-        const family_members = memberSlice
-          .filter(isRowPopulated)
-          .map(parseMemberRow);
+        const family_members = memberSlice.filter(isRowPopulated).map(parseMemberRow);
 
         if (!head.nid && !head.name_bn && !head.name_en && family_members.length === 0) {
           window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
@@ -435,17 +412,19 @@
 
   const STORAGE_KEY = 'fc_pro_api_key';
   const STORAGE_MODEL = 'fc_pro_model';
-
   let isOpen = false;
+
   function sendToPanel(message) {
     if (iframe.contentWindow) iframe.contentWindow.postMessage(message, panelOrigin);
   }
   function pushSavedCredentials() {
-    sendToPanel({
-      action: 'FC_API_KEY_DATA',
-      apiKey: localStorage.getItem(STORAGE_KEY) || '',
-      model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
-    });
+    try {
+      sendToPanel({
+        action: 'FC_API_KEY_DATA',
+        apiKey: localStorage.getItem(STORAGE_KEY) || '',
+        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
+      });
+    } catch (e) {}
   }
   function closeSheet() {
     isOpen = false;
@@ -457,12 +436,10 @@
     if (isOpen) {
       iframe.classList.add('open');
       trigger.classList.add('active');
-      localStorage.setItem('fc_session_open', 'true');
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
       pushSavedCredentials();
     } else {
       closeSheet();
-      localStorage.removeItem('fc_session_open');
     }
   }
 
@@ -473,6 +450,9 @@
 
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
+
+  // Auto-open panel instantly on launch so it never looks like "nothing happens"
+  setTimeout(() => { if (!isOpen) toggleSheet(); }, 100);
 
   window.addEventListener('message', (event) => {
     if (event.source !== iframe.contentWindow || event.origin !== panelOrigin || !event.data) return;
@@ -486,8 +466,10 @@
       pushSavedCredentials();
     }
     if (data.action === 'FC_SAVE_API_KEY') {
-      if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
-      if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
+      try {
+        if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
+        if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
+      } catch (e) {}
     }
     if (data.action === 'FILL_VUE_FORM') {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL', { detail: data.payload }));

@@ -310,6 +310,10 @@
     </div>
   </div>
 
-  <script src="sidepanel.js"></script>
+  <!-- Bypasses aggressive browser caching forever -->
+  <script>
+    const v = new URLSearchParams(window.location.search).get('t') || Date.now();
+    document.write('<script src="sidepanel.js?t=' + v + '"><' + '/script>');
+  </script>
 </body>
 </html>

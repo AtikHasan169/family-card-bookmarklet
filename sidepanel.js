@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.5-live';
+const CURRENT_VERSION_TAG = 'v3.6-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -103,6 +103,7 @@ function initApp() {
   $('modelSelect').value = savedModel;
   if (!savedKey) $('settingsDrawer').classList.add('open');
 
+  // Bind UI Events Safely
   $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined));
   $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value));
 
@@ -115,6 +116,46 @@ function initApp() {
     closeBtn.addEventListener('click', () => window.parent.postMessage({ action: 'FC_CLOSE_SHEET' }, '*'));
     navRight.prepend(closeBtn);
   }
+
+  $('settingsToggleBtn').addEventListener('click', () => $('settingsDrawer').classList.toggle('open'));
+  $('toggleKeyBtn').addEventListener('click', () => {
+    const inp = $('apiKeyInput');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    $('toggleKeyBtn').textContent = inp.type === 'password' ? 'Show' : 'Hide';
+  });
+
+  $('uploadHeadBtn').addEventListener('click', () => $('headUpload').click());
+  $('uploadOtherBtn').addEventListener('click', () => $('otherUpload').click());
+  $('headUpload').addEventListener('change', (e) => handleUpload(e, 'head'));
+  $('otherUpload').addEventListener('change', (e) => handleUpload(e, 'other'));
+
+  $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
+  $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
+
+  $('extractBtn').addEventListener('click', runExtraction);
+  $('autofillBtn').addEventListener('click', triggerFormAutofill);
+
+  $('copyJsonBtn').addEventListener('click', async () => {
+    if (!state.lastExtracted) return;
+    await copyTextSafe($('rawJsonOutput').textContent);
+    setStatus('Raw JSON copied to clipboard.', 'ok');
+  });
+
+  $('clearAllBtn').addEventListener('click', () => {
+    state.head = [];
+    state.other = [];
+    state.lastExtracted = null;
+    renderPreviews('head');
+    renderPreviews('other');
+    $('resultsWrap').classList.remove('visible');
+    $('autofillBtn').disabled = true;
+    setStatus('Workspace cleared.', 'idle');
+  });
+
+  $('pullFromWebBtn').addEventListener('click', () => {
+    window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
+    setStatus('Pulling drafted data from web form...', 'loading');
+  });
 
   // Setup Drag-and-Drop
   ['headDropZone', 'otherDropZone'].forEach(id => {
@@ -134,12 +175,59 @@ function initApp() {
   setupImageViewerModal();
   setupUpdateChecker();
 
+  window.addEventListener('message', handleIncomingMessages);
+
   window.parent.postMessage({ action: 'FC_CHECK_STATUS' }, '*');
   window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
 }
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
-else initApp();
+// Guaranteed launch
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
+
+function handleIncomingMessages(e) {
+  if (e.source !== window.parent || !e.data) return;
+
+  if (e.data.action === 'FC_API_KEY_DATA') {
+    if (e.data.apiKey) {
+      if (!$('apiKeyInput').value) $('apiKeyInput').value = e.data.apiKey;
+      try { localStorage.setItem(STORAGE_KEY, e.data.apiKey); } catch (_) {}
+      $('settingsDrawer').classList.remove('open');
+    }
+    if (e.data.model) {
+      $('modelSelect').value = e.data.model;
+      try { localStorage.setItem(STORAGE_MODEL, e.data.model); } catch (_) {}
+    }
+  }
+
+  if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
+    setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
+  }
+  if (e.data.action === 'FC_STATUS_REPLY') {
+    const pill = $('connStatus');
+    if (e.data.online) {
+      pill.classList.add('online');
+      $('connText').textContent = 'Form Ready';
+    }
+  }
+  
+  if (e.data.action === 'FC_SYNC_FROM_WEB') syncFromWebToPanel(e.data.payload);
+
+  if (e.data.action === 'FC_PULL_RESPONSE') {
+    const res = e.data.detail;
+    if (res.success && res.payload) {
+      state.lastExtracted = normalizeOutput(res.payload, true);
+      renderExtractedCards(state.lastExtracted);
+      $('autofillBtn').disabled = false;
+      setStatus(`Successfully pulled Head + ${state.lastExtracted.family_members.length} member(s) from form!`, 'ok');
+    } else {
+      setStatus(res.message || 'Could not pull draft data.', 'err');
+    }
+  }
+}
 
 function setStatus(message, mode = 'idle') {
   const banner = $('statusBanner');
@@ -577,7 +665,6 @@ async function handleUpload(e, category, droppedFiles = null) {
   const files = Array.from(droppedFiles || (e ? e.target.files : []));
   if (!files.length) return;
   
-  // Single image upload immediately throws you into Crop Modal
   if (files.length === 1 && files[0].type.startsWith('image/')) {
     const file = files[0];
     const reader = new FileReader();
@@ -603,7 +690,6 @@ async function handleUpload(e, category, droppedFiles = null) {
     };
     reader.readAsDataURL(file);
   } else {
-    // Multi-file upload goes straight to thumbnails
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
@@ -1039,15 +1125,8 @@ function renderExtractedCards(data) {
     return card;
   };
 
-  if (data.head) {
-    container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
-  }
-
-  if (Array.isArray(data.family_members)) {
-    data.family_members.forEach((m, i) => {
-      container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i));
-    });
-  }
+  if (data.head) container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
+  if (Array.isArray(data.family_members)) data.family_members.forEach((m, i) => container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i)));
 
   bindExtractedDataToThumbnails(data);
   syncJsonOutput();
@@ -1113,7 +1192,7 @@ async function runExtraction() {
 
     renderExtractedCards(normalized);
     $('autofillBtn').disabled = false;
-    setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Verify Relation, Gender & NID/BRN before Auto-Fill.`, 'ok');
+    setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Verify empty red fields before Auto-Fill.`, 'ok');
   } catch (err) {
     setStatus(`Error: ${err.message}`, 'err');
   } finally {
@@ -1126,89 +1205,6 @@ function triggerFormAutofill() {
   window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
   setStatus('Sent auto-fill data to form!', 'ok');
 }
-
-$('settingsToggleBtn').addEventListener('click', () => $('settingsDrawer').classList.toggle('open'));
-$('toggleKeyBtn').addEventListener('click', () => {
-  const inp = $('apiKeyInput');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-  $('toggleKeyBtn').textContent = inp.type === 'password' ? 'Show' : 'Hide';
-});
-$('uploadHeadBtn').addEventListener('click', () => $('headUpload').click());
-$('uploadOtherBtn').addEventListener('click', () => $('otherUpload').click());
-$('headUpload').addEventListener('change', (e) => handleUpload(e, 'head'));
-$('otherUpload').addEventListener('change', (e) => handleUpload(e, 'other'));
-
-$('captureHeadBtn').addEventListener('click', () => openCamera('head'));
-$('captureOtherBtn').addEventListener('click', () => openCamera('other'));
-
-$('extractBtn').addEventListener('click', runExtraction);
-$('autofillBtn').addEventListener('click', triggerFormAutofill);
-
-$('copyJsonBtn').addEventListener('click', async () => {
-  if (!state.lastExtracted) return;
-  await copyTextSafe($('rawJsonOutput').textContent);
-  setStatus('Raw JSON copied to clipboard.', 'ok');
-});
-
-$('clearAllBtn').addEventListener('click', () => {
-  state.head = [];
-  state.other = [];
-  state.lastExtracted = null;
-  renderPreviews('head');
-  renderPreviews('other');
-  $('resultsWrap').classList.remove('visible');
-  $('autofillBtn').disabled = true;
-  setStatus('Workspace cleared.', 'idle');
-});
-
-window.addEventListener('message', (e) => {
-  if (e.source !== window.parent || !e.data) return;
-
-  if (e.data.action === 'FC_API_KEY_DATA') {
-    if (e.data.apiKey) {
-      if (!$('apiKeyInput').value) {
-        $('apiKeyInput').value = e.data.apiKey;
-      }
-      try { localStorage.setItem(STORAGE_KEY, e.data.apiKey); } catch (_) {}
-      $('settingsDrawer').classList.remove('open');
-    }
-    if (e.data.model) {
-      $('modelSelect').value = e.data.model;
-      try { localStorage.setItem(STORAGE_MODEL, e.data.model); } catch (_) {}
-    }
-  }
-
-  if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
-    setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
-  }
-  if (e.data.action === 'FC_STATUS_REPLY') {
-    const pill = $('connStatus');
-    const txt = $('connText');
-    if (e.data.online) {
-      pill.classList.add('online');
-      txt.textContent = 'Form Ready';
-    } else {
-      pill.classList.remove('online');
-      txt.textContent = 'Page Connected';
-    }
-  }
-  
-  if (e.data.action === 'FC_SYNC_FROM_WEB') {
-    syncFromWebToPanel(e.data.payload);
-  }
-
-  if (e.data.action === 'FC_PULL_RESPONSE') {
-    const res = e.data.detail;
-    if (res.success && res.payload) {
-      state.lastExtracted = normalizeOutput(res.payload, true);
-      renderExtractedCards(state.lastExtracted);
-      $('autofillBtn').disabled = false;
-      setStatus(`Successfully pulled Head + ${state.lastExtracted.family_members.length} member(s) from form!`, 'ok');
-    } else {
-      setStatus(res.message || 'Could not pull draft data.', 'err');
-    }
-  }
-});
 
 function syncFromWebToPanel(webData) {
   if (!state.lastExtracted) return; 
@@ -1257,15 +1253,9 @@ function syncFromWebToPanel(webData) {
   if (changed) {
     syncJsonOutput();
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
-       // Silently synced while typing
     } else {
        renderExtractedCards(state.lastExtracted); 
     }
     setStatus('Webpage edits automatically synced to panel.', 'ok');
   }
 }
-
-$('pullFromWebBtn').addEventListener('click', () => {
-  window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
-  setStatus('Pulling drafted data from web form...', 'loading');
-});
