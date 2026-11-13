@@ -412,6 +412,7 @@
 
   const STORAGE_KEY = 'fc_pro_api_key';
   const STORAGE_MODEL = 'fc_pro_model';
+  const SESSION_DRAFT_KEY = 'fc_pro_active_session';
   let isOpen = false;
 
   function sendToPanel(message) {
@@ -424,6 +425,13 @@
         apiKey: localStorage.getItem(STORAGE_KEY) || '',
         model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
       });
+      const savedSession = sessionStorage.getItem(SESSION_DRAFT_KEY);
+      if (savedSession) {
+        sendToPanel({
+          action: 'FC_RESTORE_SESSION',
+          sessionData: JSON.parse(savedSession)
+        });
+      }
     } catch (e) {}
   }
   function closeSheet() {
@@ -469,6 +477,15 @@
       try {
         if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
         if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
+      } catch (e) {}
+    }
+    if (data.action === 'FC_SAVE_SESSION') {
+      try {
+        if (data.sessionData) {
+          sessionStorage.setItem(SESSION_DRAFT_KEY, JSON.stringify(data.sessionData));
+        } else {
+          sessionStorage.removeItem(SESSION_DRAFT_KEY);
+        }
       } catch (e) {}
     }
     if (data.action === 'FILL_VUE_FORM') {

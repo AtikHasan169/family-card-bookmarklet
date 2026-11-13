@@ -149,6 +149,7 @@ function initApp() {
     state.head = [];
     state.other = [];
     state.lastExtracted = null;
+    window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: null }, '*');
     renderPreviews('head');
     renderPreviews('other');
     $('resultsWrap').classList.remove('visible');
@@ -192,8 +193,28 @@ if (document.readyState === 'loading') {
   initApp();
 }
 
+let sessionRestored = false;
+
 function handleIncomingMessages(e) {
   if (e.source !== window.parent || !e.data) return;
+
+  if (e.data.action === 'FC_RESTORE_SESSION' && !sessionRestored) {
+    sessionRestored = true;
+    const s = e.data.sessionData;
+    if (s) {
+      if (Array.isArray(s.head) && !state.head.length) state.head = s.head;
+      if (Array.isArray(s.other) && !state.other.length) state.other = s.other;
+      if (s.nextId) nextId = s.nextId;
+      renderPreviews('head');
+      renderPreviews('other');
+      if (s.lastExtracted && !state.lastExtracted) {
+        state.lastExtracted = s.lastExtracted;
+        renderExtractedCards(state.lastExtracted);
+        $('autofillBtn').disabled = false;
+        setStatus('Restored previous session data automatically!', 'ok');
+      }
+    }
+  }
 
   if (e.data.action === 'FC_API_KEY_DATA') {
     if (e.data.apiKey) {
@@ -299,19 +320,34 @@ function formatEnglishName(rawName) {
   return s.toUpperCase();
 }
 
+function saveSessionState() {
+  try {
+    const payload = {
+      head: state.head,
+      other: state.other,
+      lastExtracted: state.lastExtracted,
+      nextId
+    };
+    window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: payload }, '*');
+  } catch (e) {}
+}
+
 function syncJsonOutput() {
   if (!state.lastExtracted) return;
   $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+  saveSessionState();
 }
 
 function addImage(category, base64, name) {
   state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null });
   renderPreviews(category);
+  saveSessionState();
 }
 
 function removeImage(category, id) {
   state[category] = state[category].filter((item) => item.id !== id);
   renderPreviews(category);
+  saveSessionState();
 }
 
 function moveImage(category, idx, dir) {
@@ -320,6 +356,7 @@ function moveImage(category, idx, dir) {
   if (target < 0 || target >= list.length) return;
   [list[idx], list[target]] = [list[target], list[idx]];
   renderPreviews(category);
+  saveSessionState();
 }
 
 function setupUpdateChecker() {
