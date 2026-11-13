@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.2-live';
+const CURRENT_VERSION_TAG = 'v3.3-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -96,7 +96,9 @@ document.addEventListener('DOMContentLoaded', () => {
   $('apiKeyInput').value = savedKey;
   $('modelSelect').value = savedModel;
 
-  // Auto-save API key instantly as you type/paste it
+  if (!savedKey) $('settingsDrawer').classList.add('open');
+
+  // Auto-save API key instantly on input
   $('apiKeyInput').addEventListener('input', (e) => {
     localStorage.setItem(STORAGE_KEY, e.target.value.trim());
   });
@@ -105,8 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
   $('modelSelect').addEventListener('change', (e) => {
     localStorage.setItem(STORAGE_MODEL, e.target.value);
   });
-
-  if (!savedKey) $('settingsDrawer').classList.add('open');
 
   const navRight = document.querySelector('.nav-right');
   if (navRight && !$('closeSheetBtn')) {
