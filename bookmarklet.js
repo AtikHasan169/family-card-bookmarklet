@@ -10,6 +10,7 @@
     return;
   }
 
+  // 1. Capture currentScript FIRST before any conditional checks or logic
   const currentScript = document.currentScript;
   if (!currentScript || !currentScript.src) {
     alert('Could not determine the hosted Family Card Pro URL.');
@@ -18,22 +19,24 @@
 
   const cleanScriptSrc = currentScript.src.split('?')[0];
 
+  // 2. Auto-restore sidebar state across page refreshes
   if (localStorage.getItem('fc_session_open') === 'true') {
      setTimeout(() => {
        const existingRoot = document.getElementById('fc-floating-root');
        if (!existingRoot) {
           const reInject = document.createElement('script');
-          reInject.src = `${cleanScriptSrc}?t=${Date.now()}`;
+          reInject.src = cleanScriptSrc;
           document.documentElement.appendChild(reInject);
        }
      }, 500);
   }
 
+  // Keep panelUrl completely static so iframe localStorage stays persistent
   const baseUrl = new URL('.', cleanScriptSrc).href;
   const panelUrl = new URL('sidepanel.html', baseUrl).href;
-
   const panelOrigin = new URL(panelUrl).origin;
 
+  // --- LIVE DEV UPDATE: Destroy old instance and force-fetch latest code ---
   const existingRoot = document.getElementById('fc-floating-root');
   if (existingRoot) {
     existingRoot.remove();
@@ -327,7 +330,6 @@
       }
     });
 
-    // --- LIVE REVERSE SYNC: Web Page -> Extension ---
     function extractCurrentFormState() {
       const { vmHead, vmMembers } = getVueNodes();
       const d = (vmHead && vmHead.data) ? vmHead.data : {};
@@ -429,9 +431,19 @@
   root.append(trigger, iframe);
   (document.body || document.documentElement).appendChild(root);
 
+  const STORAGE_KEY = 'fc_pro_api_key';
+  const STORAGE_MODEL = 'fc_pro_model';
+
   let isOpen = false;
   function sendToPanel(message) {
     if (iframe.contentWindow) iframe.contentWindow.postMessage(message, panelOrigin);
+  }
+  function pushSavedCredentials() {
+    sendToPanel({
+      action: 'FC_API_KEY_DATA',
+      apiKey: localStorage.getItem(STORAGE_KEY) || '',
+      model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
+    });
   }
   function closeSheet() {
     isOpen = false;
@@ -445,44 +457,35 @@
       trigger.classList.add('active');
       localStorage.setItem('fc_session_open', 'true');
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+      pushSavedCredentials();
     } else {
       closeSheet();
       localStorage.removeItem('fc_session_open');
     }
   }
 
+  iframe.addEventListener('load', () => {
+    sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+    pushSavedCredentials();
+  });
+
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
-
-  // --- FIRST-PARTY STORAGE BRIDGE ---
-  const STORAGE_KEY = 'fc_pro_api_key';
-  const STORAGE_MODEL = 'fc_pro_model';
 
   window.addEventListener('message', (event) => {
     if (event.source !== iframe.contentWindow || event.origin !== panelOrigin || !event.data) return;
     const data = event.data;
-
-    if (data.action === 'FC_GET_API_KEY') {
-      sendToPanel({
-        action: 'FC_API_KEY_DATA',
-        apiKey: localStorage.getItem(STORAGE_KEY) || '',
-        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
-      });
-    }
-
-    if (data.action === 'FC_SAVE_API_KEY') {
-      if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
-      if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
-    }
-
     if (data.action === 'FC_CLOSE_SHEET') closeSheet();
     if (data.action === 'FC_CHECK_STATUS') {
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
-      sendToPanel({
-        action: 'FC_API_KEY_DATA',
-        apiKey: localStorage.getItem(STORAGE_KEY) || '',
-        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
-      });
+      pushSavedCredentials();
+    }
+    if (data.action === 'FC_GET_API_KEY') {
+      pushSavedCredentials();
+    }
+    if (data.action === 'FC_SAVE_API_KEY') {
+      if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
+      if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
     }
     if (data.action === 'FILL_VUE_FORM') {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL', { detail: data.payload }));
@@ -491,7 +494,6 @@
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
     }
   });
-
 
   window.addEventListener('FC_PRO_AUTOFILL_RESULT', (event) => {
     sendToPanel({ action: 'FC_AUTOFILL_RESPONSE', detail: event.detail });

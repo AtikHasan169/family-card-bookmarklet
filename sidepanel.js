@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.3-live';
+const CURRENT_VERSION_TAG = 'v3.4-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -78,14 +78,6 @@ let nextId = 1, activeCategory = null;
 
 let rawImage = null;
 let baseScale = 1; 
-let apiKeyLoaded = false;
-
-// Retry asking parent window for API key until received
-function requestApiKeyWithRetry() {
-  if (apiKeyLoaded) return;
-  window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
-  setTimeout(requestApiKeyWithRetry, 400);
-}
 let zoomLevel = 1;
 let rotationAngle = 0; 
 let panX = 0;
@@ -98,30 +90,41 @@ let viewerZoom = 1;
 
 const $ = (id) => document.getElementById(id);
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Request saved API key from parent with automatic retry until acknowledged
-  requestApiKeyWithRetry();
+function saveCredentialsEverywhere(apiKey, model) {
+  try {
+    if (apiKey !== undefined) localStorage.setItem(STORAGE_KEY, apiKey);
+    if (model !== undefined) localStorage.setItem(STORAGE_MODEL, model);
+  } catch (err) {
+    // Ignore storage error if third-party blocked
+  }
+  window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey, model }, '*');
+}
 
-  // Auto-save API key instantly as you type/paste it to parent
+function initApp() {
+  let savedKey = '';
+  let savedModel = 'gemini-2.5-flash';
+  try {
+    savedKey = localStorage.getItem(STORAGE_KEY) || '';
+    savedModel = localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash';
+  } catch (err) {
+    // Fallback to parent message bridge
+  }
+
+  $('apiKeyInput').value = savedKey;
+  $('modelSelect').value = savedModel;
+
+  if (!savedKey) {
+    $('settingsDrawer').classList.add('open');
+  }
+
+  // Save immediately to both localStorage and parent storage when typing or changing
   $('apiKeyInput').addEventListener('input', (e) => {
-    window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey: e.target.value.trim() }, '*');
+    const val = e.target.value.trim();
+    saveCredentialsEverywhere(val, undefined);
   });
 
-  // Auto-save model selection instantly to parent
   $('modelSelect').addEventListener('change', (e) => {
-    window.parent.postMessage({ action: 'FC_SAVE_API_KEY', model: e.target.value }, '*');
-  });
-
-  if (!localStorage.getItem(STORAGE_KEY)) $('settingsDrawer').classList.add('open');
-
-  // Auto-save API key instantly on input
-  $('apiKeyInput').addEventListener('input', (e) => {
-    localStorage.setItem(STORAGE_KEY, e.target.value.trim());
-  });
-
-  // Auto-save model selection instantly on change
-  $('modelSelect').addEventListener('change', (e) => {
-    localStorage.setItem(STORAGE_MODEL, e.target.value);
+    saveCredentialsEverywhere(undefined, e.target.value);
   });
 
   const navRight = document.querySelector('.nav-right');
@@ -142,7 +145,14 @@ document.addEventListener('DOMContentLoaded', () => {
   setupUpdateChecker();
 
   window.parent.postMessage({ action: 'FC_CHECK_STATUS' }, '*');
-});
+  window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 function setStatus(message, mode = 'idle') {
   const banner = $('statusBanner');
@@ -238,55 +248,46 @@ function setupUpdateChecker() {
     const originalText = updateBtn.textContent;
     updateBtn.textContent = 'Checking...';
     updateBtn.disabled = true;
-    updateBtn.style.background = '#2563eb';
-    updateBtn.style.color = '#ffffff';
-    setStatus('Checking for updates from server...', 'loading');
+    setStatus('Checking for updates...', 'loading');
 
     try {
-      // Clean path calculation to ensure correct file resolution on GitHub Pages
-      const cleanPath = location.href.split('?')[0];
-      const baseUrl = cleanPath.substring(0, cleanPath.lastIndexOf('/') + 1);
-      const jsUrl = `${baseUrl}sidepanel.js?t=${Date.now()}`;
-      
-      const res = await fetch(jsUrl, { 
-        cache: 'no-store'
-      });
+      const cleanUrl = location.href.split('?')[0];
+      const baseDir = cleanUrl.substring(0, cleanUrl.lastIndexOf('/') + 1);
+      const checkJsUrl = `${baseDir}sidepanel.js?update_check=${Date.now()}`;
+      const checkHtmlUrl = `${cleanUrl}?update_check=${Date.now()}`;
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} (${res.statusText || 'Not Found'})`);
-      }
+      // Fetch both sidepanel.js and sidepanel.html with cache reload so browser updates its cache
+      const [jsRes] = await Promise.all([
+        fetch(checkJsUrl, { cache: 'reload' }),
+        fetch(checkHtmlUrl, { cache: 'reload' })
+      ]);
 
-      const codeText = await res.text();
-      const match = codeText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
-      const remoteVer = match ? match[1] : null;
+      if (jsRes.ok) {
+        const jsText = await jsRes.text();
+        const match = jsText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
+        const remoteVer = match ? match[1] : CURRENT_VERSION_TAG;
 
-      if (!remoteVer) {
-        throw new Error('Could not parse version tag from remote script.');
-      }
-
-      if (remoteVer !== CURRENT_VERSION_TAG) {
-        setStatus(`New version (${remoteVer}) found! Reloading panel...`, 'ok');
-        updateBtn.textContent = `Updating...`;
-        updateBtn.style.background = '#059669';
-        setTimeout(() => {
-          location.replace(`${cleanPath}?v=${Date.now()}`);
-        }, 800);
-      } else {
-        setStatus(`Family Card Pro is Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
+        setStatus(`Family Card Pro is Up to Date (${remoteVer})!`, 'ok');
         updateBtn.textContent = 'Up to Date ✓';
         updateBtn.style.background = '#059669';
         updateBtn.style.color = '#ffffff';
-        
+
+        if (remoteVer !== CURRENT_VERSION_TAG) {
+          setTimeout(() => location.reload(), 600);
+          return;
+        }
+
         setTimeout(() => {
           updateBtn.textContent = originalText;
           updateBtn.disabled = false;
           updateBtn.style.background = '';
           updateBtn.style.color = '';
         }, 2500);
+      } else {
+        throw new Error('Server returned ' + jsRes.status);
       }
     } catch (err) {
-      console.warn('Update check error:', err);
-      setStatus(`Update failed: ${err.message}. (Verify files are pushed to GitHub).`, 'err');
+      setStatus('Update check failed. Check connection.', 'err');
       updateBtn.textContent = 'Error';
       updateBtn.style.background = '#dc2626';
       updateBtn.style.color = '#ffffff';
@@ -296,11 +297,10 @@ function setupUpdateChecker() {
         updateBtn.disabled = false;
         updateBtn.style.background = '';
         updateBtn.style.color = '';
-      }, 3000);
+      }, 2500);
     }
   });
 }
-
 
 function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
   let inputEl;
@@ -1103,8 +1103,7 @@ async function runExtraction() {
     return;
   }
 
-  localStorage.setItem(STORAGE_KEY, apiKey);
-  localStorage.setItem(STORAGE_MODEL, model);
+  saveCredentialsEverywhere(apiKey, model);
 
   $('extractBtn').disabled = true;
   setStatus(`Extracting with ${model}...`, 'loading');
@@ -1202,16 +1201,15 @@ window.addEventListener('message', (e) => {
 
   if (e.data.action === 'FC_API_KEY_DATA') {
     if (e.data.apiKey) {
-      apiKeyLoaded = true; // Stop retrying
       if (!$('apiKeyInput').value) {
         $('apiKeyInput').value = e.data.apiKey;
       }
+      try { localStorage.setItem(STORAGE_KEY, e.data.apiKey); } catch (_) {}
+      $('settingsDrawer').classList.remove('open');
     }
     if (e.data.model) {
       $('modelSelect').value = e.data.model;
-    }
-    if (!e.data.apiKey) {
-      $('settingsDrawer').classList.add('open');
+      try { localStorage.setItem(STORAGE_MODEL, e.data.model); } catch (_) {}
     }
   }
 
