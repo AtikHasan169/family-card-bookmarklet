@@ -124,7 +124,7 @@ function formatEnglishName(rawName) {
   let s = String(rawName).trim().replace(/\s+/g, ' ');
   s = s.replace(/^(?:mosha|mosa|most|mst|mosammat|musammat|মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?\s+/i, 'MST. ');
   s = s.replace(/^(?:md|mohd|मोঃ|মোঃ|মো)[:.]?\s+/i, 'MD. ');
-  return s;
+  return s.toUpperCase(); // Force all English names to uppercase
 }
 
 function syncJsonOutput() {
@@ -265,6 +265,9 @@ function showImageViewer(item) {
           inputEl.type = 'text';
           inputEl.value = targetObj[f.key] || '';
           inputEl.style.cssText = 'width:100%; padding:5px 8px; background:#09090b; color:#fff; border:1px solid #3f3f46; border-radius:5px; font-size:12px;';
+          if (f.key.endsWith('_en')) {
+             inputEl.style.textTransform = 'uppercase';
+          }
           inputEl.addEventListener('input', (e) => {
             let val = e.target.value;
             if (f.key === 'nid' || f.key === 'nid_or_brn') {
@@ -768,6 +771,9 @@ function renderExtractedCards(data) {
         inputEl.value = targetObj[f.key] || '';
         inputEl.placeholder = '—';
         inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
+        if (f.key.endsWith('_en')) {
+           inputEl.style.textTransform = 'uppercase';
+        }
         inputEl.addEventListener('focus', () => {
           inputEl.style.borderColor = '#bfdbfe';
           inputEl.style.background = '#eff6ff';
