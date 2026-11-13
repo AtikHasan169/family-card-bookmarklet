@@ -78,6 +78,14 @@ let nextId = 1, activeCategory = null;
 
 let rawImage = null;
 let baseScale = 1; 
+let apiKeyLoaded = false;
+
+// Retry asking parent window for API key until received
+function requestApiKeyWithRetry() {
+  if (apiKeyLoaded) return;
+  window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
+  setTimeout(requestApiKeyWithRetry, 400);
+}
 let zoomLevel = 1;
 let rotationAngle = 0; 
 let panX = 0;
@@ -91,8 +99,8 @@ let viewerZoom = 1;
 const $ = (id) => document.getElementById(id);
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Request saved API key from parent (bhata.gov.bd first-party storage)
-  window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
+  // Request saved API key from parent with automatic retry until acknowledged
+  requestApiKeyWithRetry();
 
   // Auto-save API key instantly as you type/paste it to parent
   $('apiKeyInput').addEventListener('input', (e) => {
@@ -1193,8 +1201,11 @@ window.addEventListener('message', (e) => {
   if (e.source !== window.parent || !e.data) return;
 
   if (e.data.action === 'FC_API_KEY_DATA') {
-    if (e.data.apiKey && !$('apiKeyInput').value) {
-      $('apiKeyInput').value = e.data.apiKey;
+    if (e.data.apiKey) {
+      apiKeyLoaded = true; // Stop retrying
+      if (!$('apiKeyInput').value) {
+        $('apiKeyInput').value = e.data.apiKey;
+      }
     }
     if (e.data.model) {
       $('modelSelect').value = e.data.model;
