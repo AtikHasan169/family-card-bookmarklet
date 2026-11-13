@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Family Card Pro</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-muted: #f1f5f9;
+      --border: #e2e8f0;
+      --border-hover: #cbd5e1;
+      --text-main: #09090b;
+      --text-sub: #52525b;
+      --text-muted: #71717a;
+      --primary: #18181b;
+      --primary-hover: #27272a;
+      --accent: #2563eb;
+      --accent-soft: #eff6ff;
+      --emerald: #059669;
+      --emerald-soft: #ecfdf5;
+      --danger: #dc2626;
+      --danger-soft: #fef2f2;
+      --ring: rgba(37, 99, 235, 0.18);
+      --radius-lg: 12px;
+      --radius-md: 8px;
+      --radius-sm: 6px;
+      --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.07), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+      --transition: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 90px;
+    }
+
+    /* Sticky Glass Header */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: var(--primary);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: -0.03em;
+    }
+    .brand-text h1 {
+      margin: 0;
+      font-size: 13.5px;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .brand-text span {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .conn-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-sub);
+    }
+    .conn-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #94a3b8;
+    }
+    .conn-pill.online {
+      border-color: #a7f3d0;
+      background: var(--emerald-soft);
+      color: var(--emerald);
+    }
+    .conn-pill.online .conn-dot {
+      background: var(--emerald);
+      box-shadow: 0 0 6px var(--emerald);
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-sub);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .icon-btn:hover {
+      background: var(--surface-muted);
+      color: var(--text-main);
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 14px 14px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Collapsible Settings Drawer */
+    .settings-drawer {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+    .settings-drawer.open { display: block; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .field-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 4px;
+    }
+    .input-group {
+      display: flex;
+      gap: 6px;
+    }
+    input[type="text"], input[type="password"], select {
+      width: 100%;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 12.5px;
+      color: var(--text-main);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      box-shadow: var(--shadow-xs);
+      transition: border-color var(--transition);
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .step-badge {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+    }
+    .card-title {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--surface-muted);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+
+    /* Upload Dropzone & Action Buttons */
+    .upload-Zone {
+      border: 1px dashed var(--border-hover);
+      background: #fcfcfd;
+      border-radius: var(--radius-md);
+      padding: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all var(--transition);
+      box-shadow: var(--shadow-xs);
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--surface-muted);
+      border-color: var(--border-hover);
+    }
+    .btn:active:not(:disabled) { transform: scale(0.99); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-dark {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+    .btn-dark:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+    .btn-accent {
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+    .btn-accent:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+    .btn-emerald {
+      background: var(--emerald);
+      color: #ffffff;
+      border-color: var(--emerald);
+    }
+    .btn-emerald:hover:not(:disabled) {
+      background: #047857;
+    }
+    .btn-xs {
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+
+    /* Thumbnail Grid */
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .thumb-grid:empty { display: none; }
+    .thumb-item {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .thumb-item.has-data {
+      border-color: #a7f3d0;
+      background: #f0fdf4;
+    }
+    .thumb-item img {
+      width: 100%;
+      height: 76px;
+      object-fit: cover;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border);
+    }
+    .thumb-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .thumb-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 75px;
+      font-weight: 500;
+    }
+    .thumb-moves {
+      display: flex;
+      gap: 2px;
+    }
+    .thumb-moves button {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .thumb-remove {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      border: none;
+      background: rgba(9, 9, 11, 0.75);
+      color: #fff;
+      font-size: 13px;
+      line-height: 20px;
+      padding: 0;
+      cursor: pointer;
+    }
+    .thumb-remove:hover { background: var(--danger); }
+
+    /* Status Banner */
+    .status-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-sub);
+    }
+    .status-banner.ok {
+      background: var(--emerald-soft);
+      border-color: #a7f3d0;
+      color: var(--emerald);
+    }
+    .status-banner.err {
+      background: var(--danger-soft);
+      border-color: #fecaca;
+      color: var(--danger);
+    }
+    .spinner {
+      width: 13px;
+      height: 13px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .status-banner.loading .spinner { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Extracted Data Cards */
+    .results-wrap {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .results-wrap.visible { display: flex; }
+
+    .record-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: var(--shadow-xs);
+    }
+    .record-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--surface-muted);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .record-tag {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-sub);
+    }
+    .record-rows {
+      display: flex;
+      flex-direction: column;
+    }
+    .record-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      align-items: center;
+      border-bottom: 1px solid #f1f5f9;
+      padding: 5px 10px;
+      gap: 8px;
+    }
+    .record-row:last-child { border-bottom: none; }
+    .row-key {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .row-val {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-size: 12.5px;
+      font-weight: 550;
+      color: var(--text-main);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 120ms ease;
+      word-break: break-word;
+    }
+    .row-val::after {
+      content: "Copy";
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      opacity: 0;
+      margin-left: 6px;
+      flex-shrink: 0;
+    }
+    .row-val:hover {
+      background: var(--accent-soft);
+      border-color: #bfdbfe;
+    }
+    .row-val:hover::after { opacity: 1; }
+    .row-val.copied {
+      background: var(--emerald-soft);
+      border-color: #a7f3d0;
+      color: var(--emerald);
+    }
+    .row-val.copied::after {
+      content: "Copied";
+      color: var(--emerald);
+      opacity: 1;
+    }
+
+    pre {
+      background: #09090b;
+      color: #e4e4e7;
+      padding: 12px;
+      border-radius: var(--radius-md);
+      font-size: 11.5px;
+      overflow-x: auto;
+      margin: 8px 0 0;
+    }
+
+    /* Sticky Bottom Action Dock */
+    .bottom-dock {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 40;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--border);
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* Native Canvas Crop Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(9, 9, 11, 0.92);
+      flex-direction: column;
+      padding: 12px;
+    }
+    .modal.open { display: flex; }
+    .crop-container {
+      flex: 1;
+      width: 100%;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    #cropCanvas {
+      max-width: 100%;
+      max-height: 100%;
+      cursor: grab;
+      touch-action: none;
+    }
+    #cropCanvas:active { cursor: grabbing; }
+  </style>
+</head>
+<body>
+
+  <!-- Sticky Top Navigation -->
+  <nav class="navbar">
+    <div class="brand">
+      <div class="brand-logo">FC</div>
+      <div class="brand-text">
+        <h1>Family Card Pro</h1>
+        <span>OCR &amp; Form Injector</span>
+      </div>
+    </div>
+    <div class="nav-right">
+      <div class="conn-pill" id="connStatus">
+        <span class="conn-dot"></span>
+        <span id="connText">Checking...</span>
+      </div>
+      <button type="button" class="icon-btn" id="settingsToggleBtn" title="API Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </nav>
+
+  <main class="container">
+    <!-- Collapsible API Settings Drawer -->
+    <section class="settings-drawer" id="settingsDrawer">
+      <div class="form-grid">
+        <div>
+          <div class="field-label">
+            <span>Gemini API Key</span>
+            <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent); text-decoration:none;">Get Key</a>
+          </div>
+          <div class="input-group">
+            <input id="apiKeyInput" type="password" placeholder="AIzaSy..." autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-xs" id="toggleKeyBtn">Show</button>
+          </div>
+        </div>
+        <div>
+          <div class="field-label"><span>Model Endpoint</span></div>
+          <input id="modelSelect" type="text" list="modelList" value="gemini-2.5-flash">
+          <datalist id="modelList">
+            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-1.5-flash"></option>
+            <option value="gemini-3.5-flash"></option>
+          </datalist>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 1: Head & Husband -->
+    <section class="card">
+      <div class="card-head">
+        <div class="card-title-group">
+          <span class="step-badge">1</span>
+          <h2 class="card-title">Household Head (Wife) &amp; Husband</h2>
+        </div>
+        <span class="badge" id="headCount">0 files</span>
+      </div>
+      <div class="upload-Zone">
+        <button type="button" class="btn btn-dark" id="uploadHeadBtn">Upload Photos</button>
+        <button type="button" class="btn" id="captureHeadBtn">Live Camera</button>
+        <input type="file" id="headUpload" accept="image/*" multiple hidden>
+      </div>
+      <div class="thumb-grid" id="headPreviews"></div>
+    </section>
+
+    <!-- Section 2: Other Family Members -->
+    <section class="card">
+      <div class="card-head">
+        <div class="card-title-group">
+          <span class="step-badge">2</span>
+          <h2 class="card-title">Other Family Members</h2>
+        </div>
+        <span class="badge" id="otherCount">0 files</span>
+      </div>
+      <div class="upload-Zone">
+        <button type="button" class="btn btn-dark" id="uploadOtherBtn">Upload Photos</button>
+        <button type="button" class="btn" id="captureOtherBtn">Live Camera</button>
+        <input type="file" id="otherUpload" accept="image/*" multiple hidden>
+      </div>
+      <div class="thumb-grid" id="otherPreviews"></div>
+    </section>
+
+    <!-- Hidden Native File Input for Live Camera Capture -->
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+
+    <!-- Status Indicator -->
+    <div class="status-banner" id="statusBanner">
+      <span class="spinner"></span>
+      <span id="statusText">Ready — add NID or BRN images to extract.</span>
+    </div>
+
+    <!-- Extracted Output & Click-to-Copy Cards -->
+    <section class="results-wrap" id="resultsWrap">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted Records (Click any value to copy)</span>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-xs" id="copyJsonBtn">Copy JSON</button>
+          <button type="button" class="btn btn-xs" id="clearAllBtn">Reset</button>
+        </div>
+      </div>
+
+      <div id="visualCards" style="display:flex; flex-direction:column; gap:10px;"></div>
+
+      <details>
+        <summary style="cursor:pointer; font-size:11.5px; color:var(--text-muted); font-weight:600;">Raw JSON Payload</summary>
+        <pre id="rawJsonOutput"></pre>
+      </details>
+    </section>
+  </main>
+
+  <!-- Sticky Bottom Action Bar -->
+  <footer class="bottom-dock">
+    <button type="button" class="btn btn-accent" id="extractBtn">1. Extract with AI</button>
+    <button type="button" class="btn btn-emerald" id="autofillBtn" disabled>2. Auto-Fill Form</button>
+  </footer>
+
+  <!-- Native Canvas Crop & Zoom Modal -->
+  <div class="modal" id="cropModal">
+    <h3 style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop &amp; Zoom Image</h3>
+    <div class="crop-container">
+      <canvas id="cropCanvas"></canvas>
+    </div>
+    
+    <!-- Volume-style Zoom Bar -->
+    <div style="padding: 10px 14px; background: #18181b; display: flex; align-items: center; gap: 12px; border-top: 1px solid #334155;">
+      <span style="color: #94a3b8; font-size: 11px; font-weight: 600; min-width: 35px;">ZOOM</span>
+      <input type="range" id="zoomRange" min="0.5" max="3.5" step="0.05" value="1" style="flex: 1; accent-color: #2563eb; cursor: pointer;">
+    </div>
+
+    <div style="display:flex; gap:8px; padding-top: 10px; background: #09090b;">
+      <button type="button" class="btn" id="cancelCropBtn" style="flex:1; background:#dc2626; color:#fff;">Retake</button>
+      <button type="button" class="btn" id="saveCropBtn" style="flex:1; background:#16a34a; color:#fff;">Apply Crop</button>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
