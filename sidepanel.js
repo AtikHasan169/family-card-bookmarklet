@@ -2,50 +2,71 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.0-live';
+const CURRENT_VERSION_TAG = 'v3.2-live';
 
 const RELATION_OPTIONS = [
-  { value: 'Auto', label: 'Auto (Son / Daughter)', id: null },
-  { value: 'Son', label: 'Son (পুত্র)', id: 160 },
-  { value: 'Daughter', label: 'Daughter (কন্যা)', id: 161 },
-  { value: 'Husband', label: 'Husband (স্বামী)', id: 159 },
-  { value: 'Wife', label: 'Wife (স্ত্রী)', id: 186 },
-  { value: 'Father', label: 'Father (পিতা)', id: 157 },
-  { value: 'Mother', label: 'Mother (মাতা)', id: 158 },
-  { value: 'Brother', label: 'Brother (ভাই)', id: 162 },
-  { value: 'Sister', label: 'Sister (বোন)', id: 163 },
-  { value: 'Father-in-law', label: 'Father-in-law (শ্বশুর)', id: 164 },
-  { value: 'Mother-in-law', label: 'Mother-in-law (শাশুড়ি)', id: 165 },
-  { value: 'Son-in-law', label: 'Son-in-law (জামাতা)', id: 181 },
-  { value: 'Daughter-in-law', label: 'Daughter-in-law (পুত্রবধূ)', id: 182 },
-  { value: 'Grandson', label: 'Grandson (নাতি)', id: 183 },
-  { value: 'Granddaughter', label: 'Granddaughter (নাতনি)', id: 184 },
-  { value: 'Other Relative', label: 'Other Relative (অন্যান্য)', id: 263 }
+  { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
+  { value: 'Son', label: 'Son (পুত্র)', id: 160, gender: 'Male' },
+  { value: 'Daughter', label: 'Daughter (কন্যা)', id: 161, gender: 'Female' },
+  { value: 'Husband', label: 'Husband (স্বামী)', id: 159, gender: 'Male' },
+  { value: 'Wife', label: 'Wife (স্ত্রী)', id: 186, gender: 'Female' },
+  { value: 'Father', label: 'Father (পিতা)', id: 157, gender: 'Male' },
+  { value: 'Mother', label: 'Mother (মাতা)', id: 158, gender: 'Female' },
+  { value: 'Brother', label: 'Brother (ভাই)', id: 162, gender: 'Male' },
+  { value: 'Sister', label: 'Sister (বোন)', id: 163, gender: 'Female' },
+  { value: 'Father-in-law', label: 'Father-in-law (শ্বশুর)', id: 164, gender: 'Male' },
+  { value: 'Mother-in-law', label: 'Mother-in-law (শাশুড়ি)', id: 165, gender: 'Female' },
+  { value: 'Son-in-law', label: 'Son-in-law (জামাতা)', id: 181, gender: 'Male' },
+  { value: 'Daughter-in-law', label: 'Daughter-in-law (পুত্রবধূ)', id: 182, gender: 'Female' },
+  { value: 'Grandson', label: 'Grandson (নাতি)', id: 183, gender: 'Male' },
+  { value: 'Granddaughter', label: 'Granddaughter (নাতনি)', id: 184, gender: 'Female' },
+  { value: 'Other Relative', label: 'Other Relative (অন্যান্য)', id: 263, gender: null }
+];
+
+const DOC_TYPE_OPTIONS = [
+  { value: 'NID', label: 'NID (National ID)' },
+  { value: 'BRN', label: 'BRN (Birth Certificate)' }
+];
+
+const GENDER_OPTIONS = [
+  { value: 'Male', label: 'Male (পুরুষ)', id: 1 },
+  { value: 'Female', label: 'Female (মহিলা)', id: 2 },
+  { value: 'Other', label: 'Other (অন্যান্য)', id: 3 }
 ];
 
 const RELATION_ID_MAP = Object.fromEntries(
   RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id])
 );
 
+const RELATION_GENDER_MAP = Object.fromEntries(
+  RELATION_OPTIONS.filter((r) => r.gender !== null).map((r) => [r.value, r.gender])
+);
+
+const GENDER_ID_MAP = { Male: 1, Female: 2, Other: 3 };
+
 const HEAD_FIELDS = [
+  { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
   { key: 'father_name_bn', label: 'Father (BN)' },
   { key: 'father_name_en', label: 'Father (EN)' },
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'mother_name_en', label: 'Mother (EN)' },
-  { key: 'nid', label: 'NID / BRN' },
-  { key: 'dob', label: 'DOB (YYYY-MM-DD)' }
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'nid', label: 'NID / BRN No' },
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' }
 ];
 
 const MEMBER_FIELDS = [
-  { key: 'relation', label: 'Relation', type: 'select' },
+  { key: 'relation', label: 'Relation', type: 'rel_select' },
+  { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
   { key: 'father_name_bn', label: 'Father (BN)' },
   { key: 'mother_name_bn', label: 'Mother (BN)' },
-  { key: 'nid_or_brn', label: 'NID / BRN' },
-  { key: 'dob', label: 'DOB (YYYY-MM-DD)' }
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'nid_or_brn', label: 'NID / BRN No' },
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' }
 ];
 
 const state = { head: [], other: [], lastExtracted: null };
@@ -108,10 +129,38 @@ function normalizeDob(rawDob) {
   let s = toEnglishDigits(rawDob).trim();
   if (!s) return '';
   const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  if (dmy) return `${dmy[1].padStart(2, '0')}-${dmy[2].padStart(2, '0')}-${dmy[3]}`;
   const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+  if (ymd) return `${ymd[3].padStart(2, '0')}-${ymd[2].padStart(2, '0')}-${ymd[1]}`;
   return s;
+}
+
+function dobToSortable(dobStr) {
+  const dmy = String(dobStr || '').match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  return dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : String(dobStr || '');
+}
+
+function inferDocType(idStr, explicitType) {
+  const up = String(explicitType || '').toUpperCase().trim();
+  if (up === 'NID' || up === 'BRN') return up;
+  const clean = String(idStr || '').replace(/\s+/g, '');
+  if (clean.length === 10 || clean.length === 13) return 'NID';
+  if (clean.length === 17) return 'BRN';
+  return 'NID';
+}
+
+function inferGender(relation, explicitGender, nameEn, nameBn) {
+  if (relation && RELATION_GENDER_MAP[relation]) {
+    return RELATION_GENDER_MAP[relation];
+  }
+  const g = String(explicitGender || '').trim().toLowerCase();
+  if (g === 'female' || g === '2' || g === 'f' || g === 'মহিলা' || g === 'নারী') return 'Female';
+  if (g === 'male' || g === '1' || g === 'm' || g === 'পুরুষ') return 'Male';
+  const combined = `${nameEn || ''} ${nameBn || ''}`;
+  if (/\b(?:mst|mosammat|begum|khatun|akter|akhter|bibi|parvin|sultana)\b|মোছা|মোসা|বেগম|খাতুন|আক্তার/i.test(combined)) {
+    return 'Female';
+  }
+  return 'Male';
 }
 
 function formatEnglishName(rawName) {
@@ -159,18 +208,32 @@ function setupUpdateChecker() {
     const originalText = updateBtn.textContent;
     updateBtn.textContent = 'Checking...';
     updateBtn.disabled = true;
+    updateBtn.style.background = '#2563eb';
+    updateBtn.style.color = '#ffffff';
 
     try {
-      const cleanUrl = location.href.split('?')[0];
-      const checkUrl = `${cleanUrl}?update_check=${Date.now()}`;
+      const baseUrl = new URL('.', location.href).href;
+      const jsUrl = `${baseUrl}sidepanel.js?t=${Date.now()}`;
       
-      const res = await fetch(checkUrl, { 
-        cache: 'reload',
+      const res = await fetch(jsUrl, { 
+        cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
       });
 
-      if (res.ok) {
-        setStatus(`Family Card Pro is Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const codeText = await res.text();
+      const match = codeText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
+      const remoteVer = match ? match[1] : CURRENT_VERSION_TAG;
+
+      if (remoteVer !== CURRENT_VERSION_TAG) {
+        setStatus(`New version (${remoteVer}) found! Reloading panel...`, 'ok');
+        updateBtn.textContent = `Updating to ${remoteVer}...`;
+        updateBtn.style.background = '#059669';
+        setTimeout(() => {
+          location.replace(`${location.pathname}?v=${Date.now()}`);
+        }, 900);
+      } else {
+        setStatus(`Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
         updateBtn.textContent = 'Up to Date ✓';
         updateBtn.style.background = '#059669';
         updateBtn.style.color = '#ffffff';
@@ -180,13 +243,11 @@ function setupUpdateChecker() {
           updateBtn.disabled = false;
           updateBtn.style.background = '';
           updateBtn.style.color = '';
-        }, 2500);
-      } else {
-        throw new Error('Server returned ' + res.status);
+        }, 2200);
       }
     } catch (err) {
-      setStatus('Update check failed. Check connection.', 'err');
-      updateBtn.textContent = 'Error';
+      setStatus('Update check failed: ' + err.message, 'err');
+      updateBtn.textContent = 'Retry Update';
       updateBtn.style.background = '#dc2626';
       updateBtn.style.color = '#ffffff';
       
@@ -198,6 +259,103 @@ function setupUpdateChecker() {
       }, 2500);
     }
   });
+}
+
+function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
+  let inputEl;
+  if (f.type === 'rel_select') {
+    inputEl = document.createElement('select');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #e2e8f0; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    RELATION_OPTIONS.filter((opt) => opt.id !== null).forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.relation || 'Son';
+    inputEl.addEventListener('change', (e) => {
+      const newRel = e.target.value;
+      targetObj.relation = newRel;
+      targetObj.relationship_id = RELATION_ID_MAP[newRel] || 263;
+      if (RELATION_GENDER_MAP[newRel]) {
+        targetObj.gender = RELATION_GENDER_MAP[newRel];
+        targetObj.gender_id = GENDER_ID_MAP[targetObj.gender] || 1;
+        if (cardContainer) {
+          const gSel = cardContainer.querySelector('select[data-field="gender"]');
+          if (gSel) gSel.value = targetObj.gender;
+        }
+      }
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+    });
+  } else if (f.type === 'gender_select') {
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'gender');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #e2e8f0; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    GENDER_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.gender || 'Male';
+    inputEl.addEventListener('change', (e) => {
+      targetObj.gender = e.target.value;
+      targetObj.gender_id = GENDER_ID_MAP[e.target.value] || 1;
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+    });
+  } else if (f.type === 'doc_select') {
+    inputEl = document.createElement('select');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px; cursor:pointer; width:100%;';
+    DOC_TYPE_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.doc_type || 'NID';
+    inputEl.addEventListener('change', (e) => {
+      targetObj.doc_type = e.target.value;
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+    });
+  } else {
+    inputEl = document.createElement('input');
+    inputEl.type = 'text';
+    inputEl.value = targetObj[f.key] || '';
+    inputEl.placeholder = f.key === 'dob' ? 'DD-MM-YYYY' : '—';
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
+    
+    if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
+
+    inputEl.addEventListener('focus', () => {
+      inputEl.style.borderColor = '#bfdbfe';
+      inputEl.style.background = '#eff6ff';
+    });
+    
+    inputEl.addEventListener('blur', () => {
+      inputEl.style.borderColor = 'transparent';
+      inputEl.style.background = 'transparent';
+      if (f.key === 'dob') {
+        targetObj.dob = normalizeDob(inputEl.value);
+        inputEl.value = targetObj.dob;
+        syncJsonOutput();
+      }
+    });
+    
+    inputEl.addEventListener('input', () => {
+      let val = inputEl.value;
+      if (f.key === 'nid' || f.key === 'nid_or_brn') {
+        val = toEnglishDigits(val).replace(/\s+/g, '');
+      } else if (f.key.endsWith('_en')) {
+        val = val.toUpperCase();
+      }
+      targetObj[f.key] = val;
+      syncJsonOutput();
+    });
+  }
+  return inputEl;
 }
 
 function setupImageViewerModal() {
@@ -265,11 +423,17 @@ function showImageViewer(item) {
     const targetObj = isHead ? state.lastExtracted.head : state.lastExtracted.family_members[item.boundRef.index];
 
     if (targetObj) {
-      $('fcViewerTitle').textContent = isHead ? 'Primary Applicant (Wife) — Edit' : `Member #${item.boundRef.index + 2} (${targetObj.relation}) — Edit`;
+      const updateModalTitle = () => {
+        $('fcViewerTitle').textContent = isHead 
+          ? `Primary Applicant (Wife) [${targetObj.doc_type || 'NID'}] — Edit` 
+          : `Member #${item.boundRef.index + 2} (${targetObj.relation} • ${targetObj.gender} • ${targetObj.doc_type || 'NID'})`;
+      };
+      updateModalTitle();
+
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
       const headerNote = document.createElement('div');
       headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;';
-      headerNote.innerHTML = '<span>Edit any field below — auto-saves to form payload</span><span style="color:#10b981; font-weight:600;">● Live Sync</span>';
+      headerNote.innerHTML = '<span>Switch Relation, Gender, or NID/BRN below</span><span style="color:#10b981; font-weight:600;">● Live Sync</span>';
       metaBox.appendChild(headerNote);
 
       const formList = document.createElement('div');
@@ -283,54 +447,11 @@ function showImageViewer(item) {
         lbl.style.cssText = 'color:#a1a1aa; font-size:11px; font-weight:500;';
         lbl.textContent = f.label;
 
-        let inputEl;
-        if (f.type === 'select') {
-          inputEl = document.createElement('select');
-          inputEl.style.cssText = 'width:100%; padding:5px 8px; background:#09090b; color:#fff; border:1px solid #3f3f46; border-radius:5px; font-size:12px;';
-          RELATION_OPTIONS.filter((r) => r.id !== null).forEach((opt) => {
-            const o = document.createElement('option');
-            o.value = opt.value;
-            o.textContent = opt.label;
-            inputEl.appendChild(o);
-          });
-          inputEl.value = targetObj[f.key] || 'Son';
-          inputEl.addEventListener('change', (e) => {
-            targetObj.relation = e.target.value;
-            targetObj.relationship_id = RELATION_ID_MAP[e.target.value] || 263;
-            $('fcViewerTitle').textContent = `Member #${item.boundRef.index + 2} (${targetObj.relation}) — Edit`;
-            syncJsonOutput();
-          });
-        } else {
-          inputEl = document.createElement('input');
-          inputEl.type = 'text';
-          inputEl.value = targetObj[f.key] || '';
-          inputEl.placeholder = '—';
-          inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
-          
-          if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
-
-          inputEl.addEventListener('focus', () => {
-            inputEl.style.borderColor = '#bfdbfe';
-            inputEl.style.background = '#eff6ff';
-          });
-          
-          inputEl.addEventListener('blur', () => {
-            inputEl.style.borderColor = 'transparent';
-            inputEl.style.background = 'transparent';
-            if (f.key === 'dob') {
-              targetObj.dob = normalizeDob(inputEl.value);
-              inputEl.value = targetObj.dob;
-              syncJsonOutput();
-            }
-          });
-          
-          inputEl.addEventListener('input', () => {
-            let val = inputEl.value;
-            if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
-            else if (f.key.endsWith('_en')) val = val.toUpperCase();
-            targetObj[f.key] = val;
-            syncJsonOutput();
-          });
+        const inputEl = createFieldControl(f, targetObj, updateModalTitle, formList);
+        if (inputEl.tagName === 'INPUT') {
+          inputEl.style.color = '#f8fafc';
+          inputEl.style.background = '#09090b';
+          inputEl.style.borderColor = '#3f3f46';
         }
 
         const copyBtn = document.createElement('button');
@@ -633,16 +754,17 @@ function buildPrompt() {
   const allowedRelations = RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => `"${r.value}"`).join(', ');
   return `Extract Bangladeshi NID and Birth Registration (BRN) data from the provided images into strict JSON.
 
-INTELLIGENT DOCUMENT DETECTION:
-- First, carefully inspect each image to determine if it is a National Identity Card (NID) or a Birth Registration Certificate (BRN).
-- If the document contains a 10, 13, or 17-digit National ID number, parse it as an NID.
-- If the document contains a Birth Registration Number (usually 17 digits with birth registration headers like জন্ম নিবন্ধন সনদ), parse it strictly as a Birth Certificate (BRN). Never place a birth certificate number into an NID field.
+INTELLIGENT DOCUMENT DETECTION ('doc_type'):
+- Carefully inspect each image to determine if it is a National Identity Card ("NID") or a Birth Registration Certificate ("BRN").
+- Birth Certificates have headers like "জন্ম নিবন্ধন সনদ", "Birth Registration Certificate", "জন্ম নিবন্ধন নম্বর", or "BRN" (17 digits). Set "doc_type": "BRN".
+- National ID Cards have headers like "জাতীয় পরিচয়পত্র", "National ID Card", "ID NO", or "NID No" (10, 13, or 17 digits). Set "doc_type": "NID".
 - BRN & DOB ACCURACY: Birth Certificates have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
 
-CRITICAL ROLE RULE:
-- The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE (Female). 
-- Look at all uploaded ID cards in Section 1. Find the female cardholder (whose name starts with মোছাঃ, মোসাঃ, MST., or indicates a female name). She MUST be assigned as 'head'.
-- The Husband (whose name starts with মোঃ, MD., etc.) MUST be placed as the FIRST item in 'family_members' with relation "Husband". Never assign a male as 'head'.
+CRITICAL ROLE & GENDER RULE:
+- The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE (Female, "gender": "Female"). 
+- Look at all uploaded ID cards in Section 1. Find the female cardholder (whose name starts with মোছাঃ, মোসাঃ, MST., or indicates a female name). She MUST be assigned as 'head' with "gender": "Female".
+- The Husband (whose name starts with মোঃ, MD., etc.) MUST be placed as the FIRST item in 'family_members' with relation "Husband" and "gender": "Male". Never assign a male as 'head'.
+- For every family member, determine their "gender" ("Male" or "Female") from the card's Sex/লিঙ্গ field or their name/relationship (e.g., Son -> "Male", Daughter -> "Female").
 
 IMAGE TRACKING RULE:
 - Each image is labeled with an ID tag like "S1_1", "S1_2", "S2_1", etc.
@@ -650,22 +772,23 @@ IMAGE TRACKING RULE:
 
 EXTRACTION RULES:
 1. PRIMARY APPLICANT (WIFE = 'head'):
-   - Extract name_bn, name_en, father_name_bn, father_name_en, mother_name_bn, mother_name_en, nid, dob, and source_images.
+   - Extract doc_type ("NID" or "BRN"), gender ("Female"), name_bn, name_en, father_name_bn, father_name_en, mother_name_bn, mother_name_en, nid, dob, and source_images.
 2. HUSBAND & FAMILY MEMBERS (family_members):
-   - First member must be "Husband". Extract name_bn, name_en, father_name_bn, mother_name_bn, nid_or_brn, dob, and source_images.
-   - For children, choose correct relationship from: ${allowedRelations}.
-3. ENGLISH NAME & FORMATTING:
+   - First member must be "Husband" ("gender": "Male"). Extract relation, gender ("Male" or "Female"), doc_type ("NID" or "BRN"), name_bn, name_en, father_name_bn, mother_name_bn, nid_or_brn, dob, and source_images.
+   - For children/others, choose correct relationship from: ${allowedRelations}.
+3. ENGLISH NAME & DATE FORMATTING:
    - Always transliterate "মোঃ" or "মো:" as "MD." and "মোছাঃ" or "মোসাঃ" as "MST."
-   - All numbers and dates must use English digits (0-9) in YYYY-MM-DD format.
+   - All numbers must use English digits (0-9).
+   - All dates ('dob') MUST be formatted strictly as DD-MM-YYYY (e.g., "05-11-1998").
 
 JSON SCHEMA:
 {
   "head": {
-    "name_bn": "", "name_en": "", "father_name_bn": "", "father_name_en": "", "mother_name_bn": "", "mother_name_en": "", "nid": "", "dob": "", "source_images": ["S1_1"]
+    "doc_type": "NID", "gender": "Female", "name_bn": "", "name_en": "", "father_name_bn": "", "father_name_en": "", "mother_name_bn": "", "mother_name_en": "", "nid": "", "dob": "DD-MM-YYYY", "source_images": ["S1_1"]
   },
   "family_members": [
     {
-      "relation": "Son", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "", "is_disabled": 0, "source_images": ["S1_2"]
+      "relation": "Husband", "gender": "Male", "doc_type": "BRN", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "DD-MM-YYYY", "is_disabled": 0, "source_images": ["S1_2"]
     }
   ]
 }`;
@@ -674,14 +797,19 @@ JSON SCHEMA:
 function normalizeOutput(raw) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
+  const cleanHeadId = toEnglishDigits(s(h.nid)).replace(/\s+/g, '');
+  const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
   const head = {
+    doc_type: inferDocType(cleanHeadId, h.doc_type),
+    gender: headGender,
+    gender_id: GENDER_ID_MAP[headGender] || 2,
     name_bn: s(h.name_bn),
     name_en: formatEnglishName(h.name_en),
     father_name_bn: s(h.father_name_bn),
     father_name_en: formatEnglishName(h.father_name_en),
     mother_name_bn: s(h.mother_name_bn),
     mother_name_en: formatEnglishName(h.mother_name_en),
-    nid: toEnglishDigits(s(h.nid)).replace(/\s+/g, ''),
+    nid: cleanHeadId,
     dob: normalizeDob(h.dob),
     source_images: Array.isArray(h.source_images) ? h.source_images : []
   };
@@ -694,14 +822,20 @@ function normalizeOutput(raw) {
     let rel = s(m?.relation);
     if (!RELATION_ID_MAP[rel]) rel = 'Son';
 
+    const cleanMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
+    const memGender = inferGender(rel, m?.gender, m?.name_en, m?.name_bn);
+
     const entry = {
       relation: rel,
       relationship_id: RELATION_ID_MAP[rel] || 263,
+      gender: memGender,
+      gender_id: GENDER_ID_MAP[memGender] || 1,
+      doc_type: inferDocType(cleanMemId, m?.doc_type),
       name_bn: s(m?.name_bn),
       name_en: formatEnglishName(m?.name_en),
       father_name_bn: s(m?.father_name_bn),
       mother_name_bn: s(m?.mother_name_bn),
-      nid_or_brn: toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, ''),
+      nid_or_brn: cleanMemId,
       dob: normalizeDob(m?.dob),
       is_disabled: Number(m?.is_disabled) === 1 ? 1 : 0,
       source_images: Array.isArray(m?.source_images) ? m.source_images : []
@@ -726,7 +860,7 @@ function normalizeOutput(raw) {
   deduped.sort((a, b) => {
     if (a.relation === 'Husband' && b.relation !== 'Husband') return -1;
     if (b.relation === 'Husband' && a.relation !== 'Husband') return 1;
-    if (a.dob && b.dob) return a.dob.localeCompare(b.dob);
+    if (a.dob && b.dob) return dobToSortable(a.dob).localeCompare(dobToSortable(b.dob));
     return 0;
   });
 
@@ -819,17 +953,27 @@ function renderExtractedCards(data) {
   container.replaceChildren();
   $('resultsWrap').classList.add('visible');
 
-  const buildEditableCard = (title, tag, targetObj, fields, isMember = false, memberIdx = 0) => {
+  const buildEditableCard = (targetObj, fields, isMember = false, memberIdx = 0) => {
     const card = document.createElement('div');
     card.className = 'record-card';
 
     const headEl = document.createElement('div');
     headEl.className = 'record-head';
     const titleSpan = document.createElement('span');
-    titleSpan.textContent = title;
     const tagSpan = document.createElement('span');
     tagSpan.className = 'record-tag';
-    tagSpan.textContent = tag;
+
+    const refreshHeader = () => {
+      if (!isMember) {
+        titleSpan.textContent = `Member #1 — Head (${targetObj.gender || 'Female'})`;
+        tagSpan.textContent = `Primary • ${targetObj.doc_type || 'NID'}`;
+      } else {
+        titleSpan.textContent = `Member #${memberIdx + 2} — ${targetObj.relation} (${targetObj.gender || 'Male'})`;
+        tagSpan.textContent = `${targetObj.doc_type || 'NID'} • Rel ID: ${targetObj.relationship_id}`;
+      }
+    };
+    refreshHeader();
+
     headEl.append(titleSpan, tagSpan);
     card.appendChild(headEl);
 
@@ -839,64 +983,13 @@ function renderExtractedCards(data) {
     fields.forEach((f) => {
       const r = document.createElement('div');
       r.className = 'record-row';
-      r.style.gridTemplateColumns = '100px 1fr auto';
+      r.style.gridTemplateColumns = '105px 1fr auto';
 
       const kEl = document.createElement('span');
       kEl.className = 'row-key';
       kEl.textContent = f.label;
 
-      let inputEl;
-      if (f.type === 'select') {
-        inputEl = document.createElement('select');
-        inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid transparent; background:transparent; cursor:pointer;';
-        RELATION_OPTIONS.filter((opt) => opt.id !== null).forEach((opt) => {
-          const o = document.createElement('option');
-          o.value = opt.value;
-          o.textContent = opt.label;
-          inputEl.appendChild(o);
-        });
-        inputEl.value = targetObj[f.key] || 'Son';
-        inputEl.addEventListener('change', (e) => {
-          targetObj.relation = e.target.value;
-          targetObj.relationship_id = RELATION_ID_MAP[e.target.value] || 263;
-          if (isMember) {
-            titleSpan.textContent = `Member #${memberIdx + 2} — ${targetObj.relation}`;
-            tagSpan.textContent = `ID: ${targetObj.relationship_id}`;
-          }
-          syncJsonOutput();
-        });
-      } else {
-        inputEl = document.createElement('input');
-        inputEl.type = 'text';
-        inputEl.value = targetObj[f.key] || '';
-        inputEl.placeholder = '—';
-        inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
-        
-        if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
-
-        inputEl.addEventListener('focus', () => {
-          inputEl.style.borderColor = '#bfdbfe';
-          inputEl.style.background = '#eff6ff';
-        });
-        
-        inputEl.addEventListener('blur', () => {
-          inputEl.style.borderColor = 'transparent';
-          inputEl.style.background = 'transparent';
-          if (f.key === 'dob') {
-            targetObj.dob = normalizeDob(inputEl.value);
-            inputEl.value = targetObj.dob;
-            syncJsonOutput();
-          }
-        });
-        
-        inputEl.addEventListener('input', () => {
-          let val = inputEl.value;
-          if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
-          else if (f.key.endsWith('_en')) val = val.toUpperCase();
-          targetObj[f.key] = val;
-          syncJsonOutput();
-        });
-      }
+      const inputEl = createFieldControl(f, targetObj, refreshHeader, body);
 
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
@@ -923,16 +1016,12 @@ function renderExtractedCards(data) {
   };
 
   if (data.head) {
-    container.appendChild(
-      buildEditableCard('Member #1 — Head (Wife)', 'Primary Applicant', data.head, HEAD_FIELDS, false)
-    );
+    container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
   }
 
   if (Array.isArray(data.family_members)) {
     data.family_members.forEach((m, i) => {
-      container.appendChild(
-        buildEditableCard(`Member #${i + 2} — ${m.relation}`, `ID: ${m.relationship_id}`, m, MEMBER_FIELDS, true, i)
-      );
+      container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i));
     });
   }
 
@@ -1001,7 +1090,7 @@ async function runExtraction() {
 
     renderExtractedCards(normalized);
     $('autofillBtn').disabled = false;
-    setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Tap any thumbnail or field to edit.`, 'ok');
+    setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Verify Relation, Gender & NID/BRN before Auto-Fill.`, 'ok');
   } catch (err) {
     setStatus(`Error: ${err.message}`, 'err');
   } finally {
@@ -1073,8 +1162,8 @@ window.addEventListener('message', (e) => {
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
     if (res.success && res.payload) {
-      state.lastExtracted = res.payload;
-      renderExtractedCards(res.payload);
+      state.lastExtracted = normalizeOutput(res.payload);
+      renderExtractedCards(state.lastExtracted);
       $('autofillBtn').disabled = false;
       setStatus('Successfully pulled draft from form!', 'ok');
     } else {
@@ -1092,8 +1181,10 @@ function syncFromWebToPanel(webData) {
   if (webData.head && state.lastExtracted.head) {
     const h = state.lastExtracted.head;
     const w = webData.head;
+    if (s(w.doc_type) && h.doc_type !== s(w.doc_type)) { h.doc_type = s(w.doc_type); changed = true; }
+    if (s(w.gender) && h.gender !== s(w.gender)) { h.gender = s(w.gender); h.gender_id = GENDER_ID_MAP[h.gender] || 2; changed = true; }
     if (s(w.nid) && h.nid !== s(w.nid)) { h.nid = s(w.nid); changed = true; }
-    if (s(w.dob) && h.dob !== s(w.dob)) { h.dob = s(w.dob); changed = true; }
+    if (s(w.dob) && h.dob !== normalizeDob(w.dob)) { h.dob = normalizeDob(w.dob); changed = true; }
     if (s(w.name_bn) && h.name_bn !== s(w.name_bn)) { h.name_bn = s(w.name_bn); changed = true; }
     if (s(w.name_en) && h.name_en !== s(w.name_en)) { h.name_en = s(w.name_en); changed = true; }
     if (s(w.father_name_bn) && h.father_name_bn !== s(w.father_name_bn)) { h.father_name_bn = s(w.father_name_bn); changed = true; }
@@ -1104,10 +1195,12 @@ function syncFromWebToPanel(webData) {
 
   if (webData.members && Array.isArray(state.lastExtracted.family_members)) {
     state.lastExtracted.family_members.forEach((m, idx) => {
-      const w = webData.members[idx + 1];
+      const w = webData.members[idx];
       if (w) {
+         if (s(w.doc_type) && m.doc_type !== s(w.doc_type)) { m.doc_type = s(w.doc_type); changed = true; }
+         if (s(w.gender) && m.gender !== s(w.gender)) { m.gender = s(w.gender); m.gender_id = GENDER_ID_MAP[m.gender] || 1; changed = true; }
          if (s(w.nid_or_brn) && m.nid_or_brn !== s(w.nid_or_brn)) { m.nid_or_brn = s(w.nid_or_brn); changed = true; }
-         if (s(w.dob) && m.dob !== s(w.dob)) { m.dob = s(w.dob); changed = true; }
+         if (s(w.dob) && m.dob !== normalizeDob(w.dob)) { m.dob = normalizeDob(w.dob); changed = true; }
          if (s(w.name_bn) && m.name_bn !== s(w.name_bn)) { m.name_bn = s(w.name_bn); changed = true; }
          if (s(w.name_en) && m.name_en !== s(w.name_en)) { m.name_en = s(w.name_en); changed = true; }
          if (s(w.father_name_bn) && m.father_name_bn !== s(w.father_name_bn)) { m.father_name_bn = s(w.father_name_bn); changed = true; }
@@ -1126,7 +1219,7 @@ function syncFromWebToPanel(webData) {
   if (changed) {
     syncJsonOutput();
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
-       // Silently synced
+       // Silently synced while typing
     } else {
        renderExtractedCards(state.lastExtracted); 
     }

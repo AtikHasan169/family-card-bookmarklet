@@ -10,36 +10,33 @@
     return;
   }
 
-  // 1. Capture currentScript FIRST before any conditional checks or logic
   const currentScript = document.currentScript;
   if (!currentScript || !currentScript.src) {
     alert('Could not determine the hosted Family Card Pro URL.');
     return;
   }
 
-  // 2. Auto-restore sidebar state across page refreshes
+  const cleanScriptSrc = currentScript.src.split('?')[0];
+
   if (localStorage.getItem('fc_session_open') === 'true') {
      setTimeout(() => {
        const existingRoot = document.getElementById('fc-floating-root');
        if (!existingRoot) {
           const reInject = document.createElement('script');
-          reInject.src = currentScript.src;
+          reInject.src = `${cleanScriptSrc}?t=${Date.now()}`;
           document.documentElement.appendChild(reInject);
        }
      }, 500);
   }
 
-  const baseUrl = new URL('.', currentScript.src).href;
-  const panelUrl = new URL('sidepanel.html', baseUrl).href;
+  const baseUrl = new URL('.', cleanScriptSrc).href;
+  const panelUrl = `${new URL('sidepanel.html', baseUrl).href}?t=${Date.now()}`;
   const panelOrigin = new URL(panelUrl).origin;
 
-  // --- LIVE DEV UPDATE: Destroy old instance and force-fetch latest code ---
   const existingRoot = document.getElementById('fc-floating-root');
   if (existingRoot) {
-    existingRoot.remove(); // Completely wipe old UI from DOM
+    existingRoot.remove();
   }
-  
-  // Also clear any old injected styles or scripts from previous runs
   document.querySelectorAll('script[src*="sidepanel"], style[data-fc]').forEach(el => el.remove());
 
   /* Bundled Vue form injector (adapted from inject.js). */
@@ -48,8 +45,27 @@
       'Father': 157, 'Mother': 158, 'Husband': 159, 'Son': 160, 'Daughter': 161,
       'Brother': 162, 'Sister': 163, 'Father-in-law': 164, 'Mother-in-law': 165,
       'Son-in-law': 181, 'Daughter-in-law': 182, 'Grandson': 183, 'Granddaughter': 184,
-      'Wife': 186, 'Other Relative': 263
+      'Head/Self': 185, 'Wife': 186, 'Other Relative': 263
     };
+
+    const RELATION_GENDER_MAP = {
+      'Father': 1, 'Mother': 2, 'Husband': 1, 'Son': 1, 'Daughter': 2,
+      'Brother': 1, 'Sister': 2, 'Father-in-law': 1, 'Mother-in-law': 2,
+      'Son-in-law': 1, 'Daughter-in-law': 2, 'Grandson': 1, 'Granddaughter': 2,
+      'Head/Self': 2, 'Wife': 2
+    };
+
+    function resolveGenderId(memberObj) {
+      if (memberObj.gender_id) return Number(memberObj.gender_id);
+      const g = String(memberObj.gender || '').toLowerCase();
+      if (g === 'female' || g === '2') return 2;
+      if (g === 'male' || g === '1') return 1;
+      if (g === 'other' || g === '3') return 3;
+      if (memberObj.relation && RELATION_GENDER_MAP[memberObj.relation]) {
+        return RELATION_GENDER_MAP[memberObj.relation];
+      }
+      return 1;
+    }
 
     function getVueNodes() {
       let vmHead = null, vmMembers = null;
@@ -61,6 +77,15 @@
         }
       });
       return { vmHead, vmMembers };
+    }
+
+    function determineIsNID(docType, cleanId) {
+      const up = String(docType || '').toUpperCase().trim();
+      if (up === 'BRN') return false;
+      if (up === 'NID') return true;
+      if (cleanId.length === 10 || cleanId.length === 13) return true;
+      if (cleanId.length === 17) return false;
+      return true;
     }
 
     window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
@@ -88,9 +113,15 @@
         // 1. Populate Primary Applicant (Head) in main form
         if (payload.head && vmHead && vmHead.data) {
           const h = payload.head;
-          setReactive(vmHead, vmHead.data, 'verification_type', 1);
-          setReactive(vmHead, vmHead.data, 'verification_number', h.nid);
+          const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
+          const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
+          const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
+
+          setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
+          setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
           setReactive(vmHead, vmHead.data, 'date_of_birth', h.dob);
+          setReactive(vmHead, vmHead.data, 'gender', headGenderId);
+          setReactive(vmHead, vmHead.data, 'gender_id', headGenderId);
           setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
           setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
           setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
@@ -105,6 +136,9 @@
           fullFamilyList.push({
             ...payload.head,
             relation: 'Head/Self',
+            gender: payload.head.gender || 'Female',
+            gender_id: resolveGenderId({ ...payload.head, relation: 'Head/Self' }),
+            doc_type: payload.head.doc_type || 'NID',
             nid_or_brn: payload.head.nid,
             relationship_id: 185
           });
@@ -113,7 +147,7 @@
           fullFamilyList.push(...payload.family_members);
         }
 
-        // 3. Inject into the Member Array with strict field isolation (NID vs BRN)
+        // 3. Inject into the Member Array with strict field isolation, Gender & Relationship
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
             if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
@@ -127,11 +161,12 @@
             if (!row) return;
 
             const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
-            const isNID = cleanId.length === 10 || cleanId.length === 13 || cleanId.length === 17;
+            const isNID = determineIsNID(m.doc_type, cleanId);
+            const genderId = resolveGenderId(m);
+            const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
 
             setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
             
-            // Explicitly clear opposing fields to prevent data bleeding/mixing
             if (isNID) {
               setReactive(vmMembers, row, 'nid', cleanId);
               setReactive(vmMembers, row, 'brn_id', '');
@@ -149,8 +184,14 @@
             setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
             setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
 
-            const relId = m.relationship_id || RELATION_ID_MAP[m.relation] || null;
-            if (relId) setReactive(vmMembers, row, 'relationship_id', relId);
+            // Inject Relationship & Gender across all common Vuetify property names
+            setReactive(vmMembers, row, 'relationship_id', relId);
+            setReactive(vmMembers, row, 'relation_id', relId);
+            if (m.relation) setReactive(vmMembers, row, 'relation', m.relation);
+
+            setReactive(vmMembers, row, 'gender', genderId);
+            setReactive(vmMembers, row, 'gender_id', genderId);
+
             setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
             setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
@@ -168,7 +209,7 @@
         if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) into form.` }
+          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) with Gender & Relation.` }
         }));
       } catch (err) {
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
@@ -187,9 +228,13 @@
       try {
         const rawMembers = vmMembers && Array.isArray(vmMembers.familyMembers) ? vmMembers.familyMembers : [];
         const headRow = rawMembers[0] || {};
+        const headVerType = headRow.verification_type || (vmHead && vmHead.data ? vmHead.data.verification_type : 1);
+        const headGenVal = headRow.gender_id || headRow.gender || (vmHead && vmHead.data ? (vmHead.data.gender_id || vmHead.data.gender) : 2);
 
         const head = {
-          nid: headRow.verification_number || headRow.nid || (vmHead && vmHead.data ? vmHead.data.verification_number : '') || '',
+          doc_type: Number(headVerType) === 2 ? 'BRN' : 'NID',
+          gender: Number(headGenVal) === 1 ? 'Male' : 'Female',
+          nid: headRow.verification_number || headRow.nid || headRow.brn_id || (vmHead && vmHead.data ? vmHead.data.verification_number : '') || '',
           dob: headRow.date_of_birth || headRow.dob || (vmHead && vmHead.data ? vmHead.data.date_of_birth : '') || '',
           name_bn: headRow.name_bn || (vmHead && vmHead.data ? vmHead.data.name_bn : '') || '',
           name_en: headRow.name_en || (vmHead && vmHead.data ? vmHead.data.name_en : '') || '',
@@ -199,17 +244,22 @@
           mother_name_en: headRow.mother_name_en || (vmHead && vmHead.data ? vmHead.data.mother_name_en : '') || ''
         };
 
-        const family_members = rawMembers.slice(1).map((m) => ({
-          relation: m.relation || 'Son',
-          relationship_id: m.relationship_id || 160,
-          nid_or_brn: m.verification_number || m.brn_id || m.nid || '',
-          dob: m.date_of_birth || m.dob || '',
-          name_bn: m.name_bn || '',
-          name_en: m.name_en || '',
-          father_name_bn: m.father_name_bn || '',
-          mother_name_bn: m.mother_name_bn || '',
-          is_disabled: m.is_member_disabled || 0
-        }));
+        const family_members = rawMembers.slice(1).map((m) => {
+          const gVal = m.gender_id || m.gender;
+          return {
+            relation: m.relation || 'Son',
+            relationship_id: m.relationship_id || m.relation_id || 160,
+            gender: Number(gVal) === 2 ? 'Female' : 'Male',
+            doc_type: Number(m.verification_type) === 2 ? 'BRN' : 'NID',
+            nid_or_brn: m.verification_number || m.brn_id || m.nid || '',
+            dob: m.date_of_birth || m.dob || '',
+            name_bn: m.name_bn || '',
+            name_en: m.name_en || '',
+            father_name_bn: m.father_name_bn || '',
+            mother_name_bn: m.mother_name_bn || '',
+            is_disabled: m.is_member_disabled || 0
+          };
+        });
 
         window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
           detail: { success: true, payload: { head, family_members } }
@@ -219,7 +269,6 @@
       }
     });
 
-    // --- LIVE REVERSE SYNC: Web Page -> Extension ---
     function extractCurrentFormState() {
       const { vmHead, vmMembers } = getVueNodes();
       let headData = null;
@@ -228,22 +277,33 @@
       const rawMembers = vmMembers && Array.isArray(vmMembers.familyMembers) ? vmMembers.familyMembers : [];
       if (rawMembers.length > 0) {
         const h = rawMembers[0];
+        const hGen = h.gender_id || h.gender;
         headData = {
-          nid: h.verification_number || h.nid || '', 
+          doc_type: Number(h.verification_type) === 2 ? 'BRN' : 'NID',
+          gender: hGen ? (Number(hGen) === 1 ? 'Male' : 'Female') : '',
+          nid: h.verification_number || h.nid || h.brn_id || '', 
           dob: h.date_of_birth || h.dob || '',
           name_bn: h.name_bn || '', name_en: h.name_en || '',
           father_name_bn: h.father_name_bn || '', father_name_en: h.father_name_en || '',
           mother_name_bn: h.mother_name_bn || '', mother_name_en: h.mother_name_en || ''
         };
-        membersData = rawMembers.slice(1).map(m => ({
-          relationship_id: m.relationship_id, 
-          nid_or_brn: m.verification_number || m.brn_id || m.nid || '', 
-          dob: m.date_of_birth || m.dob || '',
-          name_bn: m.name_bn || '', name_en: m.name_en || '', 
-          father_name_bn: m.father_name_bn || '', mother_name_bn: m.mother_name_bn || ''
-        }));
+        membersData = rawMembers.slice(1).map(m => {
+          const mGen = m.gender_id || m.gender;
+          return {
+            relationship_id: m.relationship_id || m.relation_id, 
+            gender: mGen ? (Number(mGen) === 2 ? 'Female' : 'Male') : '',
+            doc_type: Number(m.verification_type) === 2 ? 'BRN' : 'NID',
+            nid_or_brn: m.verification_number || m.brn_id || m.nid || '', 
+            dob: m.date_of_birth || m.dob || '',
+            name_bn: m.name_bn || '', name_en: m.name_en || '', 
+            father_name_bn: m.father_name_bn || '', mother_name_bn: m.mother_name_bn || ''
+          };
+        });
       } else if (vmHead && vmHead.data) {
+        const hGen = vmHead.data.gender_id || vmHead.data.gender;
         headData = {
+          doc_type: Number(vmHead.data.verification_type) === 2 ? 'BRN' : 'NID',
+          gender: hGen ? (Number(hGen) === 1 ? 'Male' : 'Female') : '',
           nid: vmHead.data.verification_number || vmHead.data.nid || '', 
           dob: vmHead.data.date_of_birth || vmHead.data.dob || '',
           name_bn: vmHead.data.name_bn || '', name_en: vmHead.data.name_en || '',
@@ -264,6 +324,7 @@
   const viewClass = isMobileDevice ? 'fc-mobile-view' : 'fc-desktop-view';
 
   const style = document.createElement('style');
+  style.setAttribute('data-fc', 'true');
   style.textContent = `
     #fc-floating-root {
       position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; font-family: Inter, system-ui, sans-serif;
