@@ -191,24 +191,64 @@
   });
 })();
 
+  // Inject Responsive CSS for Mobile vs. Tablet/Desktop
+  const style = document.createElement('style');
+  style.textContent = `
+    #fc-floating-root {
+      position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; font-family: Inter, system-ui, sans-serif;
+    }
+    #fc-trigger-btn {
+      position: fixed; bottom: 20px; right: 20px; pointer-events: auto;
+      display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      background: #0f172a; color: #ffffff; border: 1px solid #334155;
+      border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); transition: transform 0.15s ease;
+    }
+    #fc-trigger-btn:hover { transform: scale(1.05); }
+    #fc-trigger-btn.active { transform: scale(0.9); }
 
-  /* Floating launcher and cross-frame message bridge (extension APIs removed). */
+    #fc-drawer-iframe {
+      position: fixed; background: #ffffff; border: none;
+      box-shadow: 0 -10px 40px rgba(0,0,0,0.3); pointer-events: auto;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Mobile View: Bottom Sheet */
+    @media (max-width: 768px) {
+      #fc-drawer-iframe {
+        bottom: 0; left: 0; right: 0; width: 100%; height: 90vh; max-height: 800px;
+        border-top-left-radius: 20px; border-top-right-radius: 20px;
+        transform: translateY(105%);
+      }
+      #fc-drawer-iframe.open { transform: translateY(0); }
+    }
+
+    /* Tablet & Desktop View: Floating Right-Side Panel */
+    @media (min-width: 769px) {
+      #fc-drawer-iframe {
+        bottom: 80px; right: 20px; width: 420px; height: calc(100vh - 110px); max-height: 850px;
+        border-radius: 16px;
+        transform: translateX(120%);
+      }
+      #fc-drawer-iframe.open { transform: translateX(0); }
+    }
+  `;
+  document.head.appendChild(style);
+
+  /* Floating launcher and cross-frame message bridge. */
   const root = document.createElement('div');
   root.id = 'fc-floating-root';
-  root.style.cssText = 'position:fixed;inset:0;z-index:2147483000;pointer-events:none;font-family:Inter,system-ui,sans-serif;';
 
   const trigger = document.createElement('button');
   trigger.id = 'fc-trigger-btn';
   trigger.type = 'button';
   trigger.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;"></span><span>Family Card AI</span>';
-  trigger.style.cssText = 'position:fixed;bottom:20px;right:20px;pointer-events:auto;display:flex;align-items:center;gap:8px;padding:10px 16px;background:#0f172a;color:#fff;border:1px solid #334155;border-radius:999px;font-size:13px;font-weight:650;cursor:pointer;box-shadow:0 10px 25px -5px rgba(0,0,0,.3);transition:transform .15s ease;';
 
   const iframe = document.createElement('iframe');
   iframe.id = 'fc-drawer-iframe';
   iframe.title = 'Family Card Pro';
   iframe.src = panelUrl;
   iframe.setAttribute('allow', 'camera');
-  iframe.style.cssText = 'position:fixed;bottom:0;left:0;right:0;width:100%;height:90vh;max-height:800px;background:#fff;border:0;border-top-left-radius:20px;border-top-right-radius:20px;box-shadow:0 -10px 40px rgba(0,0,0,.3);pointer-events:auto;transform:translateY(105%);transition:transform .3s cubic-bezier(.16,1,.3,1);';
 
   root.append(trigger, iframe);
   (document.body || document.documentElement).appendChild(root);
@@ -219,14 +259,18 @@
   }
   function closeSheet() {
     isOpen = false;
-    iframe.style.transform = 'translateY(105%)';
-    trigger.style.transform = 'scale(1)';
+    iframe.classList.remove('open');
+    trigger.classList.remove('active');
   }
   function toggleSheet() {
     isOpen = !isOpen;
-    iframe.style.transform = isOpen ? 'translateY(0)' : 'translateY(105%)';
-    trigger.style.transform = isOpen ? 'scale(.9)' : 'scale(1)';
-    if (isOpen) sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+    if (isOpen) {
+      iframe.classList.add('open');
+      trigger.classList.add('active');
+      sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+    } else {
+      closeSheet();
+    }
   }
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
