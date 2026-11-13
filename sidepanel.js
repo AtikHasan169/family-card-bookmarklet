@@ -161,28 +161,46 @@ function setupUpdateChecker() {
     updateBtn.disabled = true;
 
     try {
-      const checkUrl = location.href.split('?')[0] + '?_=' + Date.now();
-      const res = await fetch(checkUrl, { cache: 'no-store' });
+      // Force absolute cache-busting with a unique query param and reload instruction
+      const cleanUrl = location.href.split('?')[0];
+      const checkUrl = `${cleanUrl}?update_check=${Date.now()}`;
+      
+      const res = await fetch(checkUrl, { 
+        cache: 'reload',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+      });
+
       if (res.ok) {
         setStatus(`Family Card Pro is Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
         updateBtn.textContent = 'Up to Date ✓';
+        updateBtn.style.background = '#059669';
+        updateBtn.style.color = '#ffffff';
+        
         setTimeout(() => {
           updateBtn.textContent = originalText;
           updateBtn.disabled = false;
+          updateBtn.style.background = '';
+          updateBtn.style.color = '';
         }, 2500);
       } else {
-        throw new Error('Host error');
+        throw new Error('Server returned ' + res.status);
       }
     } catch (err) {
       setStatus('Update check failed. Check connection.', 'err');
       updateBtn.textContent = 'Error';
+      updateBtn.style.background = '#dc2626';
+      updateBtn.style.color = '#ffffff';
+      
       setTimeout(() => {
         updateBtn.textContent = originalText;
         updateBtn.disabled = false;
+        updateBtn.style.background = '';
+        updateBtn.style.color = '';
       }, 2500);
     }
   });
 }
+
 
 function setupImageViewerModal() {
   if ($('fcViewerModal')) return;
