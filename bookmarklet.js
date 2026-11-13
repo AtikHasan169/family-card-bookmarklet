@@ -207,6 +207,7 @@
         bottom: 80px; right: 20px; width: 420px; height: calc(100vh - 110px); max-height: 850px;
         border-radius: 16px;
         transform: translateX(120%);
+        box-shadow: 0 10px 40px rgba(0,0,0,0.15);
       }
       #fc-drawer-iframe.open { transform: translateX(0); }
     }

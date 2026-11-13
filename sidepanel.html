@@ -49,9 +49,11 @@
       font-size: 13px;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
-      padding-bottom: 90px;
+      padding-bottom: 120px; /* Increased padding to ensure bottom action bar doesn't cover last card */
       overflow-y: auto;
       overflow-x: hidden;
+      height: 100vh; /* Force body to fill viewport */
+      box-sizing: border-box;
     }
 
     /* Sticky Glass Header */
