@@ -115,6 +115,7 @@
     .input-group { display: flex; gap: 6px; }
     input[type="text"], input[type="password"], select { width: 100%; padding: 7px 10px; font: inherit; font-size: 12.5px; color: var(--text-main); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--transition), box-shadow var(--transition); }
     input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+    .field-warning { border-color: var(--danger) !important; background: var(--danger-soft) !important; }
 
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-xs); transition: border-color var(--transition); }
     .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -123,7 +124,8 @@
     .card-title { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
     .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--text-sub); border: 1px solid var(--border); }
 
-    .upload-Zone { border: 1px dashed var(--border-hover); background: #fcfcfd; border-radius: var(--radius-md); padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .upload-Zone { border: 2px dashed var(--border-hover); background: #fcfcfd; border-radius: var(--radius-md); padding: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; transition: all var(--transition); }
+    .upload-Zone.drag-over { background: #e0e7ff; border-color: var(--accent); }
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border-radius: var(--radius-sm); font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--text-main); cursor: pointer; transition: all var(--transition); box-shadow: var(--shadow-xs); }
     .btn:hover:not(:disabled) { background: var(--surface-muted); border-color: var(--border-hover); }
     .btn:active:not(:disabled) { transform: scale(0.99); }
@@ -146,8 +148,10 @@
     .thumb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75px; font-weight: 500; }
     .thumb-moves { display: flex; gap: 2px; }
     .thumb-moves button { border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer; }
-    .thumb-remove { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 4px; border: none; background: rgba(9, 9, 11, 0.75); color: #fff; font-size: 13px; line-height: 20px; padding: 0; cursor: pointer; }
+    .thumb-remove { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 4px; border: none; background: rgba(9, 9, 11, 0.75); color: #fff; font-size: 13px; line-height: 22px; padding: 0; cursor: pointer; }
     .thumb-remove:hover { background: var(--danger); }
+    .thumb-crop { position: absolute; top: 10px; right: 38px; width: 22px; height: 22px; border-radius: 4px; border: none; background: rgba(9, 9, 11, 0.75); color: #fff; font-size: 11px; cursor: pointer; padding: 0; }
+    .thumb-crop:hover { background: var(--accent); }
 
     .status-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--radius-md); font-size: 12px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); color: var(--text-sub); }
     .status-banner.ok { background: var(--emerald-soft); border-color: #a7f3d0; color: var(--emerald); }
@@ -234,7 +238,7 @@
           <span class="badge" id="headCount">0 files</span>
         </div>
       </div>
-      <div class="upload-Zone">
+      <div class="upload-Zone" id="headDropZone">
         <button type="button" class="btn btn-dark" id="uploadHeadBtn">Upload Photos</button>
         <button type="button" class="btn" id="captureHeadBtn">Live Camera</button>
         <input type="file" id="headUpload" accept="image/*" multiple hidden>
@@ -250,7 +254,7 @@
         </div>
         <span class="badge" id="otherCount">0 files</span>
       </div>
-      <div class="upload-Zone">
+      <div class="upload-Zone" id="otherDropZone">
         <button type="button" class="btn btn-dark" id="uploadOtherBtn">Upload Photos</button>
         <button type="button" class="btn" id="captureOtherBtn">Live Camera</button>
         <input type="file" id="otherUpload" accept="image/*" multiple hidden>

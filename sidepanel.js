@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.4-live';
+const CURRENT_VERSION_TAG = 'v3.5-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -34,17 +34,9 @@ const GENDER_OPTIONS = [
   { value: 'Other', label: 'Other (অন্যান্য)', id: 3 }
 ];
 
-const RELATION_ID_MAP = Object.fromEntries(
-  RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id])
-);
-
-const ID_TO_RELATION_MAP = Object.fromEntries(
-  RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.id, r.value])
-);
-
-const RELATION_GENDER_MAP = Object.fromEntries(
-  RELATION_OPTIONS.filter((r) => r.gender !== null).map((r) => [r.value, r.gender])
-);
+const RELATION_ID_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id]));
+const ID_TO_RELATION_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.id, r.value]));
+const RELATION_GENDER_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.gender !== null).map((r) => [r.value, r.gender]));
 
 const GENDER_ID_MAP = { Male: 1, Female: 2, Other: 3 };
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -75,7 +67,7 @@ const MEMBER_FIELDS = [
 ];
 
 const state = { head: [], other: [], lastExtracted: null };
-let nextId = 1, activeCategory = null;
+let nextId = 1, activeCategory = null, activeCropName = '';
 
 let rawImage = null;
 let baseScale = 1; 
@@ -95,9 +87,7 @@ function saveCredentialsEverywhere(apiKey, model) {
   try {
     if (apiKey !== undefined) localStorage.setItem(STORAGE_KEY, apiKey);
     if (model !== undefined) localStorage.setItem(STORAGE_MODEL, model);
-  } catch (err) {
-    // Ignore storage error if third-party blocked
-  }
+  } catch (err) {}
   window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey, model }, '*');
 }
 
@@ -107,39 +97,38 @@ function initApp() {
   try {
     savedKey = localStorage.getItem(STORAGE_KEY) || '';
     savedModel = localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash';
-  } catch (err) {
-    // Fallback to parent message bridge
-  }
+  } catch (err) {}
 
   $('apiKeyInput').value = savedKey;
   $('modelSelect').value = savedModel;
+  if (!savedKey) $('settingsDrawer').classList.add('open');
 
-  if (!savedKey) {
-    $('settingsDrawer').classList.add('open');
-  }
-
-  // Save immediately to both localStorage and parent storage when typing or changing
-  $('apiKeyInput').addEventListener('input', (e) => {
-    const val = e.target.value.trim();
-    saveCredentialsEverywhere(val, undefined);
-  });
-
-  $('modelSelect').addEventListener('change', (e) => {
-    saveCredentialsEverywhere(undefined, e.target.value);
-  });
+  $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined));
+  $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value));
 
   const navRight = document.querySelector('.nav-right');
   if (navRight && !$('closeSheetBtn')) {
     const closeBtn = document.createElement('button');
     closeBtn.id = 'closeSheetBtn';
     closeBtn.className = 'icon-btn';
-    closeBtn.title = 'Close Sheet';
     closeBtn.innerHTML = '✕';
-    closeBtn.addEventListener('click', () => {
-      window.parent.postMessage({ action: 'FC_CLOSE_SHEET' }, '*');
-    });
+    closeBtn.addEventListener('click', () => window.parent.postMessage({ action: 'FC_CLOSE_SHEET' }, '*'));
     navRight.prepend(closeBtn);
   }
+
+  // Setup Drag-and-Drop
+  ['headDropZone', 'otherDropZone'].forEach(id => {
+    const zone = $(id);
+    if (!zone) return;
+    const category = id === 'headDropZone' ? 'head' : 'other';
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', (e) => { e.preventDefault(); zone.classList.remove('drag-over'); });
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      handleUpload(null, category, e.dataTransfer.files);
+    });
+  });
 
   setupNativeCropper();
   setupImageViewerModal();
@@ -149,11 +138,8 @@ function initApp() {
   window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
-} else {
-  initApp();
-}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
+else initApp();
 
 function setStatus(message, mode = 'idle') {
   const banner = $('statusBanner');
@@ -169,8 +155,6 @@ function toEnglishDigits(str) {
 function normalizeDob(rawDob) {
   let s = toEnglishDigits(rawDob).trim();
   if (!s) return '';
-  
-  // Strip out any existing [Mon] brackets so it can be re-parsed if edited manually
   s = s.replace(/\[.*?\]/g, ''); 
   
   let dd, mm, yyyy;
@@ -206,16 +190,12 @@ function inferDocType(idStr, explicitType) {
 }
 
 function inferGender(relation, explicitGender, nameEn, nameBn) {
-  if (relation && RELATION_GENDER_MAP[relation]) {
-    return RELATION_GENDER_MAP[relation];
-  }
+  if (relation && RELATION_GENDER_MAP[relation]) return RELATION_GENDER_MAP[relation];
   const g = String(explicitGender || '').trim().toLowerCase();
   if (g === 'female' || g === '2' || g === 'f' || g === 'মহিলা' || g === 'নারী') return 'Female';
   if (g === 'male' || g === '1' || g === 'm' || g === 'পুরুষ') return 'Male';
   const combined = `${nameEn || ''} ${nameBn || ''}`;
-  if (/\b(?:mst|mosammat|begum|khatun|akter|akhter|bibi|parvin|sultana)\b|মোছা|মোসা|বেগম|খাতুন|আক্তার/i.test(combined)) {
-    return 'Female';
-  }
+  if (/\b(?:mst|mosammat|begum|khatun|akter|akhter|bibi|parvin|sultana)\b|মোছা|মোসা|বেগম|খাতুন|আক্তার/i.test(combined)) return 'Female';
   return 'Male';
 }
 
@@ -233,13 +213,7 @@ function syncJsonOutput() {
 }
 
 function addImage(category, base64, name) {
-  state[category].push({
-    id: nextId++,
-    base64,
-    name: name || 'Card.jpg',
-    relation: 'Auto',
-    boundRef: null
-  });
+  state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null });
   renderPreviews(category);
 }
 
@@ -259,63 +233,38 @@ function moveImage(category, idx, dir) {
 function setupUpdateChecker() {
   const updateBtn = $('updateCheckBtn');
   if (!updateBtn) return;
-
   updateBtn.addEventListener('click', async () => {
     const originalText = updateBtn.textContent;
     updateBtn.textContent = 'Checking...';
     updateBtn.disabled = true;
     setStatus('Checking for updates...', 'loading');
-
     try {
       const cleanUrl = location.href.split('?')[0];
       const baseDir = cleanUrl.substring(0, cleanUrl.lastIndexOf('/') + 1);
-      const checkJsUrl = `${baseDir}sidepanel.js?update_check=${Date.now()}`;
-      const checkHtmlUrl = `${cleanUrl}?update_check=${Date.now()}`;
-
-      // Fetch both sidepanel.js and sidepanel.html with cache reload so browser updates its cache
       const [jsRes] = await Promise.all([
-        fetch(checkJsUrl, { cache: 'reload' }),
-        fetch(checkHtmlUrl, { cache: 'reload' })
+        fetch(`${baseDir}sidepanel.js?u=${Date.now()}`, { cache: 'reload' }),
+        fetch(`${cleanUrl}?u=${Date.now()}`, { cache: 'reload' })
       ]);
-
       if (jsRes.ok) {
         const jsText = await jsRes.text();
         const match = jsText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
         const remoteVer = match ? match[1] : CURRENT_VERSION_TAG;
-
-        setStatus(`Family Card Pro is Up to Date (${remoteVer})!`, 'ok');
+        setStatus(`Up to Date (${remoteVer})!`, 'ok');
         updateBtn.textContent = 'Up to Date ✓';
-        updateBtn.style.background = '#059669';
-        updateBtn.style.color = '#ffffff';
-
-        if (remoteVer !== CURRENT_VERSION_TAG) {
-          setTimeout(() => location.reload(), 600);
-          return;
-        }
-
-        setTimeout(() => {
-          updateBtn.textContent = originalText;
-          updateBtn.disabled = false;
-          updateBtn.style.background = '';
-          updateBtn.style.color = '';
-        }, 2500);
-      } else {
-        throw new Error('Server returned ' + jsRes.status);
-      }
+        if (remoteVer !== CURRENT_VERSION_TAG) { setTimeout(() => location.reload(), 600); return; }
+        setTimeout(() => { updateBtn.textContent = originalText; updateBtn.disabled = false; }, 2500);
+      } else throw new Error('HTTP ' + jsRes.status);
     } catch (err) {
       setStatus('Update check failed. Check connection.', 'err');
       updateBtn.textContent = 'Error';
-      updateBtn.style.background = '#dc2626';
-      updateBtn.style.color = '#ffffff';
-      
-      setTimeout(() => {
-        updateBtn.textContent = originalText;
-        updateBtn.disabled = false;
-        updateBtn.style.background = '';
-        updateBtn.style.color = '';
-      }, 2500);
+      setTimeout(() => { updateBtn.textContent = originalText; updateBtn.disabled = false; }, 2500);
     }
   });
+}
+
+function toggleWarning(el) {
+  if (!el.value || el.value.trim() === '') el.classList.add('field-warning');
+  else el.classList.remove('field-warning');
 }
 
 function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
@@ -339,9 +288,10 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
         targetObj.gender_id = GENDER_ID_MAP[targetObj.gender] || 1;
         if (cardContainer) {
           const gSel = cardContainer.querySelector('select[data-field="gender"]');
-          if (gSel) gSel.value = targetObj.gender;
+          if (gSel) { gSel.value = targetObj.gender; toggleWarning(gSel); }
         }
       }
+      toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
     });
@@ -359,6 +309,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
     inputEl.addEventListener('change', (e) => {
       targetObj.gender = e.target.value;
       targetObj.gender_id = GENDER_ID_MAP[e.target.value] || 1;
+      toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
     });
@@ -374,6 +325,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
     inputEl.value = targetObj.doc_type || 'NID';
     inputEl.addEventListener('change', (e) => {
       targetObj.doc_type = e.target.value;
+      toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
     });
@@ -383,35 +335,27 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
     inputEl.value = targetObj[f.key] || '';
     inputEl.placeholder = f.key === 'dob' ? 'DD-MM-YYYY' : '—';
     inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
-    
     if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
 
-    inputEl.addEventListener('focus', () => {
-      inputEl.style.borderColor = '#bfdbfe';
-      inputEl.style.background = '#eff6ff';
-    });
-    
     inputEl.addEventListener('blur', () => {
-      inputEl.style.borderColor = 'transparent';
-      inputEl.style.background = 'transparent';
       if (f.key === 'dob') {
         targetObj.dob = normalizeDob(inputEl.value);
         inputEl.value = targetObj.dob;
         syncJsonOutput();
       }
+      toggleWarning(inputEl);
     });
     
     inputEl.addEventListener('input', () => {
       let val = inputEl.value;
-      if (f.key === 'nid' || f.key === 'nid_or_brn') {
-        val = toEnglishDigits(val).replace(/\s+/g, '');
-      } else if (f.key.endsWith('_en')) {
-        val = val.toUpperCase();
-      }
+      if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
+      else if (f.key.endsWith('_en')) val = val.toUpperCase();
       targetObj[f.key] = val;
+      toggleWarning(inputEl);
       syncJsonOutput();
     });
   }
+  toggleWarning(inputEl);
   return inputEl;
 }
 
@@ -433,11 +377,9 @@ function setupImageViewerModal() {
           <button type="button" id="fcViewerClose" style="background:#dc2626; color:#fff; border:none; border-radius:6px; width:28px; height:28px; font-weight:bold; font-size:14px; cursor:pointer; margin-left:4px;">✕</button>
         </div>
       </div>
-
       <div style="width:100%; max-height:42vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
         <img id="fcViewerImg" style="max-width:100%; max-height:42vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
       </div>
-
       <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:46vh; overflow-y:auto;"></div>
     </div>`;
   document.body.appendChild(modal);
@@ -456,7 +398,6 @@ function setupImageViewerModal() {
     modal.style.display = 'none';
     if (state.lastExtracted) renderExtractedCards(state.lastExtracted);
   };
-
   modal.querySelector('#fcViewerClose').onclick = closeViewer;
   modal.onclick = (e) => { if (e.target === modal) closeViewer(); };
 }
@@ -464,9 +405,7 @@ function setupImageViewerModal() {
 function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
-
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
-
   viewerZoom = 1;
   $('fcViewerImg').src = `data:image/jpeg;base64,${item.base64}`;
   $('fcViewerImg').style.transform = 'scale(1)';
@@ -490,7 +429,7 @@ function showImageViewer(item) {
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
       const headerNote = document.createElement('div');
       headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;';
-      headerNote.innerHTML = '<span>Switch Relation, Gender, or NID/BRN below</span><span style="color:#10b981; font-weight:600;">● Live Sync</span>';
+      headerNote.innerHTML = '<span>Check empty red fields before Auto-Fill</span><span style="color:#10b981; font-weight:600;">● Live Sync</span>';
       metaBox.appendChild(headerNote);
 
       const formList = document.createElement('div');
@@ -499,13 +438,12 @@ function showImageViewer(item) {
       fields.forEach((f) => {
         const row = document.createElement('div');
         row.style.cssText = 'display:grid; grid-template-columns:105px 1fr auto; align-items:center; gap:6px;';
-
         const lbl = document.createElement('label');
         lbl.style.cssText = 'color:#a1a1aa; font-size:11px; font-weight:500;';
         lbl.textContent = f.label;
 
         const inputEl = createFieldControl(f, targetObj, updateModalTitle, formList);
-        if (inputEl.tagName === 'INPUT') {
+        if (inputEl.tagName === 'INPUT' && !inputEl.classList.contains('field-warning')) {
           inputEl.style.color = '#f8fafc';
           inputEl.style.background = '#09090b';
           inputEl.style.borderColor = '#3f3f46';
@@ -559,12 +497,19 @@ function renderPreviews(category) {
     img.addEventListener('click', () => showImageViewer(item));
     card.appendChild(img);
 
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'thumb-remove';
-    del.textContent = '×';
-    del.addEventListener('click', () => removeImage(category, item.id));
-    card.appendChild(del);
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'thumb-remove';
+    delBtn.textContent = '×';
+    delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeImage(category, item.id); });
+    card.appendChild(delBtn);
+
+    const cropBtn = document.createElement('button');
+    cropBtn.type = 'button';
+    cropBtn.className = 'thumb-crop';
+    cropBtn.textContent = '✂️';
+    cropBtn.addEventListener('click', (e) => { e.stopPropagation(); openCropForImage(item); });
+    card.appendChild(cropBtn);
 
     const bar = document.createElement('div');
     bar.className = 'thumb-bar';
@@ -578,13 +523,13 @@ function renderPreviews(category) {
     left.type = 'button';
     left.textContent = '←';
     left.disabled = idx === 0;
-    left.addEventListener('click', () => moveImage(category, idx, -1));
+    left.addEventListener('click', (e) => { e.stopPropagation(); moveImage(category, idx, -1); });
 
     const right = document.createElement('button');
     right.type = 'button';
     right.textContent = '→';
     right.disabled = idx === state[category].length - 1;
-    right.addEventListener('click', () => moveImage(category, idx, 1));
+    right.addEventListener('click', (e) => { e.stopPropagation(); moveImage(category, idx, 1); });
 
     moves.append(left, right);
     bar.append(label, moves);
@@ -628,51 +573,55 @@ function fileToBase64(file) {
   });
 }
 
-async function handleUpload(e, category) {
-  const files = Array.from(e.target.files || []);
+async function handleUpload(e, category, droppedFiles = null) {
+  const files = Array.from(droppedFiles || (e ? e.target.files : []));
   if (!files.length) return;
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
-    try {
-      const b64 = await fileToBase64(file);
-      addImage(category, b64, file.name);
-    } catch (err) {
-      setStatus(err.message, 'err');
+  
+  // Single image upload immediately throws you into Crop Modal
+  if (files.length === 1 && files[0].type.startsWith('image/')) {
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      rawImage = new Image();
+      rawImage.onload = () => {
+        activeCategory = category;
+        activeCropItem = null;
+        activeCropName = file.name;
+        const canvas = $('cropCanvas');
+        canvas.width = 900;
+        canvas.height = 600;
+        baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
+        zoomLevel = 1;
+        rotationAngle = 0;
+        panX = 0;
+        panY = 0;
+        $('zoomRange').value = 1;
+        $('cropModal').classList.add('open');
+        drawCropCanvas();
+      };
+      rawImage.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    // Multi-file upload goes straight to thumbnails
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
+        const b64 = await fileToBase64(file);
+        addImage(category, b64, file.name);
+      } catch (err) {
+        setStatus(err.message, 'err');
+      }
     }
+    setStatus(`${files.length} images added.`, 'ok');
   }
-  e.target.value = '';
-  setStatus('Images added successfully.', 'ok');
+  if (e && e.target) e.target.value = '';
 }
 
 function openCamera(category) {
-  activeCategory = category;
-  activeCropItem = null;
   const input = $('cameraInput');
   input.value = '';
-  input.onchange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        rawImage = new Image();
-        rawImage.onload = () => {
-          const canvas = $('cropCanvas');
-          canvas.width = 900;
-          canvas.height = 600;
-          baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
-          zoomLevel = 1;
-          rotationAngle = 0;
-          panX = 0;
-          panY = 0;
-          $('zoomRange').value = 1;
-          $('cropModal').classList.add('open');
-          drawCropCanvas();
-        };
-        rawImage.src = evt.target.result;
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  input.onchange = (e) => handleUpload(e, category);
   input.click();
 }
 
@@ -800,8 +749,8 @@ function setupNativeCropper() {
       setStatus('Image cropped and updated.', 'ok');
       activeCropItem = null;
     } else if (activeCategory) {
-      addImage(activeCategory, b64, 'Live_Zoom_Crop.jpg');
-      setStatus('Cropped & zoomed photo added.', 'ok');
+      addImage(activeCategory, b64, activeCropName || 'Cropped_Photo.jpg');
+      setStatus('Cropped photo added.', 'ok');
       activeCategory = null;
     }
   });
