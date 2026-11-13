@@ -1025,6 +1025,18 @@ window.addEventListener('message', (e) => {
   if (e.data.action === 'FC_SYNC_FROM_WEB') {
     syncFromWebToPanel(e.data.payload);
   }
+
+  if (e.data.action === 'FC_PULL_RESPONSE') {
+    const res = e.data.detail;
+    if (res.success && res.payload) {
+      state.lastExtracted = res.payload;
+      renderExtractedCards(res.payload);
+      $('autofillBtn').disabled = false;
+      setStatus('Successfully pulled draft from form!', 'ok');
+    } else {
+      setStatus(res.message || 'Could not pull draft data.', 'err');
+    }
+  }
 });
 
 // --- LIVE REVERSE SYNC: Process Web Edits ---
@@ -1087,6 +1099,3 @@ $('pullFromWebBtn').addEventListener('click', () => {
   window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
   setStatus('Pulling drafted data from web form...', 'loading');
 });
-
-// Inside message listener switch:
-// (Add this case into your window.addEventListener('message', (e) => { ... }))
