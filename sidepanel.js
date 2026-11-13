@@ -224,30 +224,39 @@ function setupUpdateChecker() {
     updateBtn.disabled = true;
     updateBtn.style.background = '#2563eb';
     updateBtn.style.color = '#ffffff';
+    setStatus('Checking for updates from server...', 'loading');
 
     try {
-      const baseUrl = new URL('.', location.href).href;
+      // Clean path calculation to ensure correct file resolution on GitHub Pages
+      const cleanPath = location.href.split('?')[0];
+      const baseUrl = cleanPath.substring(0, cleanPath.lastIndexOf('/') + 1);
       const jsUrl = `${baseUrl}sidepanel.js?t=${Date.now()}`;
       
       const res = await fetch(jsUrl, { 
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+        cache: 'no-store'
       });
 
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} (${res.statusText || 'Not Found'})`);
+      }
+
       const codeText = await res.text();
       const match = codeText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
-      const remoteVer = match ? match[1] : CURRENT_VERSION_TAG;
+      const remoteVer = match ? match[1] : null;
+
+      if (!remoteVer) {
+        throw new Error('Could not parse version tag from remote script.');
+      }
 
       if (remoteVer !== CURRENT_VERSION_TAG) {
         setStatus(`New version (${remoteVer}) found! Reloading panel...`, 'ok');
-        updateBtn.textContent = `Updating to ${remoteVer}...`;
+        updateBtn.textContent = `Updating...`;
         updateBtn.style.background = '#059669';
         setTimeout(() => {
-          location.replace(`${location.pathname}?v=${Date.now()}`);
-        }, 900);
+          location.replace(`${cleanPath}?v=${Date.now()}`);
+        }, 800);
       } else {
-        setStatus(`Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
+        setStatus(`Family Card Pro is Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
         updateBtn.textContent = 'Up to Date ✓';
         updateBtn.style.background = '#059669';
         updateBtn.style.color = '#ffffff';
@@ -257,11 +266,12 @@ function setupUpdateChecker() {
           updateBtn.disabled = false;
           updateBtn.style.background = '';
           updateBtn.style.color = '';
-        }, 2200);
+        }, 2500);
       }
     } catch (err) {
-      setStatus('Update check failed: ' + err.message, 'err');
-      updateBtn.textContent = 'Retry Update';
+      console.warn('Update check error:', err);
+      setStatus(`Update failed: ${err.message}. (Verify files are pushed to GitHub).`, 'err');
+      updateBtn.textContent = 'Error';
       updateBtn.style.background = '#dc2626';
       updateBtn.style.color = '#ffffff';
       
@@ -270,10 +280,11 @@ function setupUpdateChecker() {
         updateBtn.disabled = false;
         updateBtn.style.background = '';
         updateBtn.style.color = '';
-      }, 2500);
+      }, 3000);
     }
   });
 }
+
 
 function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
   let inputEl;
