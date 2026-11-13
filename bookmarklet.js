@@ -48,6 +48,13 @@
       'Head/Self': 185, 'Wife': 186, 'Other Relative': 263
     };
 
+    const ID_TO_RELATION_MAP = {
+      157: 'Father', 158: 'Mother', 159: 'Husband', 160: 'Son', 161: 'Daughter',
+      162: 'Brother', 163: 'Sister', 164: 'Father-in-law', 165: 'Mother-in-law',
+      181: 'Son-in-law', 182: 'Daughter-in-law', 183: 'Grandson', 184: 'Granddaughter',
+      185: 'Head/Self', 186: 'Wife', 263: 'Other Relative'
+    };
+
     const RELATION_GENDER_MAP = {
       'Father': 1, 'Mother': 2, 'Husband': 1, 'Son': 1, 'Daughter': 2,
       'Brother': 1, 'Sister': 2, 'Father-in-law': 1, 'Mother-in-law': 2,
@@ -86,6 +93,50 @@
       if (cleanId.length === 10 || cleanId.length === 13) return true;
       if (cleanId.length === 17) return false;
       return true;
+    }
+
+    function parseMemberRow(m) {
+      const relId = Number(m.relationship_id || m.relation_id || 0);
+      const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
+      const finalRelId = relId || RELATION_ID_MAP[relName] || 160;
+
+      const verType = Number(m.verification_type);
+      const idVal = String(m.verification_number || (verType === 2 ? m.brn_id : m.nid) || m.brn_id || m.nid || '').trim();
+      const isBRN = verType === 2 || (!verType && idVal.length === 17 && Boolean(m.brn_id));
+
+      const gVal = Number(m.gender_id || m.gender || 0);
+      let genderStr = 'Male';
+      if (gVal === 2) genderStr = 'Female';
+      else if (gVal === 3) genderStr = 'Other';
+      else if (!gVal && RELATION_GENDER_MAP[relName] === 2) genderStr = 'Female';
+
+      return {
+        relation: relName === 'Head/Self' ? 'Wife' : relName,
+        relationship_id: finalRelId,
+        gender: genderStr,
+        gender_id: gVal || (genderStr === 'Female' ? 2 : 1),
+        doc_type: isBRN ? 'BRN' : 'NID',
+        nid_or_brn: idVal,
+        dob: m.date_of_birth || m.dob || '',
+        name_bn: m.name_bn || '',
+        name_en: m.name_en || '',
+        father_name_bn: m.father_name_bn || '',
+        father_name_en: m.father_name_en || '',
+        mother_name_bn: m.mother_name_bn || '',
+        mother_name_en: m.mother_name_en || '',
+        is_disabled: Number(m.is_member_disabled) === 1 ? 1 : 0
+      };
+    }
+
+    function isRowPopulated(m) {
+      if (!m) return false;
+      return Boolean(
+        (m.verification_number && String(m.verification_number).trim()) ||
+        (m.nid && String(m.nid).trim()) ||
+        (m.brn_id && String(m.brn_id).trim()) ||
+        (m.name_bn && String(m.name_bn).trim()) ||
+        (m.name_en && String(m.name_en).trim())
+      );
     }
 
     window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
@@ -184,7 +235,6 @@
             setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
             setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
 
-            // Inject Relationship & Gender across all common Vuetify property names
             setReactive(vmMembers, row, 'relationship_id', relId);
             setReactive(vmMembers, row, 'relation_id', relId);
             if (m.relation) setReactive(vmMembers, row, 'relation', m.relation);
@@ -209,7 +259,7 @@
         if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) with Gender & Relation.` }
+          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) successfully.` }
         }));
       } catch (err) {
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
@@ -221,98 +271,94 @@
     window.addEventListener('FC_PRO_PULL_REQUEST', () => {
       const { vmHead, vmMembers } = getVueNodes();
       if (!vmHead && !vmMembers) {
-        window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', { detail: { success: false, message: 'No active form instance found.' } }));
+        window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
+          detail: { success: false, message: 'No active Vue form instance found on this page.' }
+        }));
         return;
       }
 
       try {
-        const rawMembers = vmMembers && Array.isArray(vmMembers.familyMembers) ? vmMembers.familyMembers : [];
-        const headRow = rawMembers[0] || {};
-        const headVerType = headRow.verification_type || (vmHead && vmHead.data ? vmHead.data.verification_type : 1);
-        const headGenVal = headRow.gender_id || headRow.gender || (vmHead && vmHead.data ? (vmHead.data.gender_id || vmHead.data.gender) : 2);
+        const d = (vmHead && vmHead.data) ? vmHead.data : {};
+        const rawMembers = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
+
+        const row0 = rawMembers[0] || {};
+        const dId = String(d.verification_number || d.nid || '').trim();
+        const r0Id = String(row0.verification_number || row0.nid || row0.brn_id || '').trim();
+        const row0IsHead = Number(row0.relationship_id) === 185 || (dId && r0Id && dId === r0Id) || (!dId && rawMembers.length > 0 && !row0.relationship_id);
+
+        const hSource = row0IsHead ? { ...row0, ...d } : d;
+        const headVerType = Number(hSource.verification_type || row0.verification_type || 1);
+        const headGenVal = Number(hSource.gender_id || hSource.gender || row0.gender_id || row0.gender || 2);
 
         const head = {
-          doc_type: Number(headVerType) === 2 ? 'BRN' : 'NID',
-          gender: Number(headGenVal) === 1 ? 'Male' : 'Female',
-          nid: headRow.verification_number || headRow.nid || headRow.brn_id || (vmHead && vmHead.data ? vmHead.data.verification_number : '') || '',
-          dob: headRow.date_of_birth || headRow.dob || (vmHead && vmHead.data ? vmHead.data.date_of_birth : '') || '',
-          name_bn: headRow.name_bn || (vmHead && vmHead.data ? vmHead.data.name_bn : '') || '',
-          name_en: headRow.name_en || (vmHead && vmHead.data ? vmHead.data.name_en : '') || '',
-          father_name_bn: headRow.father_name_bn || (vmHead && vmHead.data ? vmHead.data.father_name_bn : '') || '',
-          father_name_en: headRow.father_name_en || (vmHead && vmHead.data ? vmHead.data.father_name_en : '') || '',
-          mother_name_bn: headRow.mother_name_bn || (vmHead && vmHead.data ? vmHead.data.mother_name_bn : '') || '',
-          mother_name_en: headRow.mother_name_en || (vmHead && vmHead.data ? vmHead.data.mother_name_en : '') || ''
+          doc_type: headVerType === 2 ? 'BRN' : 'NID',
+          gender: headGenVal === 1 ? 'Male' : 'Female',
+          gender_id: headGenVal === 1 ? 1 : 2,
+          nid: String(d.verification_number || d.nid || (row0IsHead ? r0Id : '') || '').trim(),
+          dob: d.date_of_birth || d.dob || (row0IsHead ? (row0.date_of_birth || row0.dob) : '') || '',
+          name_bn: d.name_bn || (row0IsHead ? row0.name_bn : '') || '',
+          name_en: d.name_en || (row0IsHead ? row0.name_en : '') || '',
+          father_name_bn: d.father_name_bn || (row0IsHead ? row0.father_name_bn : '') || '',
+          father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
+          mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
+          mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || ''
         };
 
-        const family_members = rawMembers.slice(1).map((m) => {
-          const gVal = m.gender_id || m.gender;
-          return {
-            relation: m.relation || 'Son',
-            relationship_id: m.relationship_id || m.relation_id || 160,
-            gender: Number(gVal) === 2 ? 'Female' : 'Male',
-            doc_type: Number(m.verification_type) === 2 ? 'BRN' : 'NID',
-            nid_or_brn: m.verification_number || m.brn_id || m.nid || '',
-            dob: m.date_of_birth || m.dob || '',
-            name_bn: m.name_bn || '',
-            name_en: m.name_en || '',
-            father_name_bn: m.father_name_bn || '',
-            mother_name_bn: m.mother_name_bn || '',
-            is_disabled: m.is_member_disabled || 0
-          };
-        });
+        const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
+        const family_members = memberSlice
+          .filter(isRowPopulated)
+          .map(parseMemberRow);
+
+        if (!head.nid && !head.name_bn && !head.name_en && family_members.length === 0) {
+          window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
+            detail: { success: false, message: 'Web form is currently empty — nothing to pull.' }
+          }));
+          return;
+        }
 
         window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
           detail: { success: true, payload: { head, family_members } }
         }));
       } catch (err) {
-        window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', { detail: { success: false, message: err.message } }));
+        window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
+          detail: { success: false, message: err.message }
+        }));
       }
     });
 
+    // --- LIVE REVERSE SYNC: Web Page -> Extension ---
     function extractCurrentFormState() {
       const { vmHead, vmMembers } = getVueNodes();
-      let headData = null;
-      let membersData = [];
+      const d = (vmHead && vmHead.data) ? vmHead.data : {};
+      const rawMembers = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
 
-      const rawMembers = vmMembers && Array.isArray(vmMembers.familyMembers) ? vmMembers.familyMembers : [];
-      if (rawMembers.length > 0) {
-        const h = rawMembers[0];
-        const hGen = h.gender_id || h.gender;
-        headData = {
-          doc_type: Number(h.verification_type) === 2 ? 'BRN' : 'NID',
-          gender: hGen ? (Number(hGen) === 1 ? 'Male' : 'Female') : '',
-          nid: h.verification_number || h.nid || h.brn_id || '', 
-          dob: h.date_of_birth || h.dob || '',
-          name_bn: h.name_bn || '', name_en: h.name_en || '',
-          father_name_bn: h.father_name_bn || '', father_name_en: h.father_name_en || '',
-          mother_name_bn: h.mother_name_bn || '', mother_name_en: h.mother_name_en || ''
-        };
-        membersData = rawMembers.slice(1).map(m => {
-          const mGen = m.gender_id || m.gender;
-          return {
-            relationship_id: m.relationship_id || m.relation_id, 
-            gender: mGen ? (Number(mGen) === 2 ? 'Female' : 'Male') : '',
-            doc_type: Number(m.verification_type) === 2 ? 'BRN' : 'NID',
-            nid_or_brn: m.verification_number || m.brn_id || m.nid || '', 
-            dob: m.date_of_birth || m.dob || '',
-            name_bn: m.name_bn || '', name_en: m.name_en || '', 
-            father_name_bn: m.father_name_bn || '', mother_name_bn: m.mother_name_bn || ''
-          };
-        });
-      } else if (vmHead && vmHead.data) {
-        const hGen = vmHead.data.gender_id || vmHead.data.gender;
-        headData = {
-          doc_type: Number(vmHead.data.verification_type) === 2 ? 'BRN' : 'NID',
-          gender: hGen ? (Number(hGen) === 1 ? 'Male' : 'Female') : '',
-          nid: vmHead.data.verification_number || vmHead.data.nid || '', 
-          dob: vmHead.data.date_of_birth || vmHead.data.dob || '',
-          name_bn: vmHead.data.name_bn || '', name_en: vmHead.data.name_en || '',
-          father_name_bn: vmHead.data.father_name_bn || '', father_name_en: vmHead.data.father_name_en || '',
-          mother_name_bn: vmHead.data.mother_name_bn || '', mother_name_en: vmHead.data.mother_name_en || ''
-        };
-      }
+      const row0 = rawMembers[0] || {};
+      const dId = String(d.verification_number || d.nid || '').trim();
+      const r0Id = String(row0.verification_number || row0.nid || row0.brn_id || '').trim();
+      const row0IsHead = Number(row0.relationship_id) === 185 || (dId && r0Id && dId === r0Id) || (!dId && rawMembers.length > 0 && !row0.relationship_id);
 
-      window.dispatchEvent(new CustomEvent('FC_PRO_FORM_CHANGED', { detail: { head: headData, members: membersData } }));
+      const headVerType = Number(d.verification_type || (row0IsHead ? row0.verification_type : 1) || 1);
+      const headGen = Number(d.gender_id || d.gender || (row0IsHead ? (row0.gender_id || row0.gender) : 2) || 2);
+
+      const headData = {
+        doc_type: headVerType === 2 ? 'BRN' : 'NID',
+        gender: headGen === 1 ? 'Male' : 'Female',
+        nid: String(d.verification_number || d.nid || (row0IsHead ? r0Id : '') || '').trim(),
+        dob: d.date_of_birth || d.dob || (row0IsHead ? (row0.date_of_birth || row0.dob) : '') || '',
+        name_bn: d.name_bn || (row0IsHead ? row0.name_bn : '') || '',
+        name_en: d.name_en || (row0IsHead ? row0.name_en : '') || '',
+        father_name_bn: d.father_name_bn || (row0IsHead ? row0.father_name_bn : '') || '',
+        father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
+        mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
+        mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || ''
+      };
+
+      const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
+      const membersData = memberSlice.filter(isRowPopulated).map(parseMemberRow);
+
+      window.dispatchEvent(new CustomEvent('FC_PRO_FORM_CHANGED', {
+        detail: { head: headData, members: membersData }
+      }));
     }
 
     let syncTimeout;

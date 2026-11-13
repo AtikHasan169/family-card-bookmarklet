@@ -38,6 +38,10 @@ const RELATION_ID_MAP = Object.fromEntries(
   RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id])
 );
 
+const ID_TO_RELATION_MAP = Object.fromEntries(
+  RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.id, r.value])
+);
+
 const RELATION_GENDER_MAP = Object.fromEntries(
   RELATION_OPTIONS.filter((r) => r.gender !== null).map((r) => [r.value, r.gender])
 );
@@ -760,10 +764,18 @@ INTELLIGENT DOCUMENT DETECTION ('doc_type'):
 - National ID Cards have headers like "জাতীয় পরিচয়পত্র", "National ID Card", "ID NO", or "NID No" (10, 13, or 17 digits). Set "doc_type": "NID".
 - BRN & DOB ACCURACY: Birth Certificates have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
 
+STRICT NAME EXTRACTION & CROSS-VERIFICATION RULES:
+1. NEVER READ FROM SIGNATURE:
+   - For the Primary Applicant ('head') and all other NID cards, extract 'name_bn' and 'name_en' ONLY from the printed "নাম:" (Name) and "Name:" text fields in the main body of the NID card.
+   - NEVER extract, guess, or copy the name from the handwritten signature ("স্বাক্ষর" / Signature) above the photo or at the bottom of the card.
+2. CROSS-CHECK HEAD (WIFE) WITH CHILDREN'S MOTHER'S NAME:
+   - Look at the uploaded documents for the children (in Section 2 or Section 1) and check the "মাতার নাম" (Mother's Name) and "পিতার নাম" (Father's Name) fields.
+   - Use the children's "মাতার নাম" (Mother's Name) to cross-verify which card in Section 1 belongs to the Mother/Wife ('head') and confirm her full legal name if the printed text on her own NID is blurry or partially obscured.
+
 CRITICAL ROLE & GENDER RULE:
-- The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE (Female, "gender": "Female"). 
-- Look at all uploaded ID cards in Section 1. Find the female cardholder (whose name starts with মোছাঃ, মোসাঃ, MST., or indicates a female name). She MUST be assigned as 'head' with "gender": "Female".
-- The Husband (whose name starts with মোঃ, MD., etc.) MUST be placed as the FIRST item in 'family_members' with relation "Husband" and "gender": "Male". Never assign a male as 'head'.
+- The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE / MOTHER (Female, "gender": "Female"). 
+- Look at all uploaded ID cards in Section 1. Find the female cardholder (verified via her printed Name field and cross-checked against the children's Mother's Name). She MUST be assigned as 'head' with "gender": "Female".
+- The Husband / Father (verified via his printed Name field and cross-checked against the children's Father's Name) MUST be placed as the FIRST item in 'family_members' with relation "Husband" and "gender": "Male". Never assign a male as 'head'.
 - For every family member, determine their "gender" ("Male" or "Female") from the card's Sex/লিঙ্গ field or their name/relationship (e.g., Son -> "Male", Daughter -> "Female").
 
 IMAGE TRACKING RULE:
@@ -794,7 +806,7 @@ JSON SCHEMA:
 }`;
 }
 
-function normalizeOutput(raw) {
+function normalizeOutput(raw, preserveOrder = false) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
   const cleanHeadId = toEnglishDigits(s(h.nid)).replace(/\s+/g, '');
@@ -820,6 +832,9 @@ function normalizeOutput(raw) {
 
   for (const m of members) {
     let rel = s(m?.relation);
+    if ((!rel || !RELATION_ID_MAP[rel]) && m?.relationship_id && ID_TO_RELATION_MAP[Number(m.relationship_id)]) {
+      rel = ID_TO_RELATION_MAP[Number(m.relationship_id)];
+    }
     if (!RELATION_ID_MAP[rel]) rel = 'Son';
 
     const cleanMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
@@ -827,7 +842,7 @@ function normalizeOutput(raw) {
 
     const entry = {
       relation: rel,
-      relationship_id: RELATION_ID_MAP[rel] || 263,
+      relationship_id: Number(m?.relationship_id) || RELATION_ID_MAP[rel] || 263,
       gender: memGender,
       gender_id: GENDER_ID_MAP[memGender] || 1,
       doc_type: inferDocType(cleanMemId, m?.doc_type),
@@ -840,6 +855,11 @@ function normalizeOutput(raw) {
       is_disabled: Number(m?.is_disabled) === 1 ? 1 : 0,
       source_images: Array.isArray(m?.source_images) ? m.source_images : []
     };
+
+    if (preserveOrder) {
+      deduped.push(entry);
+      continue;
+    }
 
     const key = entry.nid_or_brn || `${entry.name_en.toLowerCase()}|${entry.dob}`;
     if (key && seen.has(key)) {
@@ -857,12 +877,14 @@ function normalizeOutput(raw) {
     }
   }
 
-  deduped.sort((a, b) => {
-    if (a.relation === 'Husband' && b.relation !== 'Husband') return -1;
-    if (b.relation === 'Husband' && a.relation !== 'Husband') return 1;
-    if (a.dob && b.dob) return dobToSortable(a.dob).localeCompare(dobToSortable(b.dob));
-    return 0;
-  });
+  if (!preserveOrder) {
+    deduped.sort((a, b) => {
+      if (a.relation === 'Husband' && b.relation !== 'Husband') return -1;
+      if (b.relation === 'Husband' && a.relation !== 'Husband') return 1;
+      if (a.dob && b.dob) return dobToSortable(a.dob).localeCompare(dobToSortable(b.dob));
+      return 0;
+    });
+  }
 
   return { head, family_members: deduped };
 }
@@ -1162,10 +1184,10 @@ window.addEventListener('message', (e) => {
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
     if (res.success && res.payload) {
-      state.lastExtracted = normalizeOutput(res.payload);
+      state.lastExtracted = normalizeOutput(res.payload, true);
       renderExtractedCards(state.lastExtracted);
       $('autofillBtn').disabled = false;
-      setStatus('Successfully pulled draft from form!', 'ok');
+      setStatus(`Successfully pulled Head + ${state.lastExtracted.family_members.length} member(s) from form!`, 'ok');
     } else {
       setStatus(res.message || 'Could not pull draft data.', 'err');
     }
