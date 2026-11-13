@@ -496,7 +496,10 @@ function drawCropCanvas() {
   if (!rawImage || !canvas) return;
   const ctx = canvas.getContext('2d');
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Fill canvas with solid black to prevent JPEG transparency glitches
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
   
