@@ -47,6 +47,7 @@ const RELATION_GENDER_MAP = Object.fromEntries(
 );
 
 const GENDER_ID_MAP = { Male: 1, Female: 2, Other: 3 };
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const HEAD_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
@@ -168,15 +169,30 @@ function toEnglishDigits(str) {
 function normalizeDob(rawDob) {
   let s = toEnglishDigits(rawDob).trim();
   if (!s) return '';
+  
+  // Strip out any existing [Mon] brackets so it can be re-parsed if edited manually
+  s = s.replace(/\[.*?\]/g, ''); 
+  
+  let dd, mm, yyyy;
   const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (dmy) return `${dmy[1].padStart(2, '0')}-${dmy[2].padStart(2, '0')}-${dmy[3]}`;
-  const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-  if (ymd) return `${ymd[3].padStart(2, '0')}-${ymd[2].padStart(2, '0')}-${ymd[1]}`;
-  return s;
+  if (dmy) { dd = dmy[1]; mm = dmy[2]; yyyy = dmy[3]; }
+  else {
+    const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (ymd) { yyyy = ymd[1]; mm = ymd[2]; dd = ymd[3]; }
+    else return s;
+  }
+  
+  dd = dd.padStart(2, '0');
+  mm = mm.padStart(2, '0');
+  const mIndex = parseInt(mm, 10) - 1;
+  const monStr = (mIndex >= 0 && mIndex < 12) ? `[${MONTH_NAMES[mIndex]}]` : '';
+  
+  return `${dd}-${mm}${monStr}-${yyyy}`;
 }
 
 function dobToSortable(dobStr) {
-  const dmy = String(dobStr || '').match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  const clean = String(dobStr || '').replace(/\[.*?\]/g, '');
+  const dmy = clean.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   return dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : String(dobStr || '');
 }
 

@@ -106,9 +106,10 @@
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
         const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
 
+        const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
         setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
         setReactive(vm.data, 'verification_number', cleanHeadId);
-        setReactive(vm.data, 'date_of_birth', h.dob);
+        setReactive(vm.data, 'date_of_birth', headCleanDob);
         setReactive(vm.data, 'gender', headGenderId);
         setReactive(vm.data, 'gender_id', headGenderId);
         setReactive(vm.data, 'name_bn', h.name_bn);
@@ -153,8 +154,9 @@
             setReactive(row, 'verification_number', cleanId);
           }
 
-          setReactive(row, 'dob', m.dob);
-          setReactive(row, 'date_of_birth', m.dob);
+          const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '');
+          setReactive(row, 'dob', memCleanDob);
+          setReactive(row, 'date_of_birth', memCleanDob);
           setReactive(row, 'name_bn', m.name_bn);
           setReactive(row, 'name_en', m.name_en);
           setReactive(row, 'father_name_bn', m.father_name_bn);
