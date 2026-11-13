@@ -50,9 +50,10 @@ const MEMBER_FIELDS = [
 const state = { head: [], other: [], lastExtracted: null };
 let nextId = 1, activeCategory = null;
 
-// Native Canvas Crop & Zoom state variables (Raw Pixel Scaling restored)
+// Native Canvas Crop, Zoom & Rotate state variables
 let rawImage = null;
 let zoomLevel = 1;
+let rotationAngle = 0; // Tracks rotation (0, 90, 180, 270)
 let panX = 0;
 let panY = 0;
 let isDragging = false;
@@ -164,7 +165,6 @@ function setupImageViewerModal() {
   modal.id = 'fcViewerModal';
   modal.style.cssText = 'display:none; position:fixed; inset:0; z-index:99999; background:rgba(9,9,11,0.92); backdrop-filter:blur(6px); flex-direction:column; align-items:center; justify-content:flex-start; padding:12px; overflow-y:auto;';
   
-  // Notice the image container no longer has a fixed 36vh height or black box
   modal.innerHTML = `
     <div style="position:relative; width:100%; max-width:540px; display:flex; flex-direction:column; gap:10px; margin:auto;">
       <div style="display:flex; justify-content:space-between; align-items:center; color:#fff; padding:2px 4px;">
@@ -448,6 +448,7 @@ function openCamera(category) {
           canvas.width = 900;
           canvas.height = 600;
           zoomLevel = 1;
+          rotationAngle = 0; // Reset rotation for new image
           panX = 0;
           panY = 0;
           $('zoomRange').value = 1;
@@ -473,6 +474,7 @@ function openCropForImage(item) {
     canvas.width = 900;
     canvas.height = 600;
     zoomLevel = 1;
+    rotationAngle = 0; // Reset rotation for new image
     panX = 0;
     panY = 0;
     $('zoomRange').value = 1;
@@ -493,6 +495,7 @@ function drawCropCanvas() {
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
   ctx.scale(zoomLevel, zoomLevel); // Direct pixel-based scaling
+  ctx.rotate((rotationAngle * Math.PI) / 180); // Apply rotation
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
 }
@@ -500,6 +503,14 @@ function drawCropCanvas() {
 function setupNativeCropper() {
   const canvas = $('cropCanvas');
   const zoomRange = $('zoomRange');
+  const rotateBtn = $('rotateCropBtn');
+
+  if (rotateBtn) {
+    rotateBtn.addEventListener('click', () => {
+      rotationAngle = (rotationAngle + 90) % 360;
+      drawCropCanvas();
+    });
+  }
 
   if (zoomRange) {
     zoomRange.addEventListener('input', (e) => {
