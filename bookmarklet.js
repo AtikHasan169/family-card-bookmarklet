@@ -156,6 +156,34 @@
       }));
     }
   });
+
+  // --- LIVE REVERSE SYNC: Web Page -> Extension ---
+  function extractCurrentFormState() {
+    const { vmHead, vmMembers } = getVueNodes();
+    let headData = null;
+    if (vmHead && vmHead.data) {
+       headData = {
+         nid: vmHead.data.verification_number, dob: vmHead.data.date_of_birth,
+         name_bn: vmHead.data.name_bn, name_en: vmHead.data.name_en,
+         father_name_bn: vmHead.data.father_name_bn, father_name_en: vmHead.data.father_name_en,
+         mother_name_bn: vmHead.data.mother_name_bn, mother_name_en: vmHead.data.mother_name_en
+       };
+    }
+    let membersData = [];
+    if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
+       membersData = vmMembers.familyMembers.map(m => ({
+         relationship_id: m.relationship_id, nid_or_brn: m.verification_number, dob: m.date_of_birth,
+         name_bn: m.name_bn, name_en: m.name_en, father_name_bn: m.father_name_bn, mother_name_bn: m.mother_name_bn
+       }));
+    }
+    window.dispatchEvent(new CustomEvent('FC_PRO_FORM_CHANGED', { detail: { head: headData, members: membersData } }));
+  }
+
+  // Detect when you type on the main web page (with a 600ms delay so it doesn't spam)
+  let syncTimeout;
+  document.body.addEventListener('input', () => { clearTimeout(syncTimeout); syncTimeout = setTimeout(extractCurrentFormState, 600); });
+  document.body.addEventListener('change', () => { clearTimeout(syncTimeout); syncTimeout = setTimeout(extractCurrentFormState, 600); });
+
 })();
 
   // Evaluate physical device screen width to bypass legacy site zooming
@@ -258,5 +286,9 @@
 
   window.addEventListener('FC_PRO_AUTOFILL_RESULT', (event) => {
     sendToPanel({ action: 'FC_AUTOFILL_RESPONSE', detail: event.detail });
+  });
+
+  window.addEventListener('FC_PRO_FORM_CHANGED', (event) => {
+    sendToPanel({ action: 'FC_SYNC_FROM_WEB', payload: event.detail });
   });
 })();

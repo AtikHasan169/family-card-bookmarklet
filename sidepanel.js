@@ -1021,4 +1021,63 @@ window.addEventListener('message', (e) => {
       txt.textContent = 'Page Connected';
     }
   }
+  
+  if (e.data.action === 'FC_SYNC_FROM_WEB') {
+    syncFromWebToPanel(e.data.payload);
+  }
 });
+
+// --- LIVE REVERSE SYNC: Process Web Edits ---
+function syncFromWebToPanel(webData) {
+  if (!state.lastExtracted) return; 
+  
+  let changed = false;
+  const s = (v) => (v == null ? '' : String(v).trim());
+  
+  if (webData.head && state.lastExtracted.head) {
+    const h = state.lastExtracted.head;
+    const w = webData.head;
+    if (s(w.nid) && h.nid !== s(w.nid)) { h.nid = s(w.nid); changed = true; }
+    if (s(w.dob) && h.dob !== s(w.dob)) { h.dob = s(w.dob); changed = true; }
+    if (s(w.name_bn) && h.name_bn !== s(w.name_bn)) { h.name_bn = s(w.name_bn); changed = true; }
+    if (s(w.name_en) && h.name_en !== s(w.name_en)) { h.name_en = s(w.name_en); changed = true; }
+    if (s(w.father_name_bn) && h.father_name_bn !== s(w.father_name_bn)) { h.father_name_bn = s(w.father_name_bn); changed = true; }
+    if (s(w.father_name_en) && h.father_name_en !== s(w.father_name_en)) { h.father_name_en = s(w.father_name_en); changed = true; }
+    if (s(w.mother_name_bn) && h.mother_name_bn !== s(w.mother_name_bn)) { h.mother_name_bn = s(w.mother_name_bn); changed = true; }
+    if (s(w.mother_name_en) && h.mother_name_en !== s(w.mother_name_en)) { h.mother_name_en = s(w.mother_name_en); changed = true; }
+  }
+
+  if (webData.members && Array.isArray(state.lastExtracted.family_members)) {
+    state.lastExtracted.family_members.forEach((m, idx) => {
+      const w = webData.members[idx + 1]; // Offset by +1 because Head is placed at index 0 on the web
+      if (w) {
+         if (s(w.nid_or_brn) && m.nid_or_brn !== s(w.nid_or_brn)) { m.nid_or_brn = s(w.nid_or_brn); changed = true; }
+         if (s(w.dob) && m.dob !== s(w.dob)) { m.dob = s(w.dob); changed = true; }
+         if (s(w.name_bn) && m.name_bn !== s(w.name_bn)) { m.name_bn = s(w.name_bn); changed = true; }
+         if (s(w.name_en) && m.name_en !== s(w.name_en)) { m.name_en = s(w.name_en); changed = true; }
+         if (s(w.father_name_bn) && m.father_name_bn !== s(w.father_name_bn)) { m.father_name_bn = s(w.father_name_bn); changed = true; }
+         if (s(w.mother_name_bn) && m.mother_name_bn !== s(w.mother_name_bn)) { m.mother_name_bn = s(w.mother_name_bn); changed = true; }
+         
+         if (w.relationship_id && m.relationship_id != w.relationship_id) {
+            m.relationship_id = w.relationship_id;
+            const foundRel = RELATION_OPTIONS.find(r => r.id == w.relationship_id);
+            if (foundRel) m.relation = foundRel.value;
+            changed = true;
+         }
+      }
+    });
+  }
+
+  if (changed) {
+    syncJsonOutput(); // Always update raw JSON immediately
+    
+    // Only redraw the visual cards if you aren't currently clicking/typing inside one of them
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
+       // Silently synced!
+    } else {
+       renderExtractedCards(state.lastExtracted); 
+    }
+    
+    setStatus('Webpage edits automatically synced to panel.', 'ok');
+  }
+}
