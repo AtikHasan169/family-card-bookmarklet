@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v2.8-live';
+const CURRENT_VERSION_TAG = 'v2.9-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null },
@@ -133,6 +133,7 @@ function addImage(category, base64, name) {
     base64,
     name: name || 'Card.jpg',
     relation: 'Auto',
+    docType: 'NID', // Default document type tracking
     boundRef: null
   });
   renderPreviews(category);
@@ -161,7 +162,6 @@ function setupUpdateChecker() {
     updateBtn.disabled = true;
 
     try {
-      // Force absolute cache-busting with a unique query param and reload instruction
       const cleanUrl = location.href.split('?')[0];
       const checkUrl = `${cleanUrl}?update_check=${Date.now()}`;
       
@@ -200,7 +200,6 @@ function setupUpdateChecker() {
     }
   });
 }
-
 
 function setupImageViewerModal() {
   if ($('fcViewerModal')) return;
@@ -413,6 +412,21 @@ function renderPreviews(category) {
     moves.append(left, right);
     bar.append(label, moves);
     card.appendChild(bar);
+
+    // Document Type Selector (NID vs BRN) per uploaded card
+    const typeSelect = document.createElement('select');
+    typeSelect.style.cssText = 'width:100%; padding:3px 6px; font-size:11px; background:#09090b; color:#fff; border:1px solid #3f3f46; border-radius:4px; margin-top:4px; cursor:pointer;';
+    ['NID (National ID)', 'BRN (Birth Certificate)'].forEach((lbl, i) => {
+      const opt = document.createElement('option');
+      opt.value = i === 0 ? 'NID' : 'BRN';
+      opt.textContent = lbl;
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.value = item.docType || 'NID';
+    typeSelect.addEventListener('change', (e) => { 
+      item.docType = e.target.value; 
+    });
+    card.appendChild(typeSelect);
 
     if (category === 'other') {
       const select = document.createElement('select');
@@ -635,11 +649,11 @@ function buildPrompt() {
   const allowedRelations = RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => `"${r.value}"`).join(', ');
   return `Extract Bangladeshi NID and Birth Registration (BRN) data from the provided images into strict JSON.
 
-DOCUMENT ANALYSIS & IDENTIFIER RULES:
-- Inspect each uploaded card image to automatically determine if it is a National ID (NID) or a Birth Certificate (BRN).
-- If it is an NID, extract the 10, 13, or 17-digit number into 'nid' (or 'nid_or_brn').
-- If it is a Birth Certificate, extract the Birth Registration Number into 'nid_or_brn'. 
-- BRN & DOB ACCURACY: Birth Certificates often have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
+DOCUMENT TYPE & IDENTIFIER RULES:
+- Each image is explicitly tagged with a Document Type ("Document Type: NID" or "Document Type: BRN").
+- If Document Type is NID, extract the National ID number into 'nid' (or 'nid_or_brn').
+- If Document Type is BRN, extract the Birth Registration Number into 'nid_or_brn'. Never put a birth registration number into an NID field.
+- BRN & DOB ACCURACY: Birth Certificates have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
 
 CRITICAL ROLE RULE:
 - The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE (Female). 
@@ -969,14 +983,14 @@ async function runExtraction() {
       { text: '\n--- SECTION 1: HEAD (WIFE) & HUSBAND ---\n' }
     ];
     state.head.forEach((item, i) => {
-      parts.push({ text: `Image Tag: S1_${i + 1} (Section 1 Image #${i + 1}):` });
+      parts.push({ text: `Image Tag: S1_${i + 1} | Document Type: ${item.docType || 'NID'} (Section 1 Image #${i + 1}):` });
       parts.push({ inlineData: { mimeType: 'image/jpeg', data: item.base64 } });
     });
 
     if (state.other.length) {
       parts.push({ text: '\n--- SECTION 2: OTHER FAMILY MEMBERS ---\n' });
       state.other.forEach((item, i) => {
-        parts.push({ text: `Image Tag: S2_${i + 1} | Specified Relation: ${item.relation} (Section 2 Image #${i + 1}):` });
+        parts.push({ text: `Image Tag: S2_${i + 1} | Document Type: ${item.docType || 'NID'} | Specified Relation: ${item.relation} (Section 2 Image #${i + 1}):` });
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: item.base64 } });
       });
     }
