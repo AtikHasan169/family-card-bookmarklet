@@ -96,6 +96,16 @@ document.addEventListener('DOMContentLoaded', () => {
   $('apiKeyInput').value = savedKey;
   $('modelSelect').value = savedModel;
 
+  // Auto-save API key instantly as you type/paste it
+  $('apiKeyInput').addEventListener('input', (e) => {
+    localStorage.setItem(STORAGE_KEY, e.target.value.trim());
+  });
+
+  // Auto-save model selection instantly on change
+  $('modelSelect').addEventListener('change', (e) => {
+    localStorage.setItem(STORAGE_MODEL, e.target.value);
+  });
+
   if (!savedKey) $('settingsDrawer').classList.add('open');
 
   const navRight = document.querySelector('.nav-right');
