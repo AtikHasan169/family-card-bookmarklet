@@ -52,6 +52,7 @@ let nextId = 1, activeCategory = null;
 
 // Native Canvas Crop, Zoom & Rotate state variables
 let rawImage = null;
+let baseScale = 1; // Auto-fit scale to prevent giant pixel blowouts
 let zoomLevel = 1;
 let rotationAngle = 0; // Tracks rotation (0, 90, 180, 270)
 let panX = 0;
@@ -447,6 +448,8 @@ function openCamera(category) {
           const canvas = $('cropCanvas');
           canvas.width = 900;
           canvas.height = 600;
+          // Auto-Fit calculation restored to prevent giant pixel blowouts
+          baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
           zoomLevel = 1;
           rotationAngle = 0; // Reset rotation for new image
           panX = 0;
@@ -473,6 +476,8 @@ function openCropForImage(item) {
     const canvas = $('cropCanvas');
     canvas.width = 900;
     canvas.height = 600;
+    // Auto-Fit calculation restored to prevent giant pixel blowouts
+    baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
     zoomLevel = 1;
     rotationAngle = 0; // Reset rotation for new image
     panX = 0;
@@ -494,8 +499,12 @@ function drawCropCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
-  ctx.scale(zoomLevel, zoomLevel); // Direct pixel-based scaling
+  
+  // Apply Auto-Fit Scale multiplied by User Zoom Level
+  const totalScale = baseScale * zoomLevel;
+  ctx.scale(totalScale, totalScale); 
   ctx.rotate((rotationAngle * Math.PI) / 180); // Apply rotation
+  
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
 }
@@ -606,8 +615,9 @@ IMAGE TRACKING RULE:
 - In both "head" and each object in "family_members", include a "source_images" array listing all image tags (e.g. ["S1_1"]) that belong to that person (including front and back sides if multiple photos belong to the same person).
 
 BRN & DOB ACCURACY RULES:
-- For Birth Registration Certificates (BRN): Look specifically for the field labeled "জন্ম তারিখ" (Date of Birth) near the top/middle of the certificate.
-- Do NOT confuse the DOB with "নিবন্ধন তারিখ" (Registration Date) or "প্রদানের তারিখ" (Issue Date). Always extract the actual birth date.
+- Birth Certificates (BRN) often have 3 dates. YOU MUST EXTRACT ONLY THE DATE OF BIRTH (জন্ম তারিখ).
+- Ignore "নিবন্ধন তারিখ" (Date of Registration) and Ignore "প্রদানের তারিখ" (Date of Issuance). They are the wrong dates. 
+- Look for the word "Sex" or "লিঙ্গ", the exact Date of Birth is usually right next to it or right above it.
 - Format all 'dob' values strictly as YYYY-MM-DD using English digits (0-9).
 
 EXTRACTION RULES:
@@ -891,14 +901,15 @@ function renderExtractedCards(data) {
 
   if (data.head) {
     container.appendChild(
-      buildEditableCard('Household Head (Wife)', 'Primary', data.head, HEAD_FIELDS, false)
+      buildEditableCard('Member #1 — Head (Wife)', 'Primary Applicant', data.head, HEAD_FIELDS, false)
     );
   }
 
   if (Array.isArray(data.family_members)) {
     data.family_members.forEach((m, i) => {
       container.appendChild(
-        buildEditableCard(`Member #${i + 1} — ${m.relation}`, `ID: ${m.relationship_id}`, m, MEMBER_FIELDS, true, i)
+        // Shift member visual numbering by +2 because Head is #1
+        buildEditableCard(`Member #${i + 2} — ${m.relation}`, `ID: ${m.relationship_id}`, m, MEMBER_FIELDS, true, i + 1)
       );
     });
   }

@@ -45,148 +45,126 @@
     'Other Relative': 263
   };
 
-  function findFormVueInstance() {
-    const appRoot = document.getElementById('application');
-    if (appRoot && appRoot.__vue__ && (appRoot.__vue__.data || appRoot.__vue__.familyMembers)) {
-      return appRoot.__vue__;
-    }
-
-    const allNodes = document.querySelectorAll('*');
-    for (const node of allNodes) {
+  function getVueNodes() {
+    let vmHead = null, vmMembers = null;
+    document.querySelectorAll('*').forEach(node => {
       const v = node.__vue__;
-      if (v && v.data && Array.isArray(v.familyMembers)) {
-        return v;
+      if (v) {
+        if (v.data && typeof v.data === 'object' && ('name_bn' in v.data || 'name_en' in v.data || 'verification_number' in v.data)) vmHead = v;
+        if (Array.isArray(v.familyMembers)) vmMembers = v;
       }
-    }
-    for (const node of allNodes) {
-      const v = node.__vue__;
-      if (v && (v.data || v.familyMembers)) {
-        return v;
-      }
-    }
-    return null;
+    });
+    return { vmHead, vmMembers };
   }
 
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
     const payload = event.detail;
     if (!payload) return;
 
-    const vm = findFormVueInstance();
-    if (!vm) {
-      window.dispatchEvent(
-        new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: {
-            success: false,
-            message: 'Vue application form not detected on this page.'
-          }
-        })
-      );
+    const { vmHead, vmMembers } = getVueNodes();
+    if (!vmHead && !vmMembers) {
+      window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+        detail: { success: false, message: 'Vue application form not detected on this page.' }
+      }));
       return;
     }
 
     try {
-      // 1. Expand all Vuetify accordion panels
-      if ('panel' in vm) {
-        vm.panel = [0, 1, 2, 3, 4, 5, 6, 7];
-      }
-
-      const setReactive = (targetObj, key, val) => {
+      const setReactive = (vmTarget, targetObj, key, val) => {
         if (!targetObj || val === undefined || val === null || val === '') return;
-        if (typeof vm.$set === 'function') {
-          vm.$set(targetObj, key, val);
-        } else {
-          targetObj[key] = val;
-        }
+        if (vmTarget && typeof vmTarget.$set === 'function') vmTarget.$set(targetObj, key, val);
+        else targetObj[key] = val;
       };
 
-      // 2. Populate Primary Applicant (Wife / Head)
-      if (payload.head && vm.data) {
+      if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+
+      // 1. Populate Primary Applicant (Head) in main form
+      if (payload.head && vmHead && vmHead.data) {
         const h = payload.head;
-        setReactive(vm.data, 'verification_type', 1); // 1 = NID
-        setReactive(vm.data, 'verification_number', h.nid);
-        setReactive(vm.data, 'date_of_birth', h.dob);
-        setReactive(vm.data, 'name_bn', h.name_bn);
-        setReactive(vm.data, 'name_en', h.name_en);
-        setReactive(vm.data, 'father_name_bn', h.father_name_bn);
-        setReactive(vm.data, 'father_name_en', h.father_name_en);
-        setReactive(vm.data, 'mother_name_bn', h.mother_name_bn);
-        setReactive(vm.data, 'mother_name_en', h.mother_name_en);
+        setReactive(vmHead, vmHead.data, 'verification_type', 1);
+        setReactive(vmHead, vmHead.data, 'verification_number', h.nid);
+        setReactive(vmHead, vmHead.data, 'date_of_birth', h.dob);
+        setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
+        setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
+        setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
+        setReactive(vmHead, vmHead.data, 'father_name_en', h.father_name_en);
+        setReactive(vmHead, vmHead.data, 'mother_name_bn', h.mother_name_bn);
+        setReactive(vmHead, vmHead.data, 'mother_name_en', h.mother_name_en);
       }
 
-      // 3. Populate Family Members (Husband + Children)
-      const members = Array.isArray(payload.family_members) ? payload.family_members : [];
-      if (members.length > 0 && Array.isArray(vm.familyMembers)) {
-        while (vm.familyMembers.length < members.length) {
-          if (typeof vm.addFamilyMember === 'function') {
-            vm.addFamilyMember();
-          } else {
-            break;
-          }
+      // 2. Combine Head as Member 1, then the rest of the family
+      const fullFamilyList = [];
+      if (payload.head) {
+        fullFamilyList.push({
+          ...payload.head,
+          relation: 'Head/Self',
+          nid_or_brn: payload.head.nid,
+          relationship_id: 185 // ID for Self/Head
+        });
+      }
+      if (Array.isArray(payload.family_members)) {
+        fullFamilyList.push(...payload.family_members);
+      }
+
+      // 3. Inject into the Member Array (সদস্য page)
+      if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
+        while (vmMembers.familyMembers.length < fullFamilyList.length) {
+          if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
+          else vmMembers.familyMembers.push({});
         }
 
-        // Wait a tick for Vue DOM update
         await new Promise((r) => setTimeout(r, 150));
 
-        members.forEach((m, idx) => {
-          const row = vm.familyMembers[idx];
+        fullFamilyList.forEach((m, idx) => {
+          const row = vmMembers.familyMembers[idx];
           if (!row) return;
 
           const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
           const isNID = cleanId.length === 10 || cleanId.length === 13 || cleanId.length === 17;
 
-          setReactive(row, 'verification_type', isNID ? 1 : 2); // 1 = NID, 2 = BRN
+          setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
           if (isNID) {
-            setReactive(row, 'nid', cleanId);
-            setReactive(row, 'verification_number', cleanId);
+            setReactive(vmMembers, row, 'nid', cleanId);
+            setReactive(vmMembers, row, 'verification_number', cleanId);
           } else {
-            setReactive(row, 'brn_id', cleanId);
-            setReactive(row, 'verification_number', cleanId);
+            setReactive(vmMembers, row, 'brn_id', cleanId);
+            setReactive(vmMembers, row, 'verification_number', cleanId);
           }
 
-          setReactive(row, 'dob', m.dob);
-          setReactive(row, 'date_of_birth', m.dob);
-          setReactive(row, 'name_bn', m.name_bn);
-          setReactive(row, 'name_en', m.name_en);
-          setReactive(row, 'father_name_bn', m.father_name_bn);
-          setReactive(row, 'mother_name_bn', m.mother_name_bn);
+          setReactive(vmMembers, row, 'dob', m.dob);
+          setReactive(vmMembers, row, 'date_of_birth', m.dob);
+          setReactive(vmMembers, row, 'name_bn', m.name_bn);
+          setReactive(vmMembers, row, 'name_en', m.name_en);
+          setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
+          setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
 
-          const relId = m.relationship_id || RELATION_ID_MAP[m.relation] || 160;
-          setReactive(row, 'relationship_id', relId);
-          setReactive(row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
-          setReactive(row, 'is_gov_job_holder', 0);
+          const relId = m.relationship_id || RELATION_ID_MAP[m.relation] || null;
+          if (relId) setReactive(vmMembers, row, 'relationship_id', relId);
+          setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
+          setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
           if (m.relation === 'Husband' && !row.estimate_annual_income) {
-            setReactive(row, 'estimate_annual_income', 60000);
+            setReactive(vmMembers, row, 'estimate_annual_income', 60000);
           }
         });
 
-        // Update total household size (Head + Members)
-        if (vm.data) {
-          setReactive(vm.data, 'house_size', members.length + 1);
+        // Update total household size
+        if (vmHead && vmHead.data) {
+          setReactive(vmHead, vmHead.data, 'house_size', fullFamilyList.length);
         }
       }
 
-      if (typeof vm.$forceUpdate === 'function') {
-        vm.$forceUpdate();
-      }
+      if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
+      if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
-      window.dispatchEvent(
-        new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: {
-            success: true,
-            message: `Auto-filled Head + ${members.length} family member(s) into form.`
-          }
-        })
-      );
+      window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+        detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) into form.` }
+      }));
     } catch (err) {
-      window.dispatchEvent(
-        new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: {
-            success: false,
-            message: `Autofill error: ${err.message}`
-          }
-        })
-      );
+      window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+        detail: { success: false, message: `Autofill error: ${err.message}` }
+      }));
     }
   });
 })();
