@@ -454,11 +454,36 @@
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
 
+  // --- FIRST-PARTY STORAGE BRIDGE ---
+  const STORAGE_KEY = 'fc_pro_api_key';
+  const STORAGE_MODEL = 'fc_pro_model';
+
   window.addEventListener('message', (event) => {
     if (event.source !== iframe.contentWindow || event.origin !== panelOrigin || !event.data) return;
     const data = event.data;
+
+    if (data.action === 'FC_GET_API_KEY') {
+      sendToPanel({
+        action: 'FC_API_KEY_DATA',
+        apiKey: localStorage.getItem(STORAGE_KEY) || '',
+        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
+      });
+    }
+
+    if (data.action === 'FC_SAVE_API_KEY') {
+      if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
+      if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
+    }
+
     if (data.action === 'FC_CLOSE_SHEET') closeSheet();
-    if (data.action === 'FC_CHECK_STATUS') sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+    if (data.action === 'FC_CHECK_STATUS') {
+      sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
+      sendToPanel({
+        action: 'FC_API_KEY_DATA',
+        apiKey: localStorage.getItem(STORAGE_KEY) || '',
+        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
+      });
+    }
     if (data.action === 'FILL_VUE_FORM') {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL', { detail: data.payload }));
     }
@@ -466,6 +491,7 @@
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
     }
   });
+
 
   window.addEventListener('FC_PRO_AUTOFILL_RESULT', (event) => {
     sendToPanel({ action: 'FC_AUTOFILL_RESPONSE', detail: event.detail });

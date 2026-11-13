@@ -91,12 +91,20 @@ let viewerZoom = 1;
 const $ = (id) => document.getElementById(id);
 
 document.addEventListener('DOMContentLoaded', () => {
-  const savedKey = localStorage.getItem(STORAGE_KEY) || '';
-  const savedModel = localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash';
-  $('apiKeyInput').value = savedKey;
-  $('modelSelect').value = savedModel;
+  // Request saved API key from parent (bhata.gov.bd first-party storage)
+  window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
 
-  if (!savedKey) $('settingsDrawer').classList.add('open');
+  // Auto-save API key instantly as you type/paste it to parent
+  $('apiKeyInput').addEventListener('input', (e) => {
+    window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey: e.target.value.trim() }, '*');
+  });
+
+  // Auto-save model selection instantly to parent
+  $('modelSelect').addEventListener('change', (e) => {
+    window.parent.postMessage({ action: 'FC_SAVE_API_KEY', model: e.target.value }, '*');
+  });
+
+  if (!localStorage.getItem(STORAGE_KEY)) $('settingsDrawer').classList.add('open');
 
   // Auto-save API key instantly on input
   $('apiKeyInput').addEventListener('input', (e) => {
@@ -1183,6 +1191,19 @@ $('clearAllBtn').addEventListener('click', () => {
 
 window.addEventListener('message', (e) => {
   if (e.source !== window.parent || !e.data) return;
+
+  if (e.data.action === 'FC_API_KEY_DATA') {
+    if (e.data.apiKey && !$('apiKeyInput').value) {
+      $('apiKeyInput').value = e.data.apiKey;
+    }
+    if (e.data.model) {
+      $('modelSelect').value = e.data.model;
+    }
+    if (!e.data.apiKey) {
+      $('settingsDrawer').classList.add('open');
+    }
+  }
+
   if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
     setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
   }
