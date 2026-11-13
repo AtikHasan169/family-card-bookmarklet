@@ -58,7 +58,7 @@ let panY = 0;
 let isDragging = false;
 let startX = 0;
 let startY = 0;
-let activeCropItem = null; // Tracks if we are cropping an existing image
+let activeCropItem = null; // Tracks if we are cropping an existing image from the viewer
 
 // Viewer modal zoom state
 let viewerZoom = 1;
@@ -163,12 +163,14 @@ function setupImageViewerModal() {
   const modal = document.createElement('div');
   modal.id = 'fcViewerModal';
   modal.style.cssText = 'display:none; position:fixed; inset:0; z-index:99999; background:rgba(9,9,11,0.92); backdrop-filter:blur(6px); flex-direction:column; align-items:center; justify-content:flex-start; padding:12px; overflow-y:auto;';
+  
+  // Notice the image container no longer has a fixed 36vh height or black box
   modal.innerHTML = `
     <div style="position:relative; width:100%; max-width:540px; display:flex; flex-direction:column; gap:10px; margin:auto;">
       <div style="display:flex; justify-content:space-between; align-items:center; color:#fff; padding:2px 4px;">
-        <span id="fcViewerTitle" style="font-weight:700; font-size:13.5px; color:#38bdf8;">Card Inspector &amp; Live Editor</span>
+        <span id="fcViewerTitle" style="font-weight:700; font-size:13.5px; color:#38bdf8;">Card Inspector</span>
         <div style="display:flex; gap:6px; align-items:center;">
-          <button type="button" id="fcCropImgBtn" style="background:#059669; color:#fff; border:none; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer; margin-right:4px;">Crop / Zoom</button>
+          <button type="button" id="fcCropImgBtn" style="background:#059669; color:#fff; border:none; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer; margin-right:4px;">Crop</button>
           <button type="button" id="fcZoomOutBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 9px; font-size:12px; font-weight:700; cursor:pointer;">−</button>
           <button type="button" id="fcZoomResetBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer;">100%</button>
           <button type="button" id="fcZoomInBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 9px; font-size:12px; font-weight:700; cursor:pointer;">+</button>
@@ -176,8 +178,8 @@ function setupImageViewerModal() {
         </div>
       </div>
 
-      <div style="width:100%; height:36vh; background:#000; border-radius:8px; border:1px solid #334155; overflow:auto; display:flex; align-items:center; justify-content:center;">
-        <img id="fcViewerImg" style="max-width:100%; max-height:100%; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
+      <div style="width:100%; max-height:42vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
+        <img id="fcViewerImg" style="max-width:100%; max-height:42vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
       </div>
 
       <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:46vh; overflow-y:auto;"></div>
@@ -209,6 +211,7 @@ function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
 
+  // Bind the crop button to this specific image
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
 
   viewerZoom = 1;
@@ -227,8 +230,8 @@ function showImageViewer(item) {
 
     if (targetObj) {
       $('fcViewerTitle').textContent = isHead
-        ? 'Primary Applicant (Wife) — Live Edit'
-        : `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Live Edit`;
+        ? 'Primary Applicant (Wife) — Edit'
+        : `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Edit`;
 
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
       const headerNote = document.createElement('div');
@@ -261,7 +264,7 @@ function showImageViewer(item) {
           inputEl.addEventListener('change', (e) => {
             targetObj.relation = e.target.value;
             targetObj.relationship_id = RELATION_ID_MAP[e.target.value] || 263;
-            $('fcViewerTitle').textContent = `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Live Edit`;
+            $('fcViewerTitle').textContent = `Member #${item.boundRef.index + 1} (${targetObj.relation}) — Edit`;
             syncJsonOutput();
           });
         } else {
@@ -428,9 +431,10 @@ async function handleUpload(e, category) {
   setStatus('Images added successfully.', 'ok');
 }
 
-// Native Camera trigger opening custom Zoom/Crop modal (Raw Pixel-Scale Restored)
+// Native Camera trigger opening custom Zoom/Crop modal
 function openCamera(category) {
   activeCategory = category;
+  activeCropItem = null;
   const input = $('cameraInput');
   input.value = '';
   input.onchange = (e) => {
@@ -456,6 +460,28 @@ function openCamera(category) {
     }
   };
   input.click();
+}
+
+// Opens the crop screen for an existing image in the viewer
+function openCropForImage(item) {
+  activeCropItem = item;
+  activeCategory = null; 
+  
+  rawImage = new Image();
+  rawImage.onload = () => {
+    const canvas = $('cropCanvas');
+    canvas.width = 900;
+    canvas.height = 600;
+    zoomLevel = 1;
+    panX = 0;
+    panY = 0;
+    $('zoomRange').value = 1;
+    
+    $('fcViewerModal').style.display = 'none'; // Hide viewer
+    $('cropModal').classList.add('open');
+    drawCropCanvas();
+  };
+  rawImage.src = `data:image/jpeg;base64,${item.base64}`;
 }
 
 function drawCropCanvas() {
@@ -532,6 +558,7 @@ function setupNativeCropper() {
     $('cropModal').classList.remove('open');
     
     if (activeCropItem) {
+      // We cropped an existing image
       activeCropItem.base64 = b64;
       renderPreviews('head');
       renderPreviews('other');
@@ -540,39 +567,18 @@ function setupNativeCropper() {
       if ($('fcViewerModal').style.display !== 'none') {
         $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
       } else {
-        $('fcViewerModal').style.display = 'flex'; // Reopen viewer
+        $('fcViewerModal').style.display = 'flex';
       }
       
       setStatus('Image cropped and updated.', 'ok');
       activeCropItem = null;
     } else if (activeCategory) {
+      // We cropped a brand new camera capture
       addImage(activeCategory, b64, 'Live_Zoom_Crop.jpg');
       setStatus('Cropped & zoomed photo added.', 'ok');
       activeCategory = null;
     }
   });
-}
-
-function openCropForImage(item) {
-  activeCropItem = item;
-  activeCategory = null; // Prevent adding as new image
-  
-  rawImage = new Image();
-  rawImage.onload = () => {
-    const canvas = $('cropCanvas');
-    canvas.width = 900;
-    canvas.height = 600;
-    baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
-    zoomLevel = 1;
-    panX = 0;
-    panY = 0;
-    $('zoomRange').value = 1;
-    
-    $('fcViewerModal').style.display = 'none'; // Hide viewer while cropping
-    $('cropModal').classList.add('open');
-    drawCropCanvas();
-  };
-  rawImage.src = `data:image/jpeg;base64,${item.base64}`;
 }
 
 function buildPrompt() {
