@@ -77,7 +77,7 @@
 
       try {
         const setReactive = (vmTarget, targetObj, key, val) => {
-          if (!targetObj || val === undefined || val === null || val === '') return;
+          if (!targetObj || val === undefined || val === null) return;
           if (vmTarget && typeof vmTarget.$set === 'function') vmTarget.$set(targetObj, key, val);
           else targetObj[key] = val;
         };
@@ -113,7 +113,7 @@
           fullFamilyList.push(...payload.family_members);
         }
 
-        // 3. Inject into the Member Array (সদস্য page)
+        // 3. Inject into the Member Array with strict field isolation (NID vs BRN)
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
             if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
@@ -130,11 +130,15 @@
             const isNID = cleanId.length === 10 || cleanId.length === 13 || cleanId.length === 17;
 
             setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
+            
+            // Explicitly clear opposing fields to prevent data bleeding/mixing
             if (isNID) {
               setReactive(vmMembers, row, 'nid', cleanId);
+              setReactive(vmMembers, row, 'brn_id', '');
               setReactive(vmMembers, row, 'verification_number', cleanId);
             } else {
               setReactive(vmMembers, row, 'brn_id', cleanId);
+              setReactive(vmMembers, row, 'nid', '');
               setReactive(vmMembers, row, 'verification_number', cleanId);
             }
 
@@ -198,7 +202,7 @@
         const family_members = rawMembers.slice(1).map((m) => ({
           relation: m.relation || 'Son',
           relationship_id: m.relationship_id || 160,
-          nid_or_brn: m.verification_number || m.nid || m.brn_id || '',
+          nid_or_brn: m.verification_number || m.brn_id || m.nid || '',
           dob: m.date_of_birth || m.dob || '',
           name_bn: m.name_bn || '',
           name_en: m.name_en || '',
@@ -225,21 +229,26 @@
       if (rawMembers.length > 0) {
         const h = rawMembers[0];
         headData = {
-          nid: h.verification_number || h.nid, dob: h.date_of_birth || h.dob,
-          name_bn: h.name_bn, name_en: h.name_en,
-          father_name_bn: h.father_name_bn, father_name_en: h.father_name_en,
-          mother_name_bn: h.mother_name_bn, mother_name_en: h.mother_name_en
+          nid: h.verification_number || h.nid || '', 
+          dob: h.date_of_birth || h.dob || '',
+          name_bn: h.name_bn || '', name_en: h.name_en || '',
+          father_name_bn: h.father_name_bn || '', father_name_en: h.father_name_en || '',
+          mother_name_bn: h.mother_name_bn || '', mother_name_en: h.mother_name_en || ''
         };
         membersData = rawMembers.slice(1).map(m => ({
-          relationship_id: m.relationship_id, nid_or_brn: m.verification_number || m.nid || m.brn_id, dob: m.date_of_birth || m.dob,
-          name_bn: m.name_bn, name_en: m.name_en, father_name_bn: m.father_name_bn, mother_name_bn: m.mother_name_bn
+          relationship_id: m.relationship_id, 
+          nid_or_brn: m.verification_number || m.brn_id || m.nid || '', 
+          dob: m.date_of_birth || m.dob || '',
+          name_bn: m.name_bn || '', name_en: m.name_en || '', 
+          father_name_bn: m.father_name_bn || '', mother_name_bn: m.mother_name_bn || ''
         }));
       } else if (vmHead && vmHead.data) {
         headData = {
-          nid: vmHead.data.verification_number, dob: vmHead.data.date_of_birth,
-          name_bn: vmHead.data.name_bn, name_en: vmHead.data.name_en,
-          father_name_bn: vmHead.data.father_name_bn, father_name_en: vmHead.data.father_name_en,
-          mother_name_bn: vmHead.data.mother_name_bn, mother_name_en: vmHead.data.mother_name_en
+          nid: vmHead.data.verification_number || vmHead.data.nid || '', 
+          dob: vmHead.data.date_of_birth || vmHead.data.dob || '',
+          name_bn: vmHead.data.name_bn || '', name_en: vmHead.data.name_en || '',
+          father_name_bn: vmHead.data.father_name_bn || '', father_name_en: vmHead.data.father_name_en || '',
+          mother_name_bn: vmHead.data.mother_name_bn || '', mother_name_en: vmHead.data.mother_name_en || ''
         };
       }
 
