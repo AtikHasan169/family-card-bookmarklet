@@ -15,6 +15,19 @@
     alert('Could not determine the hosted Family Card Pro URL.');
     return;
   }
+
+  // Auto-restore sidebar state if it was open before refresh (Fixed position)
+  if (localStorage.getItem('fc_session_open') === 'true') {
+     setTimeout(() => {
+       const existingRoot = document.getElementById('fc-floating-root');
+       if (!existingRoot) {
+          const reInject = document.createElement('script');
+          reInject.src = currentScript.src;
+          document.documentElement.appendChild(reInject);
+       }
+     }, 500);
+  }
+
   const baseUrl = new URL('.', currentScript.src).href;
   const panelUrl = new URL('sidepanel.html', baseUrl).href;
   const panelOrigin = new URL(panelUrl).origin;
@@ -261,7 +274,7 @@
     .fc-mobile-view #fc-drawer-iframe {
       bottom: 0; left: 0; right: 0; width: 100%; height: 90vh; max-height: 850px;
       border-top-left-radius: 20px; border-top-right-radius: 20px;
-      box-shadow: 0 -10px 40px rgba(0,0,0,0.3);
+      box-shadow: -10px 0 40px rgba(0,0,0,0.3);
       transform: translateY(105%);
     }
     .fc-mobile-view #fc-drawer-iframe.open { transform: translateY(0); }
@@ -309,11 +322,14 @@
     if (isOpen) {
       iframe.classList.add('open');
       trigger.classList.add('active');
+      localStorage.setItem('fc_session_open', 'true');
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
     } else {
       closeSheet();
+      localStorage.removeItem('fc_session_open');
     }
   }
+
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
 
