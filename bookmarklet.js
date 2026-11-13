@@ -10,13 +10,14 @@
     return;
   }
 
+  // 1. Capture currentScript FIRST before any conditional checks or logic
   const currentScript = document.currentScript;
   if (!currentScript || !currentScript.src) {
     alert('Could not determine the hosted Family Card Pro URL.');
     return;
   }
 
-  // Auto-restore sidebar state if it was open before refresh (Fixed position)
+  // 2. Auto-restore sidebar state across page refreshes
   if (localStorage.getItem('fc_session_open') === 'true') {
      setTimeout(() => {
        const existingRoot = document.getElementById('fc-floating-root');
