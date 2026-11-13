@@ -33,11 +33,14 @@
   const panelUrl = new URL('sidepanel.html', baseUrl).href;
   const panelOrigin = new URL(panelUrl).origin;
 
+  // --- LIVE DEV UPDATE: Destroy old instance and force-fetch latest code ---
   const existingRoot = document.getElementById('fc-floating-root');
-  if (existingRoot && typeof existingRoot.__fcToggle === 'function') {
-    existingRoot.__fcToggle();
-    return;
+  if (existingRoot) {
+    existingRoot.remove(); // Completely wipe old UI from DOM
   }
+  
+  // Also clear any old injected styles or scripts from previous runs
+  document.querySelectorAll('script[src*="sidepanel"], style[data-fc]').forEach(el => el.remove());
 
   /* Bundled Vue form injector (adapted from inject.js). */
   (function () {
