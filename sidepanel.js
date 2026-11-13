@@ -1081,3 +1081,12 @@ function syncFromWebToPanel(webData) {
     setStatus('Webpage edits automatically synced to panel.', 'ok');
   }
 }
+
+// --- PULL DRAFT FROM WEB FORM ---
+$('pullFromWebBtn').addEventListener('click', () => {
+  window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
+  setStatus('Pulling drafted data from web form...', 'loading');
+});
+
+// Inside message listener switch:
+// (Add this case into your window.addEventListener('message', (e) => { ... }))

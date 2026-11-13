@@ -157,6 +157,52 @@
     }
   });
 
+  window.addEventListener('FC_PRO_PULL_REQUEST', () => {
+    const { vmHead, vmMembers } = getVueNodes();
+    if (!vmHead && !vmMembers) {
+      window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', { detail: { success: false, message: 'No active form instance found.' } }));
+      return;
+    }
+
+    try {
+      let head = null;
+      if (vmHead && vmHead.data) {
+        head = {
+          nid: vmHead.data.verification_number || vmHead.data.nid || '',
+          dob: vmHead.data.date_of_birth || vmHead.data.dob || '',
+          name_bn: vmHead.data.name_bn || '',
+          name_en: vmHead.data.name_en || '',
+          father_name_bn: vmHead.data.father_name_bn || '',
+          father_name_en: vmHead.data.father_name_en || '',
+          mother_name_bn: vmHead.data.mother_name_bn || '',
+          mother_name_en: vmHead.data.mother_name_en || ''
+        };
+      }
+
+      let family_members = [];
+      if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
+        family_members = vmMembers.familyMembers.map((m) => ({
+          relation: m.relation || 'Son',
+          relationship_id: m.relationship_id || 160,
+          nid_or_brn: m.verification_number || m.nid || m.brn_id || '',
+          dob: m.date_of_birth || m.dob || '',
+          name_bn: m.name_bn || '',
+          name_en: m.name_en || '',
+          father_name_bn: m.father_name_bn || '',
+          mother_name_bn: m.mother_name_bn || '',
+          is_disabled: m.is_member_disabled || 0
+        }));
+      }
+
+      window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
+        detail: { success: true, payload: { head, family_members } }
+      }));
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', { detail: { success: false, message: err.message } }));
+    }
+  });
+
+
   // --- LIVE REVERSE SYNC: Web Page -> Extension ---
   function extractCurrentFormState() {
     const { vmHead, vmMembers } = getVueNodes();
@@ -282,10 +328,17 @@
     if (data.action === 'FILL_VUE_FORM') {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL', { detail: data.payload }));
     }
+    if (data.action === 'FC_PULL_DRAFT') {
+      window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
+    }
   });
 
   window.addEventListener('FC_PRO_AUTOFILL_RESULT', (event) => {
     sendToPanel({ action: 'FC_AUTOFILL_RESPONSE', detail: event.detail });
+  });
+
+  window.addEventListener('FC_PRO_PULL_RESULT', (event) => {
+    sendToPanel({ action: 'FC_PULL_RESPONSE', detail: event.detail });
   });
 
   window.addEventListener('FC_PRO_FORM_CHANGED', (event) => {
