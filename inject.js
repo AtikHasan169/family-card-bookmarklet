@@ -63,7 +63,7 @@
       }
 
       const setReactive = (targetObj, key, val) => {
-        if (!targetObj || val === undefined || val === null || val === '') return;
+        if (!targetObj || val === undefined || val === null) return;
         if (typeof vm.$set === 'function') {
           vm.$set(targetObj, key, val);
         } else {
@@ -85,7 +85,7 @@
         setReactive(vm.data, 'mother_name_en', h.mother_name_en);
       }
 
-      // 3. Populate Family Members (Husband + Children)
+      // 3. Populate Family Members (Husband + Children) with strict field isolation
       const members = Array.isArray(payload.family_members) ? payload.family_members : [];
       if (members.length > 0 && Array.isArray(vm.familyMembers)) {
         while (vm.familyMembers.length < members.length) {
@@ -107,11 +107,15 @@
           const isNID = cleanId.length === 10 || cleanId.length === 13 || cleanId.length === 17;
 
           setReactive(row, 'verification_type', isNID ? 1 : 2); // 1 = NID, 2 = BRN
+          
+          // Explicitly clear opposing fields to prevent data bleeding
           if (isNID) {
             setReactive(row, 'nid', cleanId);
+            setReactive(row, 'brn_id', '');
             setReactive(row, 'verification_number', cleanId);
           } else {
             setReactive(row, 'brn_id', cleanId);
+            setReactive(row, 'nid', '');
             setReactive(row, 'verification_number', cleanId);
           }
 

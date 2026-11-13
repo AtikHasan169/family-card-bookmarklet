@@ -34,7 +34,6 @@
 
     * { box-sizing: border-box; }
 
-    /* Flexbox App Layout: Locks Body, Prevents Iframe Scroll Bugs */
     html {
       height: 100%;
       overscroll-behavior-y: none;
@@ -53,12 +52,11 @@
       flex-direction: column;
       height: 100vh;
       width: 100vw;
-      overflow: hidden; /* Locks the main body from scrolling */
+      overflow: hidden;
     }
 
-    /* Fixed Top Navbar */
     .navbar {
-      flex-shrink: 0; /* Never collapse */
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -82,12 +80,11 @@
     .icon-btn { width: 30px; height: 30px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-sub); display: grid; place-items: center; cursor: pointer; transition: all var(--transition); }
     .icon-btn:hover { background: var(--surface-muted); color: var(--text-main); }
 
-    /* Scrollable Middle Container */
     .container {
-      flex: 1; /* Takes up all remaining space */
-      overflow-y: auto; /* ONLY this section scrolls */
-      -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
-      padding: 14px 14px 90px 14px; /* 90px bottom padding clears the absolute dock */
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 14px 14px 90px 14px;
       max-width: 640px;
       margin: 0 auto;
       width: 100%;
@@ -96,7 +93,6 @@
       gap: 12px;
     }
 
-    /* Fixed Bottom Action Dock */
     .bottom-dock {
       position: absolute;
       bottom: 0;
@@ -112,7 +108,6 @@
       gap: 8px;
     }
 
-    /* Collapsible Settings Drawer */
     .settings-drawer { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-sm); }
     .settings-drawer.open { display: block; }
     .form-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
@@ -121,7 +116,6 @@
     input[type="text"], input[type="password"], select { width: 100%; padding: 7px 10px; font: inherit; font-size: 12.5px; color: var(--text-main); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--transition), box-shadow var(--transition); }
     input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 
-    /* Cards */
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-xs); transition: border-color var(--transition); }
     .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .card-title-group { display: flex; align-items: center; gap: 8px; }
@@ -129,7 +123,6 @@
     .card-title { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
     .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--text-sub); border: 1px solid var(--border); }
 
-    /* Upload Zone & Buttons */
     .upload-Zone { border: 1px dashed var(--border-hover); background: #fcfcfd; border-radius: var(--radius-md); padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border-radius: var(--radius-sm); font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--text-main); cursor: pointer; transition: all var(--transition); box-shadow: var(--shadow-xs); }
     .btn:hover:not(:disabled) { background: var(--surface-muted); border-color: var(--border-hover); }
@@ -144,7 +137,6 @@
     .btn-emerald:hover:not(:disabled) { background: #047857; }
     .btn-xs { padding: 4px 8px; font-size: 11px; }
 
-    /* Thumbnail Grid */
     .thumb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
     .thumb-grid:empty { display: none; }
     .thumb-item { position: relative; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 6px; display: flex; flex-direction: column; gap: 5px; }
@@ -157,7 +149,6 @@
     .thumb-remove { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 4px; border: none; background: rgba(9, 9, 11, 0.75); color: #fff; font-size: 13px; line-height: 20px; padding: 0; cursor: pointer; }
     .thumb-remove:hover { background: var(--danger); }
 
-    /* Status Banner */
     .status-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--radius-md); font-size: 12px; font-weight: 500; background: var(--surface); border: 1px solid var(--border); color: var(--text-sub); }
     .status-banner.ok { background: var(--emerald-soft); border-color: #a7f3d0; color: var(--emerald); }
     .status-banner.err { background: var(--danger-soft); border-color: #fecaca; color: var(--danger); }
@@ -165,7 +156,6 @@
     .status-banner.loading .spinner { display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Extracted Data Cards */
     .results-wrap { display: none; flex-direction: column; gap: 10px; }
     .results-wrap.visible { display: flex; }
     .record-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-xs); }
@@ -175,11 +165,9 @@
     .record-row { display: grid; grid-template-columns: 110px 1fr; align-items: center; border-bottom: 1px solid #f1f5f9; padding: 5px 10px; gap: 8px; }
     .record-row:last-child { border-bottom: none; }
     .row-key { font-size: 11px; font-weight: 500; color: var(--text-muted); }
-    .row-val { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-radius: 5px; font-size: 12.5px; font-weight: 550; color: var(--text-main); cursor: pointer; border: 1px solid transparent; transition: all 120ms ease; word-break: break-word; }
 
     pre { background: #09090b; color: #e4e4e7; padding: 12px; border-radius: var(--radius-md); font-size: 11.5px; overflow-x: auto; margin: 8px 0 0; }
 
-    /* Native Canvas Crop Modal */
     .modal { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(9, 9, 11, 0.92); flex-direction: column; padding: 12px; }
     .modal.open { display: flex; }
     .crop-container { flex: 1; width: 100%; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; }
@@ -189,7 +177,6 @@
 </head>
 <body>
 
-  <!-- Fixed Top Navigation -->
   <nav class="navbar">
     <div class="brand">
       <div class="brand-logo">FC</div>
@@ -213,9 +200,7 @@
     </div>
   </nav>
 
-  <!-- Scrollable Middle Section -->
   <main class="container">
-    <!-- Collapsible API Settings Drawer -->
     <section class="settings-drawer" id="settingsDrawer">
       <div class="form-grid">
         <div>
@@ -238,7 +223,6 @@
       </div>
     </section>
 
-    <!-- Section 1: Head & Husband -->
     <section class="card">
       <div class="card-head">
         <div class="card-title-group">
@@ -258,7 +242,6 @@
       <div class="thumb-grid" id="headPreviews"></div>
     </section>
 
-    <!-- Section 2: Other Family Members -->
     <section class="card">
       <div class="card-head">
         <div class="card-title-group">
@@ -275,16 +258,13 @@
       <div class="thumb-grid" id="otherPreviews"></div>
     </section>
 
-    <!-- Hidden Native File Input for Live Camera Capture -->
     <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
 
-    <!-- Status Indicator -->
     <div class="status-banner" id="statusBanner">
       <span class="spinner"></span>
       <span id="statusText">Ready — add NID or BRN images to extract.</span>
     </div>
 
-    <!-- Extracted Output & Click-to-Copy Cards -->
     <section class="results-wrap" id="resultsWrap">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted Records (Click to copy)</span>
@@ -303,13 +283,11 @@
     </section>
   </main>
 
-  <!-- Fixed Bottom Action Dock -->
   <footer class="bottom-dock">
     <button type="button" class="btn btn-accent" id="extractBtn">1. Extract with AI</button>
     <button type="button" class="btn btn-emerald" id="autofillBtn" disabled>2. Auto-Fill Form</button>
   </footer>
 
-  <!-- Native Canvas Crop & Zoom Modal -->
   <div class="modal" id="cropModal">
     <h3 style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Rotate &amp; Zoom Image</h3>
     <div class="crop-container">

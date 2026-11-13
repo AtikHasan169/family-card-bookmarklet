@@ -2,6 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
+const CURRENT_VERSION_TAG = 'v2.8-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null },
@@ -33,7 +34,7 @@ const HEAD_FIELDS = [
   { key: 'father_name_en', label: 'Father (EN)' },
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'mother_name_en', label: 'Mother (EN)' },
-  { key: 'nid', label: 'NID' },
+  { key: 'nid', label: 'NID / BRN' },
   { key: 'dob', label: 'DOB (YYYY-MM-DD)' }
 ];
 
@@ -50,7 +51,6 @@ const MEMBER_FIELDS = [
 const state = { head: [], other: [], lastExtracted: null };
 let nextId = 1, activeCategory = null;
 
-// Native Canvas Crop, Zoom & Rotate state variables
 let rawImage = null;
 let baseScale = 1; 
 let zoomLevel = 1;
@@ -61,8 +61,6 @@ let isDragging = false;
 let startX = 0;
 let startY = 0;
 let activeCropItem = null; 
-
-// Viewer modal zoom state
 let viewerZoom = 1;
 
 const $ = (id) => document.getElementById(id);
@@ -90,6 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupNativeCropper();
   setupImageViewerModal();
+  setupUpdateChecker();
 
   window.parent.postMessage({ action: 'FC_CHECK_STATUS' }, '*');
 });
@@ -150,6 +149,39 @@ function moveImage(category, idx, dir) {
   if (target < 0 || target >= list.length) return;
   [list[idx], list[target]] = [list[target], list[idx]];
   renderPreviews(category);
+}
+
+function setupUpdateChecker() {
+  const updateBtn = $('updateCheckBtn');
+  if (!updateBtn) return;
+
+  updateBtn.addEventListener('click', async () => {
+    const originalText = updateBtn.textContent;
+    updateBtn.textContent = 'Checking...';
+    updateBtn.disabled = true;
+
+    try {
+      const checkUrl = location.href.split('?')[0] + '?_=' + Date.now();
+      const res = await fetch(checkUrl, { cache: 'no-store' });
+      if (res.ok) {
+        setStatus(`Family Card Pro is Up to Date (${CURRENT_VERSION_TAG})!`, 'ok');
+        updateBtn.textContent = 'Up to Date ✓';
+        setTimeout(() => {
+          updateBtn.textContent = originalText;
+          updateBtn.disabled = false;
+        }, 2500);
+      } else {
+        throw new Error('Host error');
+      }
+    } catch (err) {
+      setStatus('Update check failed. Check connection.', 'err');
+      updateBtn.textContent = 'Error';
+      setTimeout(() => {
+        updateBtn.textContent = originalText;
+        updateBtn.disabled = false;
+      }, 2500);
+    }
+  });
 }
 
 function setupImageViewerModal() {
@@ -478,7 +510,6 @@ function drawCropCanvas() {
   if (!rawImage || !canvas) return;
   const ctx = canvas.getContext('2d');
 
-  // Fill canvas with solid black to prevent JPEG transparency glitches on rotation
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
@@ -586,6 +617,12 @@ function buildPrompt() {
   const allowedRelations = RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => `"${r.value}"`).join(', ');
   return `Extract Bangladeshi NID and Birth Registration (BRN) data from the provided images into strict JSON.
 
+DOCUMENT ANALYSIS & IDENTIFIER RULES:
+- Inspect each uploaded card image to automatically determine if it is a National ID (NID) or a Birth Certificate (BRN).
+- If it is an NID, extract the 10, 13, or 17-digit number into 'nid' (or 'nid_or_brn').
+- If it is a Birth Certificate, extract the Birth Registration Number into 'nid_or_brn'. 
+- BRN & DOB ACCURACY: Birth Certificates often have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
+
 CRITICAL ROLE RULE:
 - The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE (Female). 
 - Look at all uploaded ID cards in Section 1. Find the female cardholder (whose name starts with মোছাঃ, মোসাঃ, MST., or indicates a female name). She MUST be assigned as 'head'.
@@ -593,25 +630,17 @@ CRITICAL ROLE RULE:
 
 IMAGE TRACKING RULE:
 - Each image is labeled with an ID tag like "S1_1", "S1_2", "S2_1", etc.
-- In both "head" and each object in "family_members", include a "source_images" array listing all image tags (e.g. ["S1_1"]) that belong to that person (including front and back sides if multiple photos belong to the same person).
-
-BRN & DOB ACCURACY RULES:
-- Birth Certificates (BRN) often have 3 dates. YOU MUST EXTRACT ONLY THE DATE OF BIRTH (জন্ম তারিখ).
-- Ignore "নিবন্ধন তারিখ" (Date of Registration) and Ignore "প্রদানের তারিখ" (Date of Issuance). They are the wrong dates. 
-- Look for the word "Sex" or "লিঙ্গ", the exact Date of Birth is usually right next to it or right above it.
-- Format all 'dob' values strictly as YYYY-MM-DD using English digits (0-9).
+- In both "head" and each object in "family_members", include a "source_images" array listing all image tags belonging to that person.
 
 EXTRACTION RULES:
 1. PRIMARY APPLICANT (WIFE = 'head'):
-   - Extract her name_bn, name_en, father_name_bn, father_name_en, mother_name_bn, mother_name_en, nid, dob, and source_images.
-   - Transliterate Bangla parent names into English for father_name_en and mother_name_en.
+   - Extract name_bn, name_en, father_name_bn, father_name_en, mother_name_bn, mother_name_en, nid, dob, and source_images.
 2. HUSBAND & FAMILY MEMBERS (family_members):
-   - First member must be "Husband". Extract his name_bn, name_en, father_name_bn, mother_name_bn, nid_or_brn, dob, and source_images.
-   - For children, if relation is set to "Auto", determine "Son" or "Daughter" correctly based on the child's actual gender/name. Allowed relations: ${allowedRelations}.
-3. ENGLISH NAME & SALUTATION FORMATTING:
-   - Always transliterate "মোঃ" or "মো:" as "MD."
-   - Always transliterate "মোছাঃ" or "মোসাঃ" or "Mosha:" as "MST."
-   - All NID/BRN numbers and dates must use English digits (0-9).
+   - First member must be "Husband". Extract name_bn, name_en, father_name_bn, mother_name_bn, nid_or_brn, dob, and source_images.
+   - For children, choose correct relationship from: ${allowedRelations}.
+3. ENGLISH NAME & FORMATTING:
+   - Always transliterate "মোঃ" or "মো:" as "MD." and "মোছাঃ" or "মোসাঃ" as "MST."
+   - All numbers and dates must use English digits (0-9) in YYYY-MM-DD format.
 
 JSON SCHEMA:
 {
@@ -620,7 +649,7 @@ JSON SCHEMA:
   },
   "family_members": [
     {
-      "relation": "", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "", "is_disabled": 0, "source_images": ["S1_2"]
+      "relation": "Son", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "", "is_disabled": 0, "source_images": ["S1_2"]
     }
   ]
 }`;
@@ -929,7 +958,7 @@ async function runExtraction() {
     if (state.other.length) {
       parts.push({ text: '\n--- SECTION 2: OTHER FAMILY MEMBERS ---\n' });
       state.other.forEach((item, i) => {
-        parts.push({ text: `Image Tag: S2_${i + 1} (Section 2 Image #${i + 1} | Specified Relation: ${item.relation}):` });
+        parts.push({ text: `Image Tag: S2_${i + 1} | Specified Relation: ${item.relation} (Section 2 Image #${i + 1}):` });
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: item.base64 } });
       });
     }
@@ -970,7 +999,6 @@ function triggerFormAutofill() {
   setStatus('Sent auto-fill data to form!', 'ok');
 }
 
-// Event Listeners
 $('settingsToggleBtn').addEventListener('click', () => $('settingsDrawer').classList.toggle('open'));
 $('toggleKeyBtn').addEventListener('click', () => {
   const inp = $('apiKeyInput');
@@ -1039,7 +1067,6 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// --- LIVE REVERSE SYNC: Process Web Edits ---
 function syncFromWebToPanel(webData) {
   if (!state.lastExtracted) return; 
   
@@ -1061,7 +1088,7 @@ function syncFromWebToPanel(webData) {
 
   if (webData.members && Array.isArray(state.lastExtracted.family_members)) {
     state.lastExtracted.family_members.forEach((m, idx) => {
-      const w = webData.members[idx + 1]; // Offset by +1 because Head is placed at index 0 on the web
+      const w = webData.members[idx + 1];
       if (w) {
          if (s(w.nid_or_brn) && m.nid_or_brn !== s(w.nid_or_brn)) { m.nid_or_brn = s(w.nid_or_brn); changed = true; }
          if (s(w.dob) && m.dob !== s(w.dob)) { m.dob = s(w.dob); changed = true; }
@@ -1081,20 +1108,16 @@ function syncFromWebToPanel(webData) {
   }
 
   if (changed) {
-    syncJsonOutput(); // Always update raw JSON immediately
-    
-    // Only redraw the visual cards if you aren't currently clicking/typing inside one of them
+    syncJsonOutput();
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
-       // Silently synced!
+       // Silently synced
     } else {
        renderExtractedCards(state.lastExtracted); 
     }
-    
     setStatus('Webpage edits automatically synced to panel.', 'ok');
   }
 }
 
-// --- PULL DRAFT FROM WEB FORM ---
 $('pullFromWebBtn').addEventListener('click', () => {
   window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
   setStatus('Pulling drafted data from web form...', 'loading');
