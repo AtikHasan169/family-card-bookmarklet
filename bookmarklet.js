@@ -405,7 +405,7 @@
   iframe.id = 'fc-drawer-iframe';
   iframe.title = 'Family Card Pro';
   iframe.src = panelUrl;
-  iframe.setAttribute('allow', 'camera');
+  iframe.setAttribute('allow', 'camera; clipboard-read; clipboard-write');
 
   root.append(trigger, iframe);
   (document.body || document.documentElement).appendChild(root);
@@ -476,6 +476,22 @@
     }
     if (data.action === 'FC_PULL_DRAFT') {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
+    }
+    if (data.action === 'FC_COPY_TEXT') {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(data.text);
+        } else throw new Error('fallback');
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = data.text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
     }
   });
 

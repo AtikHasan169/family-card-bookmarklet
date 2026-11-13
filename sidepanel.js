@@ -70,6 +70,7 @@ const state = { head: [], other: [], lastExtracted: null };
 let nextId = 1, activeCategory = null, activeCropName = '';
 
 let rawImage = null;
+let extractionController = null;
 let baseScale = 1; 
 let zoomLevel = 1;
 let rotationAngle = 0; 
@@ -133,6 +134,9 @@ function initApp() {
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
 
   $('extractBtn').addEventListener('click', runExtraction);
+  $('stopExtractBtn').addEventListener('click', () => {
+    if (extractionController) extractionController.abort();
+  });
   $('autofillBtn').addEventListener('click', triggerFormAutofill);
 
   $('copyJsonBtn').addEventListener('click', async () => {
@@ -979,20 +983,28 @@ function normalizeOutput(raw, preserveOrder = false) {
 
 async function copyTextSafe(val) {
   try {
+    // 1. Try native iframe copy (works now that we added permissions)
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(val);
-    } else {
+      return;
+    }
+    throw new Error('Fallback to parent window');
+  } catch (err) {
+    // 2. Fallback: Ask the first-party parent window to copy it (100% reliable)
+    window.parent.postMessage({ action: 'FC_COPY_TEXT', text: val }, '*');
+    
+    // 3. Last resort fallback inside iframe
+    try {
       const textarea = document.createElement('textarea');
       textarea.value = val;
       textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
       document.body.appendChild(textarea);
       textarea.focus();
       textarea.select();
       document.execCommand('copy');
       document.body.removeChild(textarea);
-    }
-  } catch (err) {
-    prompt('Copy to clipboard:', val);
+    } catch (e) {}
   }
 }
 
@@ -1149,8 +1161,11 @@ async function runExtraction() {
 
   saveCredentialsEverywhere(apiKey, model);
 
-  $('extractBtn').disabled = true;
+  $('extractBtn').style.display = 'none';
+  $('stopExtractBtn').style.display = 'inline-flex';
   setStatus(`Extracting with ${model}...`, 'loading');
+
+  extractionController = new AbortController();
 
   try {
     const parts = [
@@ -1177,7 +1192,8 @@ async function runExtraction() {
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
-      })
+      }),
+      signal: extractionController.signal
     });
 
     const payload = await res.json().catch(() => ({}));
@@ -1194,9 +1210,15 @@ async function runExtraction() {
     $('autofillBtn').disabled = false;
     setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Verify empty red fields before Auto-Fill.`, 'ok');
   } catch (err) {
-    setStatus(`Error: ${err.message}`, 'err');
+    if (err.name === 'AbortError') {
+      setStatus('Extraction cancelled by user.', 'err');
+    } else {
+      setStatus(`Error: ${err.message}`, 'err');
+    }
   } finally {
-    $('extractBtn').disabled = false;
+    $('extractBtn').style.display = 'inline-flex';
+    $('stopExtractBtn').style.display = 'none';
+    extractionController = null;
   }
 }
 

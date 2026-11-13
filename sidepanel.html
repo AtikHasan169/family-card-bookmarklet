@@ -137,6 +137,8 @@
     .btn-accent:hover:not(:disabled) { background: #1d4ed8; }
     .btn-emerald { background: var(--emerald); color: #ffffff; border-color: var(--emerald); }
     .btn-emerald:hover:not(:disabled) { background: #047857; }
+    .btn-danger { background: var(--danger); color: #ffffff; border-color: var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: #b91c1c; }
     .btn-xs { padding: 4px 8px; font-size: 11px; }
 
     .thumb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
@@ -289,6 +291,7 @@
 
   <footer class="bottom-dock">
     <button type="button" class="btn btn-accent" id="extractBtn">1. Extract with AI</button>
+    <button type="button" class="btn btn-danger" id="stopExtractBtn" style="display:none;">Stop Extraction</button>
     <button type="button" class="btn btn-emerald" id="autofillBtn" disabled>2. Auto-Fill Form</button>
   </footer>
 
