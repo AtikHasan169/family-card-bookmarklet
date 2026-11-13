@@ -35,10 +35,9 @@
     * { box-sizing: border-box; }
 
     /* Fix Tablet/Mobile Iframe Scrolling */
-    html, body {
-      overscroll-behavior-y: none;
-      -webkit-overflow-scrolling: touch;
+    html {
       height: 100%;
+      overscroll-behavior-y: none;
     }
 
     body {
@@ -49,11 +48,12 @@
       font-size: 13px;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
-      padding-bottom: 120px; /* Increased padding to ensure bottom action bar doesn't cover last card */
+      padding-bottom: 120px;
       overflow-y: auto;
       overflow-x: hidden;
-      height: 100vh; /* Force body to fill viewport */
+      height: 100%;
       box-sizing: border-box;
+      -webkit-overflow-scrolling: touch;
     }
 
     /* Sticky Glass Header */
