@@ -30,7 +30,8 @@
   }
 
   const baseUrl = new URL('.', cleanScriptSrc).href;
-  const panelUrl = `${new URL('sidepanel.html', baseUrl).href}?t=${Date.now()}`;
+  const panelUrl = new URL('sidepanel.html', baseUrl).href;
+
   const panelOrigin = new URL(panelUrl).origin;
 
   const existingRoot = document.getElementById('fc-floating-root');
