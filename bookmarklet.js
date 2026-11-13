@@ -28,21 +28,10 @@
   /* Bundled Vue form injector (adapted from inject.js). */
 (function () {
   const RELATION_ID_MAP = {
-    'Father': 157,
-    'Mother': 158,
-    'Husband': 159,
-    'Son': 160,
-    'Daughter': 161,
-    'Brother': 162,
-    'Sister': 163,
-    'Father-in-law': 164,
-    'Mother-in-law': 165,
-    'Son-in-law': 181,
-    'Daughter-in-law': 182,
-    'Grandson': 183,
-    'Granddaughter': 184,
-    'Wife': 186,
-    'Other Relative': 263
+    'Father': 157, 'Mother': 158, 'Husband': 159, 'Son': 160, 'Daughter': 161,
+    'Brother': 162, 'Sister': 163, 'Father-in-law': 164, 'Mother-in-law': 165,
+    'Son-in-law': 181, 'Daughter-in-law': 182, 'Grandson': 183, 'Granddaughter': 184,
+    'Wife': 186, 'Other Relative': 263
   };
 
   function getVueNodes() {
@@ -169,7 +158,11 @@
   });
 })();
 
-  // Inject Responsive CSS for Mobile vs. Tablet/Desktop
+  // Evaluate physical device screen width to bypass legacy site zooming
+  const isMobileDevice = window.screen.width <= 768;
+  const viewClass = isMobileDevice ? 'fc-mobile-view' : 'fc-desktop-view';
+
+  // Inject Device-Specific CSS
   const style = document.createElement('style');
   style.textContent = `
     #fc-floating-root {
@@ -187,36 +180,35 @@
 
     #fc-drawer-iframe {
       position: fixed; background: #ffffff; border: none;
-      box-shadow: 0 -10px 40px rgba(0,0,0,0.3); pointer-events: auto;
+      pointer-events: auto;
       transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     /* Mobile View: Bottom Sheet */
-    @media (max-width: 768px) {
-      #fc-drawer-iframe {
-        bottom: 0; left: 0; right: 0; width: 100%; height: 90vh; max-height: 800px;
-        border-top-left-radius: 20px; border-top-right-radius: 20px;
-        transform: translateY(105%);
-      }
-      #fc-drawer-iframe.open { transform: translateY(0); }
+    .fc-mobile-view #fc-drawer-iframe {
+      bottom: 0; left: 0; right: 0; width: 100%; height: 90vh; max-height: 850px;
+      border-top-left-radius: 20px; border-top-right-radius: 20px;
+      box-shadow: 0 -10px 40px rgba(0,0,0,0.3);
+      transform: translateY(105%);
     }
+    .fc-mobile-view #fc-drawer-iframe.open { transform: translateY(0); }
 
-    /* Tablet & Desktop View: Floating Right-Side Panel */
-    @media (min-width: 769px) {
-      #fc-drawer-iframe {
-        bottom: 80px; right: 20px; width: 420px; height: calc(100vh - 110px); max-height: 850px;
-        border-radius: 16px;
-        transform: translateX(120%);
-        box-shadow: 0 10px 40px rgba(0,0,0,0.15);
-      }
-      #fc-drawer-iframe.open { transform: translateX(0); }
+    /* Tablet & Desktop View: True Right Sidebar */
+    .fc-desktop-view #fc-drawer-iframe {
+      top: 0; bottom: 0; right: 0; left: auto;
+      width: 420px; height: 100%; max-height: none;
+      border-radius: 0; border-left: 1px solid #cbd5e1;
+      box-shadow: -10px 0 40px rgba(0,0,0,0.15);
+      transform: translateX(105%);
     }
+    .fc-desktop-view #fc-drawer-iframe.open { transform: translateX(0); }
   `;
   document.head.appendChild(style);
 
   /* Floating launcher and cross-frame message bridge. */
   const root = document.createElement('div');
   root.id = 'fc-floating-root';
+  root.className = viewClass; // Force the correct physical view class
 
   const trigger = document.createElement('button');
   trigger.id = 'fc-trigger-btn';
