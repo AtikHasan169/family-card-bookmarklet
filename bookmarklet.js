@@ -206,7 +206,6 @@
         await new Promise(r => setTimeout(r, 80));
       }
 
-      // Find all mounted <v-date-picker> instances (including detached Vuetify menu portals)
       const allPickers = [];
       document.querySelectorAll('.v-picker, .v-date-picker-table, *').forEach(n => {
         if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
@@ -216,7 +215,6 @@
 
       const targetPicker = (menuVm && findAllVueComponents(menuVm, isDatePickerVm)[0]) || allPickers[targetIndex] || allPickers[allPickers.length - 1];
       if (targetPicker) {
-        // Set table month/year and emit official Vuetify date selection events
         if ('tableDate' in targetPicker) targetPicker.tableDate = `${parts.yyyy}-${parts.mm}`;
         if ('internalActivePicker' in targetPicker) targetPicker.internalActivePicker = 'DATE';
         targetPicker.$emit('input', parts.iso);
@@ -234,7 +232,6 @@
         }
       }
 
-      // Only directly set DOM input if it is NOT a readonly Vuetify menu activator
       if (targetWrap) {
         const inp = targetWrap.querySelector('input');
         if (inp && inp._flatpickr) {
@@ -255,8 +252,8 @@
       }
     }
 
-
-    function applySmartFormDefaults(vmHead, vmMembers, totalMembers, childrenUnder18, isEthnic = 0, areaTypeId = 1) {
+    // Injects Saved Area Presets (Village/Road, Ward No, Post Code, Area Type, Khudro Nrigosthi) & Member/Child Counts
+    function applySmartFormDefaults(vmHead, vmMembers, totalMembers, childrenUnder18, isEthnic = 0, areaTypeId = 1, defs = {}) {
       const setReactive = (vmTarget, targetObj, key, val) => {
         if (!targetObj || val === undefined || val === null) return;
         if (vmTarget && typeof vmTarget.$set === 'function') vmTarget.$set(targetObj, key, val);
@@ -264,6 +261,9 @@
       };
 
       const d = (vmHead && vmHead.data) ? vmHead.data : null;
+      const villageVal = String(defs?.village || '').trim();
+      const wardVal = String(defs?.ward_no || '').trim();
+      const postVal = String(defs?.post_code || '').trim();
 
       let resolvedAreaId = areaTypeId;
       if (vmHead && vmHead.$data && areaTypeId === 1) {
@@ -298,6 +298,22 @@
           if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, childrenUnder18);
         });
 
+        if (villageVal) {
+          ['village', 'village_bn', 'village_name', 'road', 'village_or_road', 'present_village', 'permanent_village', 'address', 'present_address'].forEach(k => {
+            if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, villageVal);
+          });
+        }
+        if (wardVal) {
+          ['ward', 'ward_no', 'ward_number', 'present_ward', 'permanent_ward'].forEach(k => {
+            if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, wardVal);
+          });
+        }
+        if (postVal) {
+          ['post_code', 'postal_code', 'postcode', 'zip_code', 'present_post_code', 'permanent_post_code'].forEach(k => {
+            if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, postVal);
+          });
+        }
+
         Object.keys(d).forEach(k => {
           const low = k.toLowerCase();
           if (/child|shishu|sishu|under_18/.test(low) && typeof d[k] !== 'object') {
@@ -312,6 +328,15 @@
           }
           if (/^(location_type|location_type_id|area_type|area_type_id|geo_type|present_location_type|permanent_location_type|residence_area_type)$/.test(low)) {
             setReactive(vmHead, d, k, resolvedAreaId);
+          }
+          if (villageVal && /village|road|gram|para|moholla/.test(low) && !/id$/.test(low) && typeof d[k] !== 'object') {
+            setReactive(vmHead, d, k, villageVal);
+          }
+          if (wardVal && /(^|_)(ward|word)(_no|_number)?$/.test(low) && typeof d[k] !== 'object') {
+            setReactive(vmHead, d, k, wardVal);
+          }
+          if (postVal && /post_code|postal_code|postcode|zip/.test(low) && typeof d[k] !== 'object') {
+            setReactive(vmHead, d, k, postVal);
           }
         });
       }
@@ -334,10 +359,20 @@
         const labelTxt = (labelEl ? labelEl.textContent : wrap.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
         const vInst = wrap.__vue__;
 
+        const fillEditableInput = (valToSet) => {
+          const inp = wrap.querySelector('input[type="text"], input[type="number"], input:not([type]), textarea');
+          if (!inp || inp.readOnly || inp.disabled) return;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (nativeSetter) nativeSetter.call(inp, String(valToSet));
+          else inp.value = String(valToSet);
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+
         // A. Khudro Nrigosthi Kina -> No (না)
         if (/ক্ষুদ্র|নৃ-গোষ্ঠী|নৃগোষ্ঠী|ethnic|tribal/.test(labelTxt)) {
           const wantYes = Number(isEthnic) === 1;
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0) {
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const targetItem = vInst.items.find(it => {
               if (typeof it === 'object' && it !== null) {
                 const t = `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title || ''}`.trim().toLowerCase();
@@ -356,7 +391,7 @@
               vInst.$emit('change', val);
             }
           }
-          wrap.querySelectorAll('input[type="radio"]').forEach(rad => {
+          wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
             const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
             const rVal = String(rad.value || '').toLowerCase();
             const match = wantYes
@@ -367,7 +402,7 @@
               rad.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });
-          wrap.querySelectorAll('select').forEach(sel => {
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
             const opt = Array.from(sel.options).find(o => {
               const t = o.textContent.trim().toLowerCase();
               const v = String(o.value).toLowerCase();
@@ -386,7 +421,7 @@
         if (/এলাকার ধরন|বাসস্থানের ধরন|অবস্থান|এলাকা নির্বাচন|location type|area type/.test(labelTxt) ||
             (vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(JSON.stringify(it))))) {
           const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0) {
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const areaItem = vInst.items.find(it => {
               const t = typeof it === 'object' && it !== null
                 ? `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title_bn || ''} ${it.name || ''}`
@@ -399,14 +434,14 @@
               vInst.$emit('change', val);
             }
           }
-          wrap.querySelectorAll('input[type="radio"]').forEach(rad => {
+          wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
             const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
             if (areaPattern.test(rLbl) && !rad.checked) {
               rad.click();
               rad.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });
-          wrap.querySelectorAll('select').forEach(sel => {
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
             const opt = Array.from(sel.options).find(o => areaPattern.test(o.textContent));
             if (opt && sel.value !== opt.value) {
               sel.value = opt.value;
@@ -415,28 +450,49 @@
           });
         }
 
-        // C. Children Under 18 (শিশু সংখ্যা) DOM Input
-        if (/শিশু সংখ্যা|শিশুর সংখ্যা|১৮ বছরের নিচে|কতজন শিশু|number of children|children count/.test(labelTxt)) {
-          const inp = wrap.querySelector('input[type="text"], input[type="number"]');
-          if (inp) {
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-            if (nativeSetter) nativeSetter.call(inp, String(childrenUnder18));
-            else inp.value = String(childrenUnder18);
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-          }
+        // C. Village / Road No (গ্রাম / রাস্তা / পাড়া / মহল্লা / বাসা / হোল্ডিং)
+        if (villageVal && /গ্রাম|রাস্তা|পাড়া|মহল্লা|বাসা|হোল্ডিং|village|road|street|house no/.test(labelTxt) && !/সদস্য|member|size/.test(labelTxt)) {
+          fillEditableInput(villageVal);
         }
 
-        // D. Total Household Members (পরিবারের সদস্য সংখ্যা / খানার সদস্য সংখ্যা) DOM Input
-        if (/সদস্য সংখ্যা|খানার সদস্য|পরিবারের সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
-          const inp = wrap.querySelector('input[type="text"], input[type="number"]');
-          if (inp) {
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-            if (nativeSetter) nativeSetter.call(inp, String(totalMembers));
-            else inp.value = String(totalMembers);
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
+        // D. Ward No (ওয়ার্ড নং) — supports both text/number input and Vuetify/native dropdown
+        if (wardVal && /ওয়ার্ড|ওয়ার্ড|ward/.test(labelTxt)) {
+          const cleanW = String(parseInt(wardVal, 10) || wardVal);
+          const padW = cleanW.padStart(2, '0');
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
+            const wItem = vInst.items.find(it => {
+              const str = JSON.stringify(it);
+              return new RegExp(`\\b(${cleanW}|${padW})\\b`).test(str);
+            });
+            if (wItem !== undefined) {
+              const val = (typeof wItem === 'object' && wItem !== null) ? (wItem.value ?? wItem.id ?? wItem.code ?? cleanW) : wItem;
+              vInst.$emit('input', val);
+              vInst.$emit('change', val);
+            }
           }
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
+            const opt = Array.from(sel.options).find(o => new RegExp(`\\b(${cleanW}|${padW})\\b`).test(`${o.value} ${o.textContent}`));
+            if (opt && sel.value !== opt.value) {
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+          fillEditableInput(wardVal);
+        }
+
+        // E. Post Code (পোস্ট কোড / ডাকঘর কোড)
+        if (postVal && /পোস্ট কোড|পোষ্ট কোড|ডাকঘর|post code|postal code|postcode|zip/.test(labelTxt)) {
+          fillEditableInput(postVal);
+        }
+
+        // F. Children Under 18 (শিশু সংখ্যা)
+        if (/শিশু সংখ্যা|শিশুর সংখ্যা|১৮ বছরের নিচে|কতজন শিশু|number of children|children count/.test(labelTxt)) {
+          fillEditableInput(childrenUnder18);
+        }
+
+        // G. Total Household Members (পরিবারের সদস্য সংখ্যা / খানার সদস্য সংখ্যা)
+        if (/সদস্য সংখ্যা|খানার সদস্য|পরিবারের সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
+          fillEditableInput(totalMembers);
         }
       });
     }
@@ -507,7 +563,7 @@
         if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
         if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
-        // 0. Restore Full Website Dump & Tab Editor changes
+        // 0. Restore Full Website Dump & Tab Editor changes (skips readOnly / disabled controls)
         if (payload.full_form_dump) {
           const dump = payload.full_form_dump;
           if (dump.head_data && vmHead && vmHead.data) {
@@ -538,7 +594,7 @@
               (tab.fields || []).forEach((f) => {
                 if (!f.dom_key) return;
                 const el = document.querySelector(`[data-fc-dom-key="${f.dom_key}"]`) || (f.id ? document.getElementById(f.id) : null);
-                if (!el) return;
+                if (!el || el.readOnly || el.disabled) return;
                 if (el.tagName === 'SELECT') {
                   el.value = f.value;
                   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -685,8 +741,8 @@
           }
         }
 
-        // 4. Apply Smart Defaults: Total Members, Children (<18), Khudro Nrigosthi = No, Area Type = Polli/Union
-        applySmartFormDefaults(vmHead, vmMembers, totalMembersCount, childrenUnder18Count, isEthnicVal, areaTypeVal);
+        // 4. Apply Saved Area Presets (Village/Road, Ward No, Post Code, Polli/Union, Khudro Nrigosthi: No) & Counts
+        applySmartFormDefaults(vmHead, vmMembers, totalMembersCount, childrenUnder18Count, isEthnicVal, areaTypeVal, defs);
 
         if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
         if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
@@ -694,7 +750,7 @@
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
           detail: {
             success: true,
-            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18), Polli/Union & Khudro Nrigosthi: No!`
+            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18) + Saved Area Settings!`
           }
         }));
       } catch (err) {
@@ -908,6 +964,7 @@
 
   const STORAGE_KEY = 'fc_pro_api_key';
   const STORAGE_MODEL = 'fc_pro_model';
+  const STORAGE_AREA_PRESETS = 'fc_pro_area_presets';
   const SESSION_DRAFT_KEY = 'fc_pro_active_session';
   let isOpen = false;
 
@@ -916,10 +973,16 @@
   }
   function pushSavedCredentials() {
     try {
+      let savedPresets = null;
+      const rawPresets = localStorage.getItem(STORAGE_AREA_PRESETS);
+      if (rawPresets) {
+        try { savedPresets = JSON.parse(rawPresets); } catch (_) {}
+      }
       sendToPanel({
         action: 'FC_API_KEY_DATA',
         apiKey: localStorage.getItem(STORAGE_KEY) || '',
-        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash'
+        model: localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash',
+        areaPresets: savedPresets
       });
       const savedSession = sessionStorage.getItem(SESSION_DRAFT_KEY);
       if (savedSession) {
@@ -972,6 +1035,7 @@
       try {
         if (data.apiKey !== undefined) localStorage.setItem(STORAGE_KEY, data.apiKey);
         if (data.model !== undefined) localStorage.setItem(STORAGE_MODEL, data.model);
+        if (data.areaPresets !== undefined) localStorage.setItem(STORAGE_AREA_PRESETS, JSON.stringify(data.areaPresets));
       } catch (e) {}
     }
     if (data.action === 'FC_SAVE_SESSION') {

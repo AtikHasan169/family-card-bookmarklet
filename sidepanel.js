@@ -2,7 +2,8 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v4.0-live';
+const STORAGE_AREA_PRESETS = 'fc_pro_area_presets';
+const CURRENT_VERSION_TAG = 'v4.2-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -52,6 +53,7 @@ const RELATION_GENDER_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.
 const GENDER_ID_MAP = { Male: 1, Female: 2, Other: 3 };
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Front-of-NID only — no back-part address fields required on OCR cards
 const HEAD_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'name_bn', label: 'Name (BN)' },
@@ -79,6 +81,14 @@ const MEMBER_FIELDS = [
 
 const state = { head: [], other: [], lastExtracted: null };
 let nextId = 1, activeCategory = null, activeCropName = '';
+
+const areaPresets = {
+  village: '',
+  ward_no: '',
+  post_code: '',
+  area_type_id: 1,
+  is_ethnic: 0
+};
 
 let rawImage = null;
 let extractionController = null;
@@ -110,12 +120,85 @@ function addItemRef(item, ref) {
   item.boundRef = item.boundRefs[0] || null;
 }
 
-function saveCredentialsEverywhere(apiKey, model) {
+function saveCredentialsEverywhere(apiKey, model, presetsObj) {
   try {
     if (apiKey !== undefined) localStorage.setItem(STORAGE_KEY, apiKey);
     if (model !== undefined) localStorage.setItem(STORAGE_MODEL, model);
+    if (presetsObj !== undefined) localStorage.setItem(STORAGE_AREA_PRESETS, JSON.stringify(presetsObj));
   } catch (err) {}
-  window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey, model }, '*');
+  window.parent.postMessage({ action: 'FC_SAVE_API_KEY', apiKey, model, areaPresets: presetsObj }, '*');
+}
+
+function loadAreaPresetsFromLocal() {
+  try {
+    const raw = localStorage.getItem(STORAGE_AREA_PRESETS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.village !== undefined) areaPresets.village = String(parsed.village);
+        if (parsed.ward_no !== undefined) areaPresets.ward_no = String(parsed.ward_no);
+        if (parsed.post_code !== undefined) areaPresets.post_code = String(parsed.post_code);
+        if (parsed.area_type_id !== undefined) areaPresets.area_type_id = Number(parsed.area_type_id) || 1;
+        if (parsed.is_ethnic !== undefined) areaPresets.is_ethnic = Number(parsed.is_ethnic) || 0;
+      }
+    }
+  } catch (e) {}
+  syncAreaPresetInputs();
+}
+
+function syncAreaPresetInputs() {
+  if ($('presetVillageInput')) $('presetVillageInput').value = areaPresets.village || '';
+  if ($('presetWardInput')) $('presetWardInput').value = areaPresets.ward_no || '';
+  if ($('presetPostCodeInput')) $('presetPostCodeInput').value = areaPresets.post_code || '';
+  if ($('presetAreaTypeSelect')) $('presetAreaTypeSelect').value = String(areaPresets.area_type_id ?? 1);
+  if ($('presetEthnicSelect')) $('presetEthnicSelect').value = String(areaPresets.is_ethnic ?? 0);
+}
+
+function handleAreaPresetChange() {
+  areaPresets.village = ($('presetVillageInput')?.value || '').trim();
+  areaPresets.ward_no = toEnglishDigits($('presetWardInput')?.value || '').trim();
+  areaPresets.post_code = toEnglishDigits($('presetPostCodeInput')?.value || '').trim();
+  areaPresets.area_type_id = Number($('presetAreaTypeSelect')?.value || 1);
+  areaPresets.is_ethnic = Number($('presetEthnicSelect')?.value || 0);
+
+  if ($('presetWardInput') && $('presetWardInput').value !== areaPresets.ward_no) {
+    $('presetWardInput').value = areaPresets.ward_no;
+  }
+  if ($('presetPostCodeInput') && $('presetPostCodeInput').value !== areaPresets.post_code) {
+    $('presetPostCodeInput').value = areaPresets.post_code;
+  }
+
+  saveCredentialsEverywhere(undefined, undefined, areaPresets);
+
+  if (state.lastExtracted) {
+    if (!state.lastExtracted.form_defaults) state.lastExtracted.form_defaults = {};
+    Object.assign(state.lastExtracted.form_defaults, {
+      village: areaPresets.village,
+      ward_no: areaPresets.ward_no,
+      post_code: areaPresets.post_code,
+      area_type_id: areaPresets.area_type_id,
+      area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === areaPresets.area_type_id)?.label || 'পল্লী / ইউনিয়ন (Polli / Union)',
+      is_ethnic: areaPresets.is_ethnic,
+      khudro_nrigosthi_label: areaPresets.is_ethnic === 1 ? 'হ্যাঁ (Yes)' : 'না (No)'
+    });
+    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+    saveSessionState();
+  }
+}
+
+function bindQuickCopyBtn(btnId, getValFn) {
+  const btn = $(btnId);
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    await copyTextSafe(String(getValFn() ?? ''));
+    const orig = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.style.color = '#059669';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = '';
+    }, 800);
+  });
 }
 
 function initApp() {
@@ -130,8 +213,26 @@ function initApp() {
   $('modelSelect').value = savedModel;
   if (!savedKey) $('settingsDrawer').classList.add('open');
 
-  $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined));
-  $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value));
+  loadAreaPresetsFromLocal();
+
+  $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined, undefined));
+  $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value, undefined));
+
+  // Bind Persistent Area Preset inputs & Copy buttons
+  ['presetVillageInput', 'presetWardInput', 'presetPostCodeInput'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('input', handleAreaPresetChange);
+  });
+  ['presetAreaTypeSelect', 'presetEthnicSelect'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('change', handleAreaPresetChange);
+  });
+
+  bindQuickCopyBtn('copyPresetVillageBtn', () => areaPresets.village);
+  bindQuickCopyBtn('copyPresetWardBtn', () => areaPresets.ward_no);
+  bindQuickCopyBtn('copyPresetPostCodeBtn', () => areaPresets.post_code);
+  bindQuickCopyBtn('copyPresetAreaBtn', () => AREA_TYPE_OPTIONS.find(a => a.value === areaPresets.area_type_id)?.label || 'পল্লী / ইউনিয়ন');
+  bindQuickCopyBtn('copyPresetEthnicBtn', () => areaPresets.is_ethnic === 1 ? 'হ্যাঁ' : 'না');
 
   const navRight = document.querySelector('.nav-right');
   if (navRight && !$('closeSheetBtn')) {
@@ -183,7 +284,7 @@ function initApp() {
     renderPreviews('other');
     $('resultsWrap').classList.remove('visible');
     $('autofillBtn').disabled = true;
-    setStatus('Workspace cleared.', 'idle');
+    setStatus('Cards cleared (Saved Area settings kept for next family).', 'idle');
   });
 
   $('pullFromWebBtn').addEventListener('click', () => {
@@ -252,6 +353,16 @@ function handleIncomingMessages(e) {
     if (e.data.model) {
       $('modelSelect').value = e.data.model;
       try { localStorage.setItem(STORAGE_MODEL, e.data.model); } catch (_) {}
+    }
+    if (e.data.areaPresets && typeof e.data.areaPresets === 'object') {
+      const p = e.data.areaPresets;
+      if (!areaPresets.village && p.village) areaPresets.village = String(p.village);
+      if (!areaPresets.ward_no && p.ward_no) areaPresets.ward_no = String(p.ward_no);
+      if (!areaPresets.post_code && p.post_code) areaPresets.post_code = String(p.post_code);
+      if (p.area_type_id !== undefined) areaPresets.area_type_id = Number(p.area_type_id) || 1;
+      if (p.is_ethnic !== undefined) areaPresets.is_ethnic = Number(p.is_ethnic) || 0;
+      try { localStorage.setItem(STORAGE_AREA_PRESETS, JSON.stringify(areaPresets)); } catch (_) {}
+      syncAreaPresetInputs();
     }
   }
 
@@ -406,23 +517,18 @@ function recalculateHouseholdSummary(data) {
     return a !== null && a >= 0 && a < 18;
   }).length;
 
-  if (!data.form_defaults) {
-    data.form_defaults = {
-      total_members: totalMembers,
-      children_under_18: childrenUnder18,
-      is_ethnic: 0,
-      khudro_nrigosthi_label: 'না (No)',
-      area_type_id: 1,
-      area_type_label: 'পল্লী / ইউনিয়ন (Polli / Union)'
-    };
-  } else {
-    data.form_defaults.total_members = totalMembers;
-    data.form_defaults.children_under_18 = childrenUnder18;
-    if (data.form_defaults.is_ethnic === undefined) data.form_defaults.is_ethnic = 0;
-    if (data.form_defaults.area_type_id === undefined) data.form_defaults.area_type_id = 1;
-  }
+  data.form_defaults = {
+    total_members: totalMembers,
+    children_under_18: childrenUnder18,
+    village: areaPresets.village || '',
+    ward_no: areaPresets.ward_no || '',
+    post_code: areaPresets.post_code || '',
+    is_ethnic: Number(areaPresets.is_ethnic ?? 0),
+    khudro_nrigosthi_label: Number(areaPresets.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
+    area_type_id: Number(areaPresets.area_type_id ?? 1),
+    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)'
+  };
 
-  // Update summary UI inputs if rendered
   const totalInp = $('fcSummaryTotalMembers');
   const childInp = $('fcSummaryChildrenCount');
   const totalPill = $('fcPillTotalMembers');
@@ -581,8 +687,11 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
     
     inputEl.addEventListener('input', () => {
       let val = inputEl.value;
-      if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
-      else if (f.key.endsWith('_en')) val = val.toUpperCase();
+      if (f.key === 'nid' || f.key === 'nid_or_brn') {
+        val = toEnglishDigits(val).replace(/\s+/g, '');
+      } else if (f.key.endsWith('_en')) {
+        val = val.toUpperCase();
+      }
       targetObj[f.key] = val;
       if (f.key === 'dob') {
         targetObj.age = calculateAgeYears(val);
@@ -1159,16 +1268,27 @@ function normalizeOutput(raw, preserveOrder = false) {
     });
   }
 
+  // If imported JSON has saved area defaults and local areaPresets are empty, adopt them
+  if (raw?.form_defaults) {
+    if (!areaPresets.village && raw.form_defaults.village) areaPresets.village = s(raw.form_defaults.village);
+    if (!areaPresets.ward_no && raw.form_defaults.ward_no) areaPresets.ward_no = s(raw.form_defaults.ward_no);
+    if (!areaPresets.post_code && raw.form_defaults.post_code) areaPresets.post_code = s(raw.form_defaults.post_code);
+    syncAreaPresetInputs();
+  }
+
   const allPeople = [head, ...deduped];
   const childrenCount = allPeople.filter((p) => p.age !== null && p.age >= 0 && p.age < 18).length;
 
   const form_defaults = {
     total_members: allPeople.length,
     children_under_18: childrenCount,
-    is_ethnic: raw?.form_defaults?.is_ethnic !== undefined ? Number(raw.form_defaults.is_ethnic) : 0,
-    khudro_nrigosthi_label: Number(raw?.form_defaults?.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
-    area_type_id: raw?.form_defaults?.area_type_id !== undefined ? Number(raw.form_defaults.area_type_id) : 1,
-    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(raw?.form_defaults?.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)'
+    village: areaPresets.village || '',
+    ward_no: areaPresets.ward_no || '',
+    post_code: areaPresets.post_code || '',
+    is_ethnic: Number(areaPresets.is_ethnic ?? 0),
+    khudro_nrigosthi_label: Number(areaPresets.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
+    area_type_id: Number(areaPresets.area_type_id ?? 1),
+    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)'
   };
 
   const result = { head, family_members: deduped, form_defaults };
@@ -1285,7 +1405,7 @@ function renderHouseholdSummaryCard(data) {
   const headEl = document.createElement('div');
   headEl.className = 'record-head';
   headEl.style.background = '#eff6ff';
-  headEl.innerHTML = `<span style="color:#1e40af;">Household Summary &amp; Auto-Defaults</span><span class="record-tag child-badge">Auto-Fill Ready</span>`;
+  headEl.innerHTML = `<span style="color:#1e40af;">Household Member &amp; Child Count</span><span class="record-tag child-badge">Auto-Counted</span>`;
   card.appendChild(headEl);
 
   const pills = document.createElement('div');
@@ -1332,42 +1452,6 @@ function renderHouseholdSummaryCard(data) {
     saveSessionState();
   });
   rows.appendChild(buildCopyRow('শিশু সংখ্যা (<18)', childInp, () => defs.children_under_18));
-
-  // 3. Khudro Nrigosthi (ক্ষুদ্র নৃ-গোষ্ঠী কিনা) Row -> Default: No (না)
-  const ethnicSel = document.createElement('select');
-  ethnicSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#f0fdf4; color:#065f46; border-radius:5px; cursor:pointer; width:100%;';
-  ETHNIC_OPTIONS.forEach((opt) => {
-    const o = document.createElement('option');
-    o.value = String(opt.value);
-    o.textContent = opt.label;
-    ethnicSel.appendChild(o);
-  });
-  ethnicSel.value = String(defs.is_ethnic ?? 0);
-  ethnicSel.addEventListener('change', (e) => {
-    defs.is_ethnic = Number(e.target.value);
-    defs.khudro_nrigosthi_label = defs.is_ethnic === 1 ? 'হ্যাঁ (Yes)' : 'না (No)';
-    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
-    saveSessionState();
-  });
-  rows.appendChild(buildCopyRow('ক্ষুদ্র নৃ-গোষ্ঠী কিনা', ethnicSel, () => defs.is_ethnic === 1 ? 'হ্যাঁ' : 'না'));
-
-  // 4. Area Type / Elaka (এলাকার ধরন) Row -> Default: Polli / Union (পল্লী / ইউনিয়ন)
-  const areaSel = document.createElement('select');
-  areaSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px; cursor:pointer; width:100%;';
-  AREA_TYPE_OPTIONS.forEach((opt) => {
-    const o = document.createElement('option');
-    o.value = String(opt.value);
-    o.textContent = opt.label;
-    areaSel.appendChild(o);
-  });
-  areaSel.value = String(defs.area_type_id ?? 1);
-  areaSel.addEventListener('change', (e) => {
-    defs.area_type_id = Number(e.target.value);
-    defs.area_type_label = AREA_TYPE_OPTIONS.find(a => a.value === defs.area_type_id)?.label || 'পল্লী / ইউনিয়ন (Polli / Union)';
-    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
-    saveSessionState();
-  });
-  rows.appendChild(buildCopyRow('এলাকার ধরন (Elaka)', areaSel, () => defs.area_type_label));
 
   card.appendChild(rows);
   wrap.appendChild(card);
@@ -1725,7 +1809,7 @@ async function runExtraction() {
     return;
   }
 
-  saveCredentialsEverywhere(apiKey, model);
+  saveCredentialsEverywhere(apiKey, model, areaPresets);
 
   $('extractBtn').style.display = 'none';
   $('stopExtractBtn').style.display = 'inline-flex';
@@ -1791,8 +1875,10 @@ async function runExtraction() {
 
 function triggerFormAutofill() {
   if (!state.lastExtracted) return;
+  // Always attach the latest saved Area Presets before sending to page
+  handleAreaPresetChange();
   window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
-  setStatus('Sent auto-fill data to form!', 'ok');
+  setStatus('Sent auto-fill data + Saved Area settings to form!', 'ok');
 }
 
 function exportExtractedJson() {
@@ -1800,6 +1886,7 @@ function exportExtractedJson() {
     setStatus('Nothing to export yet — Extract or Pull All first.', 'err');
     return;
   }
+  handleAreaPresetChange();
   const h = state.lastExtracted.head || {};
   const idPart = h.nid || (h.name_en ? h.name_en.replace(/[^A-Z0-9]+/gi, '_') : 'draft');
   const filename = `FC_${idPart}_${new Date().toISOString().slice(0, 10)}.json`;

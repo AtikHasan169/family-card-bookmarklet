@@ -235,6 +235,48 @@
       </div>
     </section>
 
+    <!-- Persistent Saved Area & Defaults Card (Saved in localStorage like API Key) -->
+    <details class="record-card" id="areaPresetDrawer" open style="border-color:#bfdbfe;">
+      <summary class="record-head" style="cursor:pointer; background:#eff6ff;">
+        <span style="color:#1e40af;">📌 Saved Area &amp; Defaults (স্থায়ী এলাকা সেটিংস)</span>
+        <span class="record-tag child-badge">Auto-Saved</span>
+      </summary>
+      <div class="record-rows">
+        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
+          <span class="row-key">গ্রাম / রাস্তা (Village)</span>
+          <input id="presetVillageInput" type="text" placeholder="যেমন: চর আমলা" autocomplete="off">
+          <button type="button" class="btn btn-xs" id="copyPresetVillageBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
+        </div>
+        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
+          <span class="row-key">ওয়ার্ড নং (Ward No)</span>
+          <input id="presetWardInput" type="text" placeholder="যেমন: 04 বা 4" autocomplete="off">
+          <button type="button" class="btn btn-xs" id="copyPresetWardBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
+        </div>
+        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
+          <span class="row-key">পোস্ট কোড (Post Code)</span>
+          <input id="presetPostCodeInput" type="text" placeholder="যেমন: 7030" autocomplete="off">
+          <button type="button" class="btn btn-xs" id="copyPresetPostCodeBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
+        </div>
+        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
+          <span class="row-key">এলাকার ধরন (Elaka)</span>
+          <select id="presetAreaTypeSelect" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px;">
+            <option value="1">পল্লী / ইউনিয়ন (Polli / Union)</option>
+            <option value="2">পৌরসভা (Pourashava)</option>
+            <option value="3">সিটি কর্পোরেশন (City Corporation)</option>
+          </select>
+          <button type="button" class="btn btn-xs" id="copyPresetAreaBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
+        </div>
+        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
+          <span class="row-key">ক্ষুদ্র নৃ-গোষ্ঠী কিনা</span>
+          <select id="presetEthnicSelect" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#f0fdf4; color:#065f46; border-radius:5px;">
+            <option value="0">না (No)</option>
+            <option value="1">হ্যাঁ (Yes)</option>
+          </select>
+          <button type="button" class="btn btn-xs" id="copyPresetEthnicBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
+        </div>
+      </div>
+    </details>
+
     <section class="card">
       <div class="card-head">
         <div class="card-title-group">
@@ -289,7 +331,7 @@
         </div>
       </div>
 
-      <!-- Household Summary & Auto-Defaults Card (Total Members, Children <18, Khudro Nrigosthi: No, Area: Polli/Union) -->
+      <!-- Dynamic Household Member & Children (<18) Counter Card -->
       <div id="householdSummaryWrap"></div>
 
       <div id="visualCards" style="display:flex; flex-direction:column; gap:10px;"></div>

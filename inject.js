@@ -161,7 +161,7 @@
     if (targetWrap) {
       let curr = targetWrap.__vue__;
       let depth = 0;
-      while (curr && depth < 6) {
+      while (curr && depth < 7) {
         if (!menuVm && isMenuOrDialogVm(curr)) menuVm = curr;
         if (!menuVm && Array.isArray(curr.$children)) {
           const childMenu = curr.$children.find(isMenuOrDialogVm);
@@ -177,39 +177,25 @@
 
     let openedMenuTemporarily = false;
     if (menuVm && !menuVm.isActive) {
-      const existingPickers = findAllVueComponents(menuVm, isDatePickerVm);
-      if (existingPickers.length === 0) {
-        menuVm.isActive = true;
-        openedMenuTemporarily = true;
-        await new Promise(r => setTimeout(r, 60));
-      }
+      menuVm.isActive = true;
+      openedMenuTemporarily = true;
+      await new Promise(r => setTimeout(r, 80));
     }
 
-    let pickerEmitted = false;
-    if (menuVm) {
-      const pickers = findAllVueComponents(menuVm, isDatePickerVm);
-      pickers.forEach(pickerVm => {
-        pickerVm.$emit('input', parts.iso);
-        pickerVm.$emit('change', parts.iso);
-        pickerVm.$emit('click:date', parts.iso);
-        pickerEmitted = true;
-      });
-    }
-
-    if (!pickerEmitted) {
-      const allPickers = [];
-      document.querySelectorAll('*').forEach(n => {
-        if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
-          allPickers.push(n.__vue__);
-        }
-      });
-      const targetPicker = allPickers[targetIndex] || (targetIndex === 0 ? allPickers[0] : null);
-      if (targetPicker) {
-        targetPicker.$emit('input', parts.iso);
-        targetPicker.$emit('change', parts.iso);
-        targetPicker.$emit('click:date', parts.iso);
-        pickerEmitted = true;
+    const allPickers = [];
+    document.querySelectorAll('.v-picker, .v-date-picker-table, *').forEach(n => {
+      if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
+        allPickers.push(n.__vue__);
       }
+    });
+
+    const targetPicker = (menuVm && findAllVueComponents(menuVm, isDatePickerVm)[0]) || allPickers[targetIndex] || allPickers[allPickers.length - 1];
+    if (targetPicker) {
+      if ('tableDate' in targetPicker) targetPicker.tableDate = `${parts.yyyy}-${parts.mm}`;
+      if ('internalActivePicker' in targetPicker) targetPicker.internalActivePicker = 'DATE';
+      targetPicker.$emit('input', parts.iso);
+      targetPicker.$emit('change', parts.iso);
+      targetPicker.$emit('click:date', parts.iso);
     }
 
     if (wrapperVm && wrapperVm.$data) {
@@ -217,10 +203,27 @@
       if ('dob' in wrapperVm.$data) wrapperVm.$data.dob = parts.iso;
       if ('date_of_birth' in wrapperVm.$data) wrapperVm.$data.date_of_birth = parts.iso;
       if ('dateFormatted' in wrapperVm.$data) wrapperVm.$data.dateFormatted = parts.slash;
+      if (typeof wrapperVm.formatDate === 'function') {
+        try { wrapperVm.formatDate(parts.iso); } catch (e) {}
+      }
+    }
+
+    if (targetWrap) {
+      const inp = targetWrap.querySelector('input');
+      if (inp && inp._flatpickr) {
+        inp._flatpickr.setDate(parts.iso, true);
+      } else if (inp && !inp.readOnly && !menuVm) {
+        const displayVal = inp.type === 'date' ? parts.iso : parts.slash;
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (nativeSetter) nativeSetter.call(inp, displayVal);
+        else inp.value = displayVal;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
 
     if (openedMenuTemporarily && menuVm) {
-      await new Promise(r => setTimeout(r, 40));
+      await new Promise(r => setTimeout(r, 50));
       menuVm.isActive = false;
     }
   }
@@ -322,8 +325,9 @@
       // 2. Populate Family Members
       const members = Array.isArray(payload.family_members) ? payload.family_members : [];
       const allHousehold = payload.head ? [payload.head, ...members] : [...members];
-      const totalMembersCount = allHousehold.length;
-      const childrenUnder18Count = allHousehold.filter(m => {
+      const defs = payload.form_defaults || {};
+      const totalMembersCount = defs.total_members !== undefined ? Number(defs.total_members) : allHousehold.length;
+      const childrenUnder18Count = defs.children_under_18 !== undefined ? Number(defs.children_under_18) : allHousehold.filter(m => {
         const age = calculateAgeYears(m.dob);
         return age !== null && age >= 0 && age < 18;
       }).length;
@@ -393,8 +397,23 @@
       if (vm.data) {
         setReactive(vm.data, 'house_size', totalMembersCount);
         setReactive(vm.data, 'children_count', childrenUnder18Count);
-        setReactive(vm.data, 'is_ethnic', 0);
-        setReactive(vm.data, 'location_type', 1);
+        setReactive(vm.data, 'is_ethnic', defs.is_ethnic !== undefined ? Number(defs.is_ethnic) : 0);
+        setReactive(vm.data, 'location_type', defs.area_type_id !== undefined ? Number(defs.area_type_id) : 1);
+        if (defs.village) {
+          ['village', 'village_bn', 'road', 'present_village', 'permanent_village'].forEach(k => {
+            if (k in vm.data) setReactive(vm.data, k, defs.village);
+          });
+        }
+        if (defs.ward_no) {
+          ['ward', 'ward_no', 'present_ward', 'permanent_ward'].forEach(k => {
+            if (k in vm.data) setReactive(vm.data, k, defs.ward_no);
+          });
+        }
+        if (defs.post_code) {
+          ['post_code', 'postal_code', 'present_post_code', 'permanent_post_code'].forEach(k => {
+            if (k in vm.data) setReactive(vm.data, k, defs.post_code);
+          });
+        }
       }
 
       if (typeof vm.$forceUpdate === 'function') {
@@ -405,7 +424,7 @@
         new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
           detail: {
             success: true,
-            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18), Polli/Union & Khudro Nrigosthi: No!`
+            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18) + Saved Area Settings!`
           }
         })
       );
