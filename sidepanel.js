@@ -239,7 +239,7 @@ function handleIncomingMessages(e) {
     }
   }
   
-  if (e.data.action === 'FC_SYNC_FROM_WEB') syncFromWebToPanel(e.data.payload);
+  // Live sync from web disabled to protect extracted data
 
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
@@ -558,7 +558,7 @@ function showImageViewer(item) {
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
       const headerNote = document.createElement('div');
       headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;';
-      headerNote.innerHTML = '<span>Check empty red fields before Auto-Fill</span><span style="color:#10b981; font-weight:600;">● Live Sync</span>';
+      headerNote.innerHTML = '<span>Check empty red fields before Auto-Fill</span><span style="color:#38bdf8; font-weight:600;">● Manual Mode</span>';
       metaBox.appendChild(headerNote);
 
       const formList = document.createElement('div');

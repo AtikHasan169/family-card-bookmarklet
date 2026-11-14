@@ -343,9 +343,7 @@
       }));
     }
 
-    let syncTimeout;
-    document.body.addEventListener('input', () => { clearTimeout(syncTimeout); syncTimeout = setTimeout(extractCurrentFormState, 600); });
-    document.body.addEventListener('change', () => { clearTimeout(syncTimeout); syncTimeout = setTimeout(extractCurrentFormState, 600); });
+    // Live sync disabled so webpage interactions never overwrite extracted panel data
   })();
 
   const isMobileDevice = window.screen.width <= 768;
@@ -520,7 +518,4 @@
     sendToPanel({ action: 'FC_PULL_RESPONSE', detail: event.detail });
   });
 
-  window.addEventListener('FC_PRO_FORM_CHANGED', (event) => {
-    sendToPanel({ action: 'FC_SYNC_FROM_WEB', payload: event.detail });
-  });
 })();
