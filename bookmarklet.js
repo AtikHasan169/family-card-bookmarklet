@@ -62,14 +62,21 @@
 
     function getVueNodes() {
       let vmHead = null, vmMembers = null;
+      const allVms = [];
       document.querySelectorAll('*').forEach(node => {
         const v = node.__vue__;
         if (v) {
-          if (v.data && typeof v.data === 'object' && ('name_bn' in v.data || 'name_en' in v.data || 'verification_number' in v.data)) vmHead = v;
+          allVms.push(v);
+          if (v.data && typeof v.data === 'object' && (
+            'name_bn' in v.data || 'name_en' in v.data || 'verification_number' in v.data ||
+            'nid' in v.data || 'gender' in v.data || 'gender_id' in v.data || 'date_of_birth' in v.data
+          )) {
+            vmHead = v;
+          }
           if (Array.isArray(v.familyMembers)) vmMembers = v;
         }
       });
-      return { vmHead, vmMembers };
+      return { vmHead, vmMembers, allVms };
     }
 
     function determineIsNID(docType, cleanId) {
@@ -129,8 +136,8 @@
       const payload = event.detail;
       if (!payload) return;
 
-      const { vmHead, vmMembers } = getVueNodes();
-      if (!vmHead && !vmMembers) {
+      const { vmHead, vmMembers, allVms } = getVueNodes();
+      if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
           detail: { success: false, message: 'Vue application form not detected on this page.' }
         }));
@@ -147,26 +154,139 @@
         if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
         if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
-        if (payload.head && vmHead && vmHead.data) {
+        // 0. Restore Full Website Dump & Tab Editor changes (Vue state + DOM controls)
+        if (payload.full_form_dump) {
+          const dump = payload.full_form_dump;
+          if (dump.head_data && vmHead && vmHead.data) {
+            Object.entries(dump.head_data).forEach(([k, v]) => {
+              if (v !== undefined && typeof v !== 'function') {
+                setReactive(vmHead, vmHead.data, k, v);
+              }
+            });
+          }
+          if (Array.isArray(dump.family_members_raw) && vmMembers && Array.isArray(vmMembers.familyMembers)) {
+            while (vmMembers.familyMembers.length < dump.family_members_raw.length) {
+              if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
+              else vmMembers.familyMembers.push({});
+            }
+            await new Promise((r) => setTimeout(r, 150));
+            dump.family_members_raw.forEach((rawRow, idx) => {
+              const targetRow = vmMembers.familyMembers[idx];
+              if (!targetRow || !rawRow) return;
+              Object.entries(rawRow).forEach(([k, v]) => {
+                if (v !== undefined && typeof v !== 'function') {
+                  setReactive(vmMembers, targetRow, k, v);
+                }
+              });
+            });
+          }
+          if (Array.isArray(dump.dom_tabs)) {
+            dump.dom_tabs.forEach((tab) => {
+              (tab.fields || []).forEach((f) => {
+                if (!f.dom_key) return;
+                const el = document.querySelector(`[data-fc-dom-key="${f.dom_key}"]`) || (f.id ? document.getElementById(f.id) : null);
+                if (!el) return;
+                if (el.tagName === 'SELECT') {
+                  el.value = f.value;
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (el.type === 'checkbox' || el.type === 'radio') {
+                  el.checked = Boolean(f.value);
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                  el.value = f.value;
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              });
+            });
+          }
+        }
+
+        // 1. Populate Primary Applicant (Head) in main form & First-Page Verification
+        if (payload.head) {
           const h = payload.head;
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
           const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
 
-          setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
-          setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
-          setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
-          setReactive(vmHead, vmHead.data, 'gender', headGenderId);
-          setReactive(vmHead, vmHead.data, 'gender_id', headGenderId);
-          setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
-          setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
-          setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
-          setReactive(vmHead, vmHead.data, 'father_name_en', h.father_name_en);
-          setReactive(vmHead, vmHead.data, 'mother_name_bn', h.mother_name_bn);
-          setReactive(vmHead, vmHead.data, 'mother_name_en', h.mother_name_en);
+          if (vmHead && vmHead.data) {
+            setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
+            setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
+            setReactive(vmHead, vmHead.data, 'nid', headIsNID ? cleanHeadId : '');
+            setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
+            setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
+            setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
+            setReactive(vmHead, vmHead.data, 'gender', headGenderId);
+            setReactive(vmHead, vmHead.data, 'gender_id', headGenderId);
+            setReactive(vmHead, vmHead.data, 'sex', headGenderId);
+            setReactive(vmHead, vmHead.data, 'applicant_gender', headGenderId);
+            setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
+            setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
+            setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
+            setReactive(vmHead, vmHead.data, 'father_name_en', h.father_name_en);
+            setReactive(vmHead, vmHead.data, 'mother_name_bn', h.mother_name_bn);
+            setReactive(vmHead, vmHead.data, 'mother_name_en', h.mother_name_en);
+          }
+
+          // Also sync root/verification Vue instances that hold gender or verification fields on Page 1
+          (allVms || []).forEach((v) => {
+            if (!v || v === vmMembers) return;
+            ['data', 'form', 'verifyForm', 'verification', 'applicant'].forEach((subKey) => {
+              const obj = v[subKey];
+              if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+                if ('gender' in obj) setReactive(v, obj, 'gender', headGenderId);
+                if ('gender_id' in obj) setReactive(v, obj, 'gender_id', headGenderId);
+                if ('sex' in obj) setReactive(v, obj, 'sex', headGenderId);
+                if ('verification_number' in obj && !obj.verification_number) setReactive(v, obj, 'verification_number', cleanHeadId);
+                if ('date_of_birth' in obj && !obj.date_of_birth) setReactive(v, obj, 'date_of_birth', headCleanDob);
+              }
+            });
+            if ('gender' in v && typeof v.gender !== 'function') v.gender = headGenderId;
+            if ('gender_id' in v && typeof v.gender_id !== 'function') v.gender_id = headGenderId;
+          });
+
+          // Direct DOM fallback for the First-Page Gender <select> or radio buttons
+          const genderLabels = headGenderId === 2
+            ? ['2', 'female', 'মহিলা', 'নারী']
+            : (headGenderId === 1 ? ['1', 'male', 'পুরুষ'] : ['3', 'other', 'অন্যান্য']);
+
+          document.querySelectorAll('select').forEach((sel) => {
+            if (sel.closest('#fc-floating-root')) return;
+            const meta = `${sel.name || ''} ${sel.id || ''} ${sel.getAttribute('aria-label') || ''}`.toLowerCase();
+            const hasGenderOpts = Array.from(sel.options).some((o) => /মহিলা|পুরুষ|নারী|female|male/i.test(o.textContent));
+            if (/gender|sex|লিঙ্গ/.test(meta) || hasGenderOpts) {
+              // Only target the first/head gender select (not family member rows)
+              if (sel.closest('tr, .family-member-row')) return;
+              const matchOpt = Array.from(sel.options).find((o) => {
+                const val = String(o.value).trim().toLowerCase();
+                const txt = o.textContent.trim().toLowerCase();
+                return val === String(headGenderId) || genderLabels.some((g) => val === g || txt.includes(g));
+              });
+              if (matchOpt && sel.value !== matchOpt.value) {
+                sel.value = matchOpt.value;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                sel.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+          });
+
+          document.querySelectorAll('input[type="radio"]').forEach((rad) => {
+            if (rad.closest('#fc-floating-root') || rad.closest('tr, .family-member-row')) return;
+            const meta = `${rad.name || ''} ${rad.id || ''} ${rad.value || ''}`.toLowerCase();
+            const lblTxt = (rad.closest('label, .v-radio')?.textContent || '').trim().toLowerCase();
+            if ((/gender|sex|লিঙ্গ/.test(meta) || /মহিলা|পুরুষ|নারী|female|male/i.test(lblTxt)) &&
+                genderLabels.some((g) => String(rad.value).toLowerCase() === g || lblTxt.includes(g))) {
+              if (!rad.checked) {
+                rad.checked = true;
+                rad.click();
+                rad.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }
+          });
         }
 
+        // 2. Combine Head as Member 1, then the rest of the family
         const fullFamilyList = [];
         if (payload.head) {
           fullFamilyList.push({
@@ -183,6 +303,7 @@
           fullFamilyList.push(...payload.family_members);
         }
 
+        // 3. Inject into the Member Array
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
             if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
@@ -254,8 +375,8 @@
     });
 
     window.addEventListener('FC_PRO_PULL_REQUEST', () => {
-      const { vmHead, vmMembers } = getVueNodes();
-      if (!vmHead && !vmMembers) {
+      const { vmHead, vmMembers, allVms } = getVueNodes();
+      if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
         window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
           detail: { success: false, message: 'No active Vue form instance found on this page.' }
         }));
@@ -292,7 +413,89 @@
         const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
         const family_members = memberSlice.filter(isRowPopulated).map(parseMemberRow);
 
-        if (!head.nid && !head.name_bn && !head.name_en && family_members.length === 0) {
+        const safeClone = (obj) => {
+          try { return JSON.parse(JSON.stringify(obj || {})); } catch (e) { return {}; }
+        };
+
+        const dom_tabs = [];
+        const vueOptionCatalog = {};
+
+        if (vmHead && vmHead.$data) {
+          Object.entries(vmHead.$data).forEach(([k, val]) => {
+            if (Array.isArray(val) && val.length > 0 && val.length <= 200 && typeof val[0] === 'object' && val[0] !== null) {
+              const sample = val[0];
+              const idKey = ('id' in sample) ? 'id' : (('value' in sample) ? 'value' : (('code' in sample) ? 'code' : null));
+              const nameKey = ('name_bn' in sample) ? 'name_bn' : (('title_bn' in sample) ? 'title_bn' : (('name' in sample) ? 'name' : (('label' in sample) ? 'label' : ('name_en' in sample ? 'name_en' : null))));
+              if (idKey && nameKey) {
+                vueOptionCatalog[k] = val.map(item => ({
+                  value: item[idKey],
+                  label: item.name_bn && item.name_en ? `${item.name_bn} (${item.name_en})` : String(item[nameKey])
+                }));
+              }
+            }
+          });
+        }
+
+        const containers = document.querySelectorAll('.v-expansion-panel, .card, .tab-pane, fieldset, form');
+        const roots = containers.length ? Array.from(containers) : [document.body];
+        const seenElements = new Set();
+        let domKeyCounter = 1;
+
+        roots.forEach((sec, secIdx) => {
+          const inputs = Array.from(sec.querySelectorAll('input:not([type="hidden"]):not([type="file"]), select, textarea'))
+            .filter(el => !el.closest('#fc-floating-root') && !seenElements.has(el));
+          if (!inputs.length) return;
+
+          const headerEl = sec.querySelector('.v-expansion-panel-header, .card-header, h1, h2, h3, h4, h5, legend');
+          const tabTitle = headerEl ? headerEl.textContent.replace(/\s+/g, ' ').trim().slice(0, 65) : `Website Section #${secIdx + 1}`;
+          const fields = [];
+
+          inputs.forEach((el) => {
+            seenElements.add(el);
+            const domKey = el.getAttribute('data-fc-dom-key') || `fc_dom_${domKeyCounter++}`;
+            el.setAttribute('data-fc-dom-key', domKey);
+
+            let label = '';
+            if (el.id) {
+              const lblEl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+              if (lblEl) label = lblEl.textContent;
+            }
+            if (!label) {
+              const wrap = el.closest('.v-input, .form-group, .col-md-6, .col-md-4, .col-12, div');
+              const lblEl = wrap ? wrap.querySelector('label, .v-label, .field-label') : null;
+              if (lblEl) label = lblEl.textContent;
+            }
+            label = (label || el.name || el.placeholder || el.id || `Field ${domKeyCounter}`).replace(/\s+/g, ' ').trim();
+
+            if (el.tagName === 'SELECT') {
+              const options = Array.from(el.options).map(o => ({ value: o.value, label: o.textContent.trim() }));
+              const selectedText = el.options[el.selectedIndex] ? el.options[el.selectedIndex].textContent.trim() : '';
+              fields.push({ dom_key: domKey, id: el.id || '', name: el.name || '', label, type: 'select', value: el.value, display_value: selectedText, options });
+            } else if (el.type === 'checkbox' || el.type === 'radio') {
+              fields.push({
+                dom_key: domKey, id: el.id || '', name: el.name || '', label, type: 'boolean', value: el.checked,
+                display_value: el.checked ? 'Yes (হ্যাঁ)' : 'No (না)',
+                options: [{ value: 'true', label: 'Yes (হ্যাঁ)' }, { value: 'false', label: 'No (না)' }]
+              });
+            } else {
+              fields.push({ dom_key: domKey, id: el.id || '', name: el.name || '', label, type: 'text', value: el.value || '', display_value: el.value || '' });
+            }
+          });
+
+          if (fields.length) dom_tabs.push({ title: tabTitle, fields });
+        });
+
+        const full_form_dump = {
+          pulled_at: new Date().toISOString(),
+          page_url: location.href,
+          head_data: safeClone(d),
+          family_members_raw: safeClone(rawMembers),
+          vue_options: vueOptionCatalog,
+          dom_tabs
+        };
+
+        const hasAnyHeadData = Object.values(full_form_dump.head_data).some(v => v !== null && v !== '' && v !== undefined && typeof v !== 'object');
+        if (!hasAnyHeadData && !head.nid && !head.name_bn && !head.name_en && family_members.length === 0 && dom_tabs.length === 0) {
           window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
             detail: { success: false, message: 'Web form is currently empty — nothing to pull.' }
           }));
@@ -300,7 +503,7 @@
         }
 
         window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-          detail: { success: true, payload: { head, family_members } }
+          detail: { success: true, payload: { head, family_members, full_form_dump } }
         }));
       } catch (err) {
         window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
@@ -308,40 +511,6 @@
         }));
       }
     });
-
-    function extractCurrentFormState() {
-      const { vmHead, vmMembers } = getVueNodes();
-      const d = (vmHead && vmHead.data) ? vmHead.data : {};
-      const rawMembers = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
-
-      const row0 = rawMembers[0] || {};
-      const dId = String(d.verification_number || d.nid || '').trim();
-      const r0Id = String(row0.verification_number || row0.nid || row0.brn_id || '').trim();
-      const row0IsHead = Number(row0.relationship_id) === 185 || (dId && r0Id && dId === r0Id) || (!dId && rawMembers.length > 0 && !row0.relationship_id);
-
-      const headVerType = Number(d.verification_type || (row0IsHead ? row0.verification_type : 1) || 1);
-      const headGen = Number(d.gender_id || d.gender || (row0IsHead ? (row0.gender_id || row0.gender) : 2) || 2);
-
-      const headData = {
-        doc_type: headVerType === 2 ? 'BRN' : 'NID',
-        gender: headGen === 1 ? 'Male' : 'Female',
-        nid: String(d.verification_number || d.nid || (row0IsHead ? r0Id : '') || '').trim(),
-        dob: d.date_of_birth || d.dob || (row0IsHead ? (row0.date_of_birth || row0.dob) : '') || '',
-        name_bn: d.name_bn || (row0IsHead ? row0.name_bn : '') || '',
-        name_en: d.name_en || (row0IsHead ? row0.name_en : '') || '',
-        father_name_bn: d.father_name_bn || (row0IsHead ? row0.father_name_bn : '') || '',
-        father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
-        mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
-        mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || ''
-      };
-
-      const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
-      const membersData = memberSlice.filter(isRowPopulated).map(parseMemberRow);
-
-      window.dispatchEvent(new CustomEvent('FC_PRO_FORM_CHANGED', {
-        detail: { head: headData, members: membersData }
-      }));
-    }
 
     // Live sync disabled so webpage interactions never overwrite extracted panel data
   })();
@@ -457,7 +626,6 @@
   root.__fcToggle = toggleSheet;
   trigger.addEventListener('click', toggleSheet);
 
-  // Auto-open panel instantly on launch so it never looks like "nothing happens"
   setTimeout(() => { if (!isOpen) toggleSheet(); }, 100);
 
   window.addEventListener('message', (event) => {
@@ -491,6 +659,18 @@
     }
     if (data.action === 'FC_PULL_DRAFT') {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
+    }
+    if (data.action === 'FC_DOWNLOAD_JSON') {
+      try {
+        const blob = new Blob([data.jsonString], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = data.filename || 'family-card-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+      } catch (e) {}
     }
     if (data.action === 'FC_COPY_TEXT') {
       try {

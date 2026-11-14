@@ -99,6 +99,33 @@
         }
       };
 
+      if (payload.full_form_dump) {
+        const dump = payload.full_form_dump;
+        if (dump.head_data && vm.data) {
+          Object.entries(dump.head_data).forEach(([k, v]) => {
+            if (v !== undefined && typeof v !== 'function') {
+              setReactive(vm.data, k, v);
+            }
+          });
+        }
+        if (Array.isArray(dump.family_members_raw) && Array.isArray(vm.familyMembers)) {
+          while (vm.familyMembers.length < dump.family_members_raw.length) {
+            if (typeof vm.addFamilyMember === 'function') vm.addFamilyMember();
+            else vm.familyMembers.push({});
+          }
+          await new Promise((r) => setTimeout(r, 150));
+          dump.family_members_raw.forEach((rawRow, idx) => {
+            const targetRow = vm.familyMembers[idx];
+            if (!targetRow || !rawRow) return;
+            Object.entries(rawRow).forEach(([k, v]) => {
+              if (v !== undefined && typeof v !== 'function') {
+                setReactive(targetRow, k, v);
+              }
+            });
+          });
+        }
+      }
+
       // 1. Populate Primary Applicant (Wife / Head)
       if (payload.head && vm.data) {
         const h = payload.head;
@@ -110,8 +137,11 @@
         setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
         setReactive(vm.data, 'verification_number', cleanHeadId);
         setReactive(vm.data, 'date_of_birth', headCleanDob);
+        setReactive(vm.data, 'dob', headCleanDob);
         setReactive(vm.data, 'gender', headGenderId);
         setReactive(vm.data, 'gender_id', headGenderId);
+        setReactive(vm.data, 'sex', headGenderId);
+        setReactive(vm.data, 'applicant_gender', headGenderId);
         setReactive(vm.data, 'name_bn', h.name_bn);
         setReactive(vm.data, 'name_en', h.name_en);
         setReactive(vm.data, 'father_name_bn', h.father_name_bn);
@@ -120,7 +150,7 @@
         setReactive(vm.data, 'mother_name_en', h.mother_name_en);
       }
 
-      // 2. Populate Family Members (Husband + Children) with strict field isolation, Gender & Relationship
+      // 2. Populate Family Members
       const members = Array.isArray(payload.family_members) ? payload.family_members : [];
       if (members.length > 0 && Array.isArray(vm.familyMembers)) {
         while (vm.familyMembers.length < members.length) {
@@ -142,7 +172,7 @@
           const genderId = resolveGenderId(m);
           const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
 
-          setReactive(row, 'verification_type', isNID ? 1 : 2); // 1 = NID, 2 = BRN
+          setReactive(row, 'verification_type', isNID ? 1 : 2);
           
           if (isNID) {
             setReactive(row, 'nid', cleanId);

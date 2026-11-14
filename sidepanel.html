@@ -118,7 +118,7 @@
     .field-warning { border-color: var(--danger) !important; background: var(--danger-soft) !important; }
 
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-xs); transition: border-color var(--transition); }
-    .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 6px; flex-wrap: wrap; }
     .card-title-group { display: flex; align-items: center; gap: 8px; }
     .step-badge { width: 20px; height: 20px; border-radius: 5px; background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-main); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
     .card-title { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
@@ -147,7 +147,7 @@
     .thumb-item.has-data { border-color: #a7f3d0; background: #f0fdf4; }
     .thumb-item img { width: 100%; height: 76px; object-fit: contain; border-radius: 4px; background: #000000; border: 1px solid var(--border); }
     .thumb-bar { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
-    .thumb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75px; font-weight: 500; }
+    .thumb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 85px; font-weight: 500; }
     .thumb-moves { display: flex; gap: 2px; }
     .thumb-moves button { border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer; }
     .thumb-remove { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 4px; border: none; background: rgba(9, 9, 11, 0.75); color: #fff; font-size: 13px; line-height: 22px; padding: 0; cursor: pointer; }
@@ -235,8 +235,10 @@
           <span class="step-badge">1</span>
           <h2 class="card-title">Household Head (Wife) &amp; Husband</h2>
         </div>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull existing drafted data from web form">Pull Draft</button>
+        <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
+          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull every field and tab from web form">Pull All</button>
+          <button type="button" class="btn btn-xs" id="importJsonBtn" title="Import JSON backup file">Import</button>
+          <input type="file" id="importJsonInput" accept=".json,application/json" hidden>
           <span class="badge" id="headCount">0 files</span>
         </div>
       </div>
@@ -273,8 +275,9 @@
 
     <section class="results-wrap" id="resultsWrap">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted Records (Click to copy)</span>
-        <div style="display:flex; gap:6px;">
+        <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted &amp; Website Records</span>
+        <div style="display:flex; gap:5px;">
+          <button type="button" class="btn btn-xs" id="exportJsonBtn" style="border-color:#2563eb; color:#2563eb;">Export JSON</button>
           <button type="button" class="btn btn-xs" id="copyJsonBtn">Copy JSON</button>
           <button type="button" class="btn btn-xs" id="clearAllBtn">Reset</button>
         </div>

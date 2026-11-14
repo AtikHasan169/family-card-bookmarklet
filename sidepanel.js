@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.6-live';
+const CURRENT_VERSION_TAG = 'v3.8-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -84,6 +84,21 @@ let viewerZoom = 1;
 
 const $ = (id) => document.getElementById(id);
 
+function getItemRefs(item) {
+  if (!item) return [];
+  if (Array.isArray(item.boundRefs)) return item.boundRefs;
+  if (item.boundRef) return [item.boundRef];
+  return [];
+}
+
+function addItemRef(item, ref) {
+  if (!item || !ref) return;
+  if (!Array.isArray(item.boundRefs)) item.boundRefs = [];
+  const exists = item.boundRefs.some((r) => r.type === ref.type && r.index === ref.index);
+  if (!exists) item.boundRefs.push(ref);
+  item.boundRef = item.boundRefs[0] || null;
+}
+
 function saveCredentialsEverywhere(apiKey, model) {
   try {
     if (apiKey !== undefined) localStorage.setItem(STORAGE_KEY, apiKey);
@@ -104,7 +119,6 @@ function initApp() {
   $('modelSelect').value = savedModel;
   if (!savedKey) $('settingsDrawer').classList.add('open');
 
-  // Bind UI Events Safely
   $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined));
   $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value));
 
@@ -145,6 +159,10 @@ function initApp() {
     setStatus('Raw JSON copied to clipboard.', 'ok');
   });
 
+  $('exportJsonBtn').addEventListener('click', exportExtractedJson);
+  $('importJsonBtn').addEventListener('click', () => $('importJsonInput').click());
+  $('importJsonInput').addEventListener('change', importExtractedJson);
+
   $('clearAllBtn').addEventListener('click', () => {
     state.head = [];
     state.other = [];
@@ -159,10 +177,9 @@ function initApp() {
 
   $('pullFromWebBtn').addEventListener('click', () => {
     window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
-    setStatus('Pulling drafted data from web form...', 'loading');
+    setStatus('Pulling all tabs & fields from web form...', 'loading');
   });
 
-  // Setup Drag-and-Drop
   ['headDropZone', 'otherDropZone'].forEach(id => {
     const zone = $(id);
     if (!zone) return;
@@ -186,7 +203,6 @@ function initApp() {
   window.parent.postMessage({ action: 'FC_GET_API_KEY' }, '*');
 }
 
-// Guaranteed launch
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initApp);
 } else {
@@ -238,8 +254,6 @@ function handleIncomingMessages(e) {
       $('connText').textContent = 'Form Ready';
     }
   }
-  
-  // Live sync from web disabled to protect extracted data
 
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
@@ -247,7 +261,7 @@ function handleIncomingMessages(e) {
       state.lastExtracted = normalizeOutput(res.payload, true);
       renderExtractedCards(state.lastExtracted);
       $('autofillBtn').disabled = false;
-      setStatus(`Successfully pulled Head + ${state.lastExtracted.family_members.length} member(s) from form!`, 'ok');
+      setStatus(`Pulled Head + ${state.lastExtracted.family_members.length} member(s) & all website tabs!`, 'ok');
     } else {
       setStatus(res.message || 'Could not pull draft data.', 'err');
     }
@@ -339,7 +353,7 @@ function syncJsonOutput() {
 }
 
 function addImage(category, base64, name) {
-  state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null });
+  state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [] });
   renderPreviews(category);
   saveSessionState();
 }
@@ -506,10 +520,10 @@ function setupImageViewerModal() {
           <button type="button" id="fcViewerClose" style="background:#dc2626; color:#fff; border:none; border-radius:6px; width:28px; height:28px; font-weight:bold; font-size:14px; cursor:pointer; margin-left:4px;">✕</button>
         </div>
       </div>
-      <div style="width:100%; max-height:42vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
-        <img id="fcViewerImg" style="max-width:100%; max-height:42vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
+      <div style="width:100%; max-height:40vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
+        <img id="fcViewerImg" style="max-width:100%; max-height:40vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
       </div>
-      <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:46vh; overflow-y:auto;"></div>
+      <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:48vh; overflow-y:auto;"></div>
     </div>`;
   document.body.appendChild(modal);
 
@@ -543,24 +557,40 @@ function showImageViewer(item) {
   const metaBox = $('fcViewerMeta');
   metaBox.replaceChildren();
 
-  if (item.boundRef && state.lastExtracted) {
-    const isHead = item.boundRef.type === 'head';
-    const targetObj = isHead ? state.lastExtracted.head : state.lastExtracted.family_members[item.boundRef.index];
+  const refs = getItemRefs(item);
+  if (refs.length > 0 && state.lastExtracted) {
+    $('fcViewerTitle').textContent = refs.length > 1
+      ? `Card Inspector (${refs.length} People in Photo)`
+      : `Card Inspector — Edit`;
 
-    if (targetObj) {
-      const updateModalTitle = () => {
-        $('fcViewerTitle').textContent = isHead 
-          ? `Primary Applicant (Wife) [${targetObj.doc_type || 'NID'}] — Edit` 
-          : `Member #${item.boundRef.index + 2} (${targetObj.relation} • ${targetObj.gender} • ${targetObj.doc_type || 'NID'})`;
+    const headerNote = document.createElement('div');
+    headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;';
+    headerNote.innerHTML = `<span>Showing ${refs.length} person(s) linked to this photo</span><span style="color:#38bdf8; font-weight:600;">● Manual Mode</span>`;
+    metaBox.appendChild(headerNote);
+
+    const multiContainer = document.createElement('div');
+    multiContainer.style.cssText = 'display:flex; flex-direction:column; gap:14px;';
+
+    refs.forEach((ref, refIdx) => {
+      const isHead = ref.type === 'head';
+      const targetObj = isHead ? state.lastExtracted.head : state.lastExtracted.family_members[ref.index];
+      if (!targetObj) return;
+
+      const personBox = document.createElement('div');
+      personBox.style.cssText = 'background:#09090b; border:1px solid #27272a; border-radius:8px; padding:10px;';
+
+      const personHeader = document.createElement('div');
+      personHeader.style.cssText = 'font-size:12px; font-weight:700; color:#38bdf8; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #27272a; display:flex; justify-content:space-between;';
+
+      const updatePersonTitle = () => {
+        personHeader.innerHTML = isHead
+          ? `<span>Person #${refIdx + 1}: Primary Applicant (Wife)</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.doc_type || 'NID'}</span>`
+          : `<span>Person #${refIdx + 1}: Member #${ref.index + 2} (${targetObj.relation})</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.gender} • ${targetObj.doc_type || 'NID'}</span>`;
       };
-      updateModalTitle();
+      updatePersonTitle();
+      personBox.appendChild(personHeader);
 
       const fields = isHead ? HEAD_FIELDS : MEMBER_FIELDS;
-      const headerNote = document.createElement('div');
-      headerNote.style.cssText = 'font-size:11px; color:#94a3b8; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;';
-      headerNote.innerHTML = '<span>Check empty red fields before Auto-Fill</span><span style="color:#38bdf8; font-weight:600;">● Manual Mode</span>';
-      metaBox.appendChild(headerNote);
-
       const formList = document.createElement('div');
       formList.style.cssText = 'display:flex; flex-direction:column; gap:7px;';
 
@@ -571,10 +601,10 @@ function showImageViewer(item) {
         lbl.style.cssText = 'color:#a1a1aa; font-size:11px; font-weight:500;';
         lbl.textContent = f.label;
 
-        const inputEl = createFieldControl(f, targetObj, updateModalTitle, formList);
+        const inputEl = createFieldControl(f, targetObj, updatePersonTitle, formList);
         if (inputEl.tagName === 'INPUT' && !inputEl.classList.contains('field-warning')) {
           inputEl.style.color = '#f8fafc';
-          inputEl.style.background = '#09090b';
+          inputEl.style.background = '#18181b';
           inputEl.style.borderColor = '#3f3f46';
         }
 
@@ -598,10 +628,13 @@ function showImageViewer(item) {
         formList.appendChild(row);
       });
 
-      metaBox.appendChild(formList);
-      modal.style.display = 'flex';
-      return;
-    }
+      personBox.appendChild(formList);
+      multiContainer.appendChild(personBox);
+    });
+
+    metaBox.appendChild(multiContainer);
+    modal.style.display = 'flex';
+    return;
   }
 
   $('fcViewerTitle').textContent = 'Card Preview';
@@ -616,8 +649,10 @@ function renderPreviews(category) {
   grid.replaceChildren();
 
   state[category].forEach((item, idx) => {
+    const refs = getItemRefs(item);
+    const hasData = refs.length > 0;
     const card = document.createElement('div');
-    card.className = `thumb-item${item.boundRef ? ' has-data' : ''}`;
+    card.className = `thumb-item${hasData ? ' has-data' : ''}`;
 
     const img = document.createElement('img');
     img.src = `data:image/jpeg;base64,${item.base64}`;
@@ -644,7 +679,8 @@ function renderPreviews(category) {
     bar.className = 'thumb-bar';
     const label = document.createElement('span');
     label.className = 'thumb-label';
-    label.textContent = `${idx + 1}. ${item.boundRef ? '✓ ' : ''}${item.name}`;
+    const countTag = refs.length > 1 ? `✓${refs.length} ` : (hasData ? '✓ ' : '');
+    label.textContent = `${idx + 1}. ${countTag}${item.name}`;
 
     const moves = document.createElement('div');
     moves.className = 'thumb-moves';
@@ -866,6 +902,7 @@ function setupNativeCropper() {
       activeCropItem.base64 = b64;
       renderPreviews('head');
       renderPreviews('other');
+      saveSessionState();
       
       if ($('fcViewerModal').style.display !== 'none') {
         $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
@@ -887,29 +924,32 @@ function buildPrompt() {
   const allowedRelations = RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => `"${r.value}"`).join(', ');
   return `Extract Bangladeshi NID and Birth Registration (BRN) data from the provided images into strict JSON.
 
+MULTI-CARD / MULTI-PERSON SINGLE IMAGE RULE:
+- A single uploaded photo may contain TWO OR MORE NID/BRN cards side-by-side or stacked (for example, Husband and Wife in one photo, or multiple children in one photo).
+- Extract EVERY person visible in each image as a separate record, and assign the same image tag (e.g., "S1_1") to the "source_images" array of EACH person found in that image!
+
 INTELLIGENT DOCUMENT DETECTION ('doc_type'):
-- Carefully inspect each image to determine if it is a National Identity Card ("NID") or a Birth Registration Certificate ("BRN").
+- Carefully inspect each card to determine if it is a National Identity Card ("NID") or a Birth Registration Certificate ("BRN").
 - Birth Certificates have headers like "জন্ম নিবন্ধন সনদ", "Birth Registration Certificate", "জন্ম নিবন্ধন নম্বর", or "BRN" (17 digits). Set "doc_type": "BRN".
 - National ID Cards have headers like "জাতীয় পরিচয়পত্র", "National ID Card", "ID NO", or "NID No" (10, 13, or 17 digits). Set "doc_type": "NID".
 - BRN & DOB ACCURACY: Birth Certificates have multiple dates. Extract ONLY the Date of Birth (জন্ম তারিখ). Ignore Date of Registration (নিবন্ধন তারিখ) and Date of Issuance (প্রদানের তারিখ).
 
 STRICT NAME EXTRACTION & CROSS-VERIFICATION RULES:
 1. NEVER READ FROM SIGNATURE:
-   - For the Primary Applicant ('head') and all other NID cards, extract 'name_bn' and 'name_en' ONLY from the printed "নাম:" (Name) and "Name:" text fields in the main body of the NID card.
-   - NEVER extract, guess, or copy the name from the handwritten signature ("স্বাক্ষর" / Signature) above the photo or at the bottom of the card.
+   - Extract 'name_bn' and 'name_en' ONLY from the printed "নাম:" (Name) and "Name:" text fields in the main body of the NID card.
+   - NEVER extract, guess, or copy the name from the handwritten signature ("স্বাক্ষর" / Signature).
 2. CROSS-CHECK HEAD (WIFE) WITH CHILDREN'S MOTHER'S NAME:
-   - Look at the uploaded documents for the children (in Section 2 or Section 1) and check the "মাতার নাম" (Mother's Name) and "পিতার নাম" (Father's Name) fields.
-   - Use the children's "মাতার নাম" (Mother's Name) to cross-verify which card in Section 1 belongs to the Mother/Wife ('head') and confirm her full legal name if the printed text on her own NID is blurry or partially obscured.
+   - Use the children's "মাতার নাম" (Mother's Name) and "পিতার নাম" (Father's Name) fields to cross-verify which card belongs to the Mother/Wife ('head') and Husband.
 
 CRITICAL ROLE & GENDER RULE:
 - The system for fc.bhata.gov.bd requires the Primary Applicant ('head') to be the WIFE / MOTHER (Female, "gender": "Female"). 
-- Look at all uploaded ID cards in Section 1. Find the female cardholder (verified via her printed Name field and cross-checked against the children's Mother's Name). She MUST be assigned as 'head' with "gender": "Female".
-- The Husband / Father (verified via his printed Name field and cross-checked against the children's Father's Name) MUST be placed as the FIRST item in 'family_members' with relation "Husband" and "gender": "Male". Never assign a male as 'head'.
-- For every family member, determine their "gender" ("Male" or "Female") from the card's Sex/লিঙ্গ field or their name/relationship (e.g., Son -> "Male", Daughter -> "Female").
+- Find the female cardholder in Section 1. She MUST be assigned as 'head' with "gender": "Female".
+- The Husband / Father MUST be placed as the FIRST item in 'family_members' with relation "Husband" and "gender": "Male". Never assign a male as 'head'.
+- For every family member, determine their "gender" ("Male" or "Female") from the card's Sex/লিঙ্গ field or their name/relationship.
 
 IMAGE TRACKING RULE:
 - Each image is labeled with an ID tag like "S1_1", "S1_2", "S2_1", etc.
-- In both "head" and each object in "family_members", include a "source_images" array listing all image tags belonging to that person.
+- In both "head" and each object in "family_members", include a "source_images" array listing all image tags where that person's card appears.
 
 EXTRACTION RULES:
 1. PRIMARY APPLICANT (WIFE = 'head'):
@@ -929,7 +969,7 @@ JSON SCHEMA:
   },
   "family_members": [
     {
-      "relation": "Husband", "gender": "Male", "doc_type": "BRN", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "DD-MM-YYYY", "is_disabled": 0, "source_images": ["S1_2"]
+      "relation": "Husband", "gender": "Male", "doc_type": "NID", "name_bn": "", "name_en": "", "father_name_bn": "", "mother_name_bn": "", "nid_or_brn": "", "dob": "DD-MM-YYYY", "is_disabled": 0, "source_images": ["S1_1"]
     }
   ]
 }`;
@@ -1015,22 +1055,22 @@ function normalizeOutput(raw, preserveOrder = false) {
     });
   }
 
-  return { head, family_members: deduped };
+  const result = { head, family_members: deduped };
+  if (raw && raw.full_form_dump && typeof raw.full_form_dump === 'object') {
+    result.full_form_dump = raw.full_form_dump;
+  }
+  return result;
 }
 
 async function copyTextSafe(val) {
   try {
-    // 1. Try native iframe copy (works now that we added permissions)
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(val);
       return;
     }
     throw new Error('Fallback to parent window');
   } catch (err) {
-    // 2. Fallback: Ask the first-party parent window to copy it (100% reliable)
     window.parent.postMessage({ action: 'FC_COPY_TEXT', text: val }, '*');
-    
-    // 3. Last resort fallback inside iframe
     try {
       const textarea = document.createElement('textarea');
       textarea.value = val;
@@ -1046,8 +1086,8 @@ async function copyTextSafe(val) {
 }
 
 function bindExtractedDataToThumbnails(data) {
-  state.head.forEach((item) => { item.boundRef = null; });
-  state.other.forEach((item) => { item.boundRef = null; });
+  state.head.forEach((item) => { item.boundRef = null; item.boundRefs = []; });
+  state.other.forEach((item) => { item.boundRef = null; item.boundRefs = []; });
 
   const tagMap = new Map();
   state.head.forEach((item, idx) => tagMap.set(`S1_${idx + 1}`, item));
@@ -1056,12 +1096,17 @@ function bindExtractedDataToThumbnails(data) {
   if (data.head) {
     const h = data.head;
     const ref = { type: 'head' };
+    let bound = false;
     if (Array.isArray(h.source_images) && h.source_images.length > 0) {
       h.source_images.forEach((tag) => {
-        if (tagMap.has(tag)) tagMap.get(tag).boundRef = ref;
+        if (tagMap.has(tag)) {
+          addItemRef(tagMap.get(tag), ref);
+          bound = true;
+        }
       });
-    } else if (state.head[0]) {
-      state.head[0].boundRef = ref;
+    }
+    if (!bound && state.head[0]) {
+      addItemRef(state.head[0], ref);
     }
   }
 
@@ -1074,7 +1119,7 @@ function bindExtractedDataToThumbnails(data) {
       if (Array.isArray(m.source_images) && m.source_images.length > 0) {
         m.source_images.forEach((tag) => {
           if (tagMap.has(tag)) {
-            tagMap.get(tag).boundRef = ref;
+            addItemRef(tagMap.get(tag), ref);
             bound = true;
           }
         });
@@ -1082,23 +1127,25 @@ function bindExtractedDataToThumbnails(data) {
 
       if (!bound) {
         if (m.relation === 'Husband') {
-          const unboundHeadImg = state.head.find((it) => !it.boundRef) || state.head[1] || state.head[0];
-          if (unboundHeadImg) unboundHeadImg.boundRef = ref;
+          const targetHeadImg = state.head.find((it) => getItemRefs(it).length === 0) || state.head[1] || state.head[0];
+          if (targetHeadImg) addItemRef(targetHeadImg, ref);
         } else if (state.other[fallbackOtherIdx]) {
-          state.other[fallbackOtherIdx].boundRef = ref;
+          addItemRef(state.other[fallbackOtherIdx], ref);
           fallbackOtherIdx++;
+        } else if (state.other[0]) {
+          addItemRef(state.other[0], ref);
         }
       }
     });
 
     state.head.forEach((item, idx) => {
-      if (!item.boundRef && idx > 0 && state.head[idx - 1].boundRef) {
-        item.boundRef = state.head[idx - 1].boundRef;
+      if (getItemRefs(item).length === 0 && idx > 0 && getItemRefs(state.head[idx - 1]).length > 0) {
+        getItemRefs(state.head[idx - 1]).forEach((r) => addItemRef(item, r));
       }
     });
     state.other.forEach((item, idx) => {
-      if (!item.boundRef && idx > 0 && state.other[idx - 1].boundRef) {
-        item.boundRef = state.other[idx - 1].boundRef;
+      if (getItemRefs(item).length === 0 && idx > 0 && getItemRefs(state.other[idx - 1]).length > 0) {
+        getItemRefs(state.other[idx - 1]).forEach((r) => addItemRef(item, r));
       }
     });
   }
@@ -1177,8 +1224,261 @@ function renderExtractedCards(data) {
   if (data.head) container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
   if (Array.isArray(data.family_members)) data.family_members.forEach((m, i) => container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i)));
 
+  if (data.full_form_dump) {
+    renderFullWebsiteTabs(container, data.full_form_dump);
+  }
+
   bindExtractedDataToThumbnails(data);
   syncJsonOutput();
+}
+
+const KNOWN_KEY_OPTIONS = {
+  verification_type: [{ value: 1, label: '1 — NID (জাতীয় পরিচয়পত্র)' }, { value: 2, label: '2 — BRN (জন্ম নিবন্ধন)' }],
+  gender: [{ value: 1, label: '1 — Male (পুরুষ)' }, { value: 2, label: '2 — Female (মহিলা)' }, { value: 3, label: '3 — Other (অন্যান্য)' }],
+  gender_id: [{ value: 1, label: '1 — Male (পুরুষ)' }, { value: 2, label: '2 — Female (মহিলা)' }, { value: 3, label: '3 — Other (অন্যান্য)' }],
+  relationship_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
+  relation_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
+  is_member_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
+  is_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
+  is_gov_job_holder: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }]
+};
+
+function prettifyKey(key) {
+  return String(key || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function guessOptionsForKey(key, val, vueOptions = {}) {
+  if (KNOWN_KEY_OPTIONS[key]) return KNOWN_KEY_OPTIONS[key];
+  if (typeof val === 'boolean') return [{ value: 'true', label: 'true (হ্যাঁ)' }, { value: 'false', label: 'false (না)' }];
+  if (/^(is_|has_)/i.test(key) && (val === 0 || val === 1 || val === '0' || val === '1')) {
+    return [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }];
+  }
+  const baseName = key.replace(/_id$/i, '');
+  for (const [optKey, list] of Object.entries(vueOptions)) {
+    if (optKey.toLowerCase().includes(baseName.toLowerCase())) return list;
+  }
+  return null;
+}
+
+function categorizeHeadKey(k) {
+  const s = k.toLowerCase();
+  if (/division|district|upazila|thana|union|ward|village|house|road|post|address|pourashava|city/.test(s)) return 'Tab — Address & Location (ঠিকানা)';
+  if (/mobile|phone|email|contact|bank|account|branch|routing|mfs|bkash|nagad|rocket|payment/.test(s)) return 'Tab — Contact & Bank/Payment (যোগাযোগ ও ব্যাংক)';
+  if (/income|occupation|profession|job|land|house_type|latrine|electricity|asset|allowance|poverty|marital|education|religion/.test(s)) return 'Tab — Socio-Economic & Info (আর্থ-সামাজিক তথ্য)';
+  return 'Tab — Applicant & General Info (আবেদনকারীর সব তথ্য)';
+}
+
+function buildCopyRow(labelStr, controlEl, getCopyValueFn) {
+  const r = document.createElement('div');
+  r.className = 'record-row';
+  r.style.gridTemplateColumns = '115px 1fr auto';
+
+  const kEl = document.createElement('span');
+  kEl.className = 'row-key';
+  kEl.style.wordBreak = 'break-word';
+  kEl.textContent = labelStr;
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn btn-xs';
+  copyBtn.textContent = 'Copy';
+  copyBtn.style.padding = '2px 7px';
+  copyBtn.style.fontSize = '10px';
+  copyBtn.addEventListener('click', async () => {
+    await copyTextSafe(String(getCopyValueFn() ?? ''));
+    copyBtn.textContent = 'Copied';
+    copyBtn.style.color = '#059669';
+    setTimeout(() => {
+      copyBtn.textContent = 'Copy';
+      copyBtn.style.color = '';
+    }, 800);
+  });
+
+  r.append(kEl, controlEl, copyBtn);
+  return r;
+}
+
+function createDumpFieldControl(targetObj, key, vueOptions) {
+  const val = targetObj[key];
+  const opts = guessOptionsForKey(key, val, vueOptions);
+
+  if (opts && opts.length) {
+    const sel = document.createElement('select');
+    sel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #cbd5e1; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    
+    const currentStr = String(val ?? '');
+    let matched = false;
+    opts.forEach((o) => {
+      const optEl = document.createElement('option');
+      optEl.value = String(o.value);
+      optEl.textContent = o.label;
+      if (String(o.value) === currentStr) matched = true;
+      sel.appendChild(optEl);
+    });
+    if (!matched && currentStr !== '') {
+      const customOpt = document.createElement('option');
+      customOpt.value = currentStr;
+      customOpt.textContent = `${currentStr} (Current)`;
+      sel.prepend(customOpt);
+    }
+    sel.value = currentStr;
+
+    sel.addEventListener('change', (e) => {
+      const rawV = e.target.value;
+      if (typeof val === 'number') targetObj[key] = Number(rawV);
+      else if (typeof val === 'boolean') targetObj[key] = (rawV === 'true');
+      else targetObj[key] = rawV;
+      syncJsonOutput();
+    });
+
+    return {
+      el: sel,
+      getCopyVal: () => {
+        const selectedOpt = sel.options[sel.selectedIndex];
+        return selectedOpt ? selectedOpt.value : targetObj[key];
+      }
+    };
+  }
+
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  const isObj = val !== null && typeof val === 'object';
+  inp.value = isObj ? JSON.stringify(val) : (val ?? '');
+  inp.placeholder = '—';
+  inp.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
+
+  inp.addEventListener('input', () => {
+    if (typeof val === 'number' && inp.value.trim() !== '' && !isNaN(Number(inp.value))) {
+      targetObj[key] = Number(inp.value);
+    } else if (isObj) {
+      try { targetObj[key] = JSON.parse(inp.value); } catch (_) {}
+    } else {
+      targetObj[key] = inp.value;
+    }
+    syncJsonOutput();
+  });
+
+  return { el: inp, getCopyVal: () => inp.value };
+}
+
+function renderFullWebsiteTabs(container, dump) {
+  const vueOptions = dump.vue_options || {};
+
+  if (dump.head_data && typeof dump.head_data === 'object') {
+    const tabGroups = {};
+    Object.keys(dump.head_data).forEach((k) => {
+      const v = dump.head_data[k];
+      if (typeof v === 'function') return;
+      const cat = categorizeHeadKey(k);
+      if (!tabGroups[cat]) tabGroups[cat] = [];
+      tabGroups[cat].push(k);
+    });
+
+    Object.entries(tabGroups).forEach(([tabName, keys]) => {
+      const details = document.createElement('details');
+      details.className = 'record-card';
+      details.open = true;
+
+      const summary = document.createElement('summary');
+      summary.className = 'record-head';
+      summary.style.cursor = 'pointer';
+      summary.innerHTML = `<span>${tabName}</span><span class="record-tag">${keys.length} fields</span>`;
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'record-rows';
+
+      keys.forEach((k) => {
+        const { el, getCopyVal } = createDumpFieldControl(dump.head_data, k, vueOptions);
+        body.appendChild(buildCopyRow(prettifyKey(k), el, getCopyVal));
+      });
+
+      details.appendChild(body);
+      container.appendChild(details);
+    });
+  }
+
+  if (Array.isArray(dump.family_members_raw) && dump.family_members_raw.length > 0) {
+    dump.family_members_raw.forEach((rawM, idx) => {
+      if (!rawM || typeof rawM !== 'object') return;
+      const details = document.createElement('details');
+      details.className = 'record-card';
+
+      const summary = document.createElement('summary');
+      summary.className = 'record-head';
+      summary.style.cursor = 'pointer';
+      const memTitle = rawM.name_bn || rawM.name_en || `Row #${idx + 1}`;
+      summary.innerHTML = `<span>Tab — Member #${idx + 1} All Website Fields (${memTitle})</span><span class="record-tag">Full Data</span>`;
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'record-rows';
+
+      Object.keys(rawM).forEach((k) => {
+        if (typeof rawM[k] === 'function') return;
+        const { el, getCopyVal } = createDumpFieldControl(rawM, k, vueOptions);
+        body.appendChild(buildCopyRow(prettifyKey(k), el, getCopyVal));
+      });
+
+      details.appendChild(body);
+      container.appendChild(details);
+    });
+  }
+
+  if (Array.isArray(dump.dom_tabs) && dump.dom_tabs.length > 0) {
+    dump.dom_tabs.forEach((tab) => {
+      const details = document.createElement('details');
+      details.className = 'record-card';
+
+      const summary = document.createElement('summary');
+      summary.className = 'record-head';
+      summary.style.cursor = 'pointer';
+      summary.innerHTML = `<span>Web Form — ${tab.title}</span><span class="record-tag">${tab.fields.length} controls</span>`;
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'record-rows';
+
+      tab.fields.forEach((f) => {
+        let ctrlEl;
+        if ((f.type === 'select' || f.type === 'boolean') && Array.isArray(f.options) && f.options.length) {
+          ctrlEl = document.createElement('select');
+          ctrlEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px; cursor:pointer; width:100%;';
+          f.options.forEach((o) => {
+            const opt = document.createElement('option');
+            opt.value = String(o.value);
+            opt.textContent = o.label || String(o.value);
+            ctrlEl.appendChild(opt);
+          });
+          ctrlEl.value = String(f.value ?? '');
+          ctrlEl.addEventListener('change', (e) => {
+            f.value = f.type === 'boolean' ? (e.target.value === 'true') : e.target.value;
+            const selOpt = ctrlEl.options[ctrlEl.selectedIndex];
+            f.display_value = selOpt ? selOpt.textContent : String(f.value);
+            syncJsonOutput();
+          });
+        } else {
+          ctrlEl = document.createElement('input');
+          ctrlEl.type = 'text';
+          ctrlEl.value = f.value ?? '';
+          ctrlEl.placeholder = '—';
+          ctrlEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
+          ctrlEl.addEventListener('input', () => {
+            f.value = ctrlEl.value;
+            f.display_value = ctrlEl.value;
+            syncJsonOutput();
+          });
+        }
+
+        body.appendChild(buildCopyRow(f.label, ctrlEl, () => f.display_value || f.value || ''));
+      });
+
+      details.appendChild(body);
+      container.appendChild(details);
+    });
+  }
 }
 
 async function runExtraction() {
@@ -1265,56 +1565,61 @@ function triggerFormAutofill() {
   setStatus('Sent auto-fill data to form!', 'ok');
 }
 
-function syncFromWebToPanel(webData) {
-  if (!state.lastExtracted) return; 
-  
-  let changed = false;
-  const s = (v) => (v == null ? '' : String(v).trim());
-  
-  if (webData.head && state.lastExtracted.head) {
-    const h = state.lastExtracted.head;
-    const w = webData.head;
-    if (s(w.doc_type) && h.doc_type !== s(w.doc_type)) { h.doc_type = s(w.doc_type); changed = true; }
-    if (s(w.gender) && h.gender !== s(w.gender)) { h.gender = s(w.gender); h.gender_id = GENDER_ID_MAP[h.gender] || 2; changed = true; }
-    if (s(w.nid) && h.nid !== s(w.nid)) { h.nid = s(w.nid); changed = true; }
-    if (s(w.dob) && h.dob !== normalizeDob(w.dob)) { h.dob = normalizeDob(w.dob); changed = true; }
-    if (s(w.name_bn) && h.name_bn !== s(w.name_bn)) { h.name_bn = s(w.name_bn); changed = true; }
-    if (s(w.name_en) && h.name_en !== s(w.name_en)) { h.name_en = s(w.name_en); changed = true; }
-    if (s(w.father_name_bn) && h.father_name_bn !== s(w.father_name_bn)) { h.father_name_bn = s(w.father_name_bn); changed = true; }
-    if (s(w.father_name_en) && h.father_name_en !== s(w.father_name_en)) { h.father_name_en = s(w.father_name_en); changed = true; }
-    if (s(w.mother_name_bn) && h.mother_name_bn !== s(w.mother_name_bn)) { h.mother_name_bn = s(w.mother_name_bn); changed = true; }
-    if (s(w.mother_name_en) && h.mother_name_en !== s(w.mother_name_en)) { h.mother_name_en = s(w.mother_name_en); changed = true; }
+function exportExtractedJson() {
+  if (!state.lastExtracted) {
+    setStatus('Nothing to export yet — Extract or Pull All first.', 'err');
+    return;
   }
+  const h = state.lastExtracted.head || {};
+  const idPart = h.nid || (h.name_en ? h.name_en.replace(/[^A-Z0-9]+/gi, '_') : 'draft');
+  const filename = `FC_${idPart}_${new Date().toISOString().slice(0, 10)}.json`;
+  const jsonString = JSON.stringify(state.lastExtracted, null, 2);
 
-  if (webData.members && Array.isArray(state.lastExtracted.family_members)) {
-    state.lastExtracted.family_members.forEach((m, idx) => {
-      const w = webData.members[idx];
-      if (w) {
-         if (s(w.doc_type) && m.doc_type !== s(w.doc_type)) { m.doc_type = s(w.doc_type); changed = true; }
-         if (s(w.gender) && m.gender !== s(w.gender)) { m.gender = s(w.gender); m.gender_id = GENDER_ID_MAP[m.gender] || 1; changed = true; }
-         if (s(w.nid_or_brn) && m.nid_or_brn !== s(w.nid_or_brn)) { m.nid_or_brn = s(w.nid_or_brn); changed = true; }
-         if (s(w.dob) && m.dob !== normalizeDob(w.dob)) { m.dob = normalizeDob(w.dob); changed = true; }
-         if (s(w.name_bn) && m.name_bn !== s(w.name_bn)) { m.name_bn = s(w.name_bn); changed = true; }
-         if (s(w.name_en) && m.name_en !== s(w.name_en)) { m.name_en = s(w.name_en); changed = true; }
-         if (s(w.father_name_bn) && m.father_name_bn !== s(w.father_name_bn)) { m.father_name_bn = s(w.father_name_bn); changed = true; }
-         if (s(w.mother_name_bn) && m.mother_name_bn !== s(w.mother_name_bn)) { m.mother_name_bn = s(w.mother_name_bn); changed = true; }
-         
-         if (w.relationship_id && m.relationship_id != w.relationship_id) {
-            m.relationship_id = w.relationship_id;
-            const foundRel = RELATION_OPTIONS.find(r => r.id == w.relationship_id);
-            if (foundRel) m.relation = foundRel.value;
-            changed = true;
-         }
+  window.parent.postMessage({ action: 'FC_DOWNLOAD_JSON', filename, jsonString }, '*');
+  setStatus(`Exported ${filename}!`, 'ok');
+}
+
+function importExtractedJson(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onerror = () => setStatus('Could not read JSON file.', 'err');
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      let normalized;
+
+      if (parsed.head || parsed.family_members || parsed.full_form_dump) {
+        normalized = normalizeOutput(parsed, true);
+      } else if (parsed.verification_number || parsed.name_bn || parsed.name_en) {
+        normalized = normalizeOutput({
+          head: {
+            nid: parsed.verification_number || parsed.nid || '',
+            dob: parsed.date_of_birth || parsed.dob || '',
+            name_bn: parsed.name_bn || '',
+            name_en: parsed.name_en || '',
+            father_name_bn: parsed.father_name_bn || '',
+            father_name_en: parsed.father_name_en || '',
+            mother_name_bn: parsed.mother_name_bn || '',
+            mother_name_en: parsed.mother_name_en || ''
+          },
+          family_members: [],
+          full_form_dump: { head_data: parsed, family_members_raw: [] }
+        }, true);
+      } else {
+        throw new Error('Unrecognized JSON structure.');
       }
-    });
-  }
 
-  if (changed) {
-    syncJsonOutput();
-    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) {
-    } else {
-       renderExtractedCards(state.lastExtracted); 
+      state.lastExtracted = normalized;
+      renderExtractedCards(normalized);
+      $('autofillBtn').disabled = false;
+      const dumpNotice = normalized.full_form_dump ? ' (includes Full Website Tabs)' : '';
+      setStatus(`Imported ${file.name}${dumpNotice}! Click 2. Auto-Fill Form to apply.`, 'ok');
+    } catch (err) {
+      setStatus(`Import error: ${err.message}`, 'err');
     }
-    setStatus('Webpage edits automatically synced to panel.', 'ok');
-  }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
 }
