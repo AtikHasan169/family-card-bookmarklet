@@ -126,13 +126,14 @@
         }
       }
 
-      // 1. Populate Primary Applicant (Wife / Head) - Names, NID, DOB filled; Gender touched only on main form
+      // 1. Populate Primary Applicant (Wife / Head) - Names, NID, DOB with slashes filled; Gender untouched on verification page
       if (payload.head && vm.data) {
         const h = payload.head;
         const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
         const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-        const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
+        // Format DOB with slashes (DD/MM/YYYY)
+        const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
         const isVerificationPage = Boolean(
           document.querySelector('input[placeholder*="ক্যাপচা"], input[id*="captcha"], .captcha-container') ||
@@ -153,7 +154,7 @@
         setReactive(vm.data, 'mother_name_bn', h.mother_name_bn);
         setReactive(vm.data, 'mother_name_en', h.mother_name_en);
 
-        // GENDER: Excluded on captcha page, filled normally on main form
+        // GENDER: Excluded on verification page, filled normally on main form
         if (!isVerificationPage) {
           setReactive(vm.data, 'gender', headGenderId);
           setReactive(vm.data, 'gender_id', headGenderId);
@@ -196,7 +197,8 @@
             setReactive(row, 'verification_number', cleanId);
           }
 
-          const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '');
+          // Format member DOB with slashes (DD/MM/YYYY)
+          const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
           setReactive(row, 'dob', memCleanDob);
           setReactive(row, 'date_of_birth', memCleanDob);
           setReactive(row, 'name_bn', m.name_bn);

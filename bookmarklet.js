@@ -208,9 +208,9 @@
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-          const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
+          // Format DOB with slashes (DD/MM/YYYY) to match website input mask expectations
+          const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
-          // Robust detection of the NID Verification / Captcha page
           const isVerificationPage = Boolean(
             document.querySelector('input[placeholder*="ক্যাপচা"], input[id*="captcha"], .captcha-container') ||
             (!document.querySelector('input[name*="name_bn"], input[id*="name_bn"], #name_bn') && 
@@ -290,7 +290,8 @@
               setReactive(vmMembers, row, 'verification_number', cleanId);
             }
 
-            const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '');
+            // Format member DOB with slashes (DD/MM/YYYY)
+            const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
             setReactive(vmMembers, row, 'dob', memCleanDob);
             setReactive(vmMembers, row, 'date_of_birth', memCleanDob);
             setReactive(vmMembers, row, 'name_bn', m.name_bn);
