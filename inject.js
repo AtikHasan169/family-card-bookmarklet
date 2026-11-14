@@ -132,8 +132,25 @@
         const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
         const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-
         const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
+
+        const isVerificationPage = Array.from(document.querySelectorAll('button, a, span, label')).some(el => 
+          el.textContent.includes('যাচাই') || el.textContent.includes('Verify') || el.textContent.includes('ক্যাপচা')
+        ) && !document.querySelector('input[name*="name_bn"], input[id*="name_bn"]');
+
+        if (isVerificationPage) {
+          setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
+          setReactive(vm.data, 'verification_number', cleanHeadId);
+          setReactive(vm.data, 'date_of_birth', headCleanDob);
+          setReactive(vm.data, 'dob', headCleanDob);
+          window.dispatchEvent(
+            new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+              detail: { success: true, message: `Filled NID & DOB for verification. Solve captcha and click Verify!` }
+            })
+          );
+          return;
+        }
+
         setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
         setReactive(vm.data, 'verification_number', cleanHeadId);
         setReactive(vm.data, 'date_of_birth', headCleanDob);

@@ -210,6 +210,27 @@
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
           const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
 
+          // Check if we are on the NID Verification / Captcha page (before main form loads)
+          const isVerificationPage = Array.from(document.querySelectorAll('button, a, span, label')).some(el => 
+            el.textContent.includes('যাচাই') || el.textContent.includes('Verify') || el.textContent.includes('ক্যাপচা')
+          ) && !document.querySelector('input[name*="name_bn"], input[id*="name_bn"]');
+
+          if (isVerificationPage) {
+            // SAFE MODE: Only fill NID/BRN and DOB on the verification page so Vuetify doesn't break!
+            if (vmHead && vmHead.data) {
+              setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
+              setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
+              setReactive(vmHead, vmHead.data, 'nid', headIsNID ? cleanHeadId : '');
+              setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
+              setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
+              setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
+            }
+            window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+              detail: { success: true, message: `Filled NID & DOB for verification. Solve captcha and click Verify!` }
+            }));
+            return;
+          }
+
           if (vmHead && vmHead.data) {
             setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
             setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
