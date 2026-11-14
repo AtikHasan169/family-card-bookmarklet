@@ -46,6 +46,50 @@
     return true;
   }
 
+  function parseDobParts(rawDob) {
+    if (!rawDob) return null;
+    const clean = String(rawDob).replace(/\[.*?\]/g, '').trim();
+    let dd, mm, yyyy;
+    const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (dmy) {
+      dd = dmy[1].padStart(2, '0');
+      mm = dmy[2].padStart(2, '0');
+      yyyy = dmy[3];
+    } else {
+      const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+      if (ymd) {
+        yyyy = ymd[1];
+        mm = ymd[2].padStart(2, '0');
+        dd = ymd[3].padStart(2, '0');
+      } else {
+        return null;
+      }
+    }
+    return {
+      dd,
+      mm,
+      yyyy,
+      iso: `${yyyy}-${mm}-${dd}`,
+      slash: `${dd}/${mm}/${yyyy}`,
+      dash: `${dd}-${mm}-${yyyy}`
+    };
+  }
+
+  function calculateAgeYears(rawDob) {
+    const parts = parseDobParts(rawDob);
+    if (!parts) return null;
+    const yyyy = parseInt(parts.yyyy, 10);
+    const mm = parseInt(parts.mm, 10);
+    const dd = parseInt(parts.dd, 10);
+    const today = new Date();
+    let age = today.getFullYear() - yyyy;
+    const mDiff = (today.getMonth() + 1) - mm;
+    if (mDiff < 0 || (mDiff === 0 && today.getDate() < dd)) {
+      age--;
+    }
+    return age;
+  }
+
   function findFormVueInstance() {
     const appRoot = document.getElementById('application');
     if (appRoot && appRoot.__vue__ && (appRoot.__vue__.data || appRoot.__vue__.familyMembers)) {
@@ -68,25 +112,117 @@
     return null;
   }
 
-  // Robust DOM setter for Vuetify masked inputs (forces component state to register value)
-  function setNativeDOMValue(selectorHint, val) {
-    if (!val) return;
-    setTimeout(() => {
-      document.querySelectorAll('input').forEach(inp => {
-        const meta = `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''} ${inp.getAttribute('aria-label') || ''}`.toLowerCase();
-        if (meta.includes(selectorHint) || inp.classList.contains('v-input__input')) {
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-          if (nativeSetter) {
-            nativeSetter.call(inp, val);
-          } else {
-            inp.value = val;
-          }
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          inp.dispatchEvent(new Event('change', { bubbles: true }));
-          inp.dispatchEvent(new Event('blur', { bubbles: true }));
+  function isDatePickerVm(v) {
+    if (!v || !v.$options) return false;
+    const tag = String(v.$options._componentTag || v.$options.name || '').toLowerCase();
+    return tag.includes('date-picker') || tag.includes('datepicker') || ('tableDate' in v && 'activePicker' in v);
+  }
+
+  function isMenuOrDialogVm(v) {
+    if (!v || !v.$options) return false;
+    const tag = String(v.$options._componentTag || v.$options.name || '').toLowerCase();
+    return (tag.includes('v-menu') || tag.includes('v-dialog')) && 'isActive' in v;
+  }
+
+  function findAllVueComponents(rootVm, filterFn, visited = new Set()) {
+    const results = [];
+    if (!rootVm || visited.has(rootVm)) return results;
+    visited.add(rootVm);
+    if (filterFn(rootVm)) results.push(rootVm);
+    if (Array.isArray(rootVm.$children)) {
+      rootVm.$children.forEach(child => {
+        results.push(...findAllVueComponents(child, filterFn, visited));
+      });
+    }
+    return results;
+  }
+
+  async function selectDateViaVuetifyCalendar(rawDob, targetIndex = 0) {
+    const parts = parseDobParts(rawDob);
+    if (!parts) return;
+
+    const dobContainers = [];
+    document.querySelectorAll('.v-input, .form-group').forEach(wrap => {
+      if (wrap.closest('#fc-floating-root')) return;
+      const txt = (wrap.textContent || '').toLowerCase();
+      const inp = wrap.querySelector('input');
+      const meta = inp ? `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''}`.toLowerCase() : '';
+      if (txt.includes('জন্ম তারিখ') || txt.includes('date of birth') || /birth|dob/.test(meta)) {
+        if (!dobContainers.some(c => c.contains(wrap) || wrap.contains(c))) {
+          dobContainers.push(wrap);
+        }
+      }
+    });
+
+    const targetWrap = dobContainers[targetIndex];
+    let menuVm = null;
+    let wrapperVm = null;
+
+    if (targetWrap) {
+      let curr = targetWrap.__vue__;
+      let depth = 0;
+      while (curr && depth < 6) {
+        if (!menuVm && isMenuOrDialogVm(curr)) menuVm = curr;
+        if (!menuVm && Array.isArray(curr.$children)) {
+          const childMenu = curr.$children.find(isMenuOrDialogVm);
+          if (childMenu) menuVm = childMenu;
+        }
+        if (curr.$data && ('date' in curr.$data || 'dateFormatted' in curr.$data || 'dob' in curr.$data || 'date_of_birth' in curr.$data)) {
+          wrapperVm = curr;
+        }
+        curr = curr.$parent;
+        depth++;
+      }
+    }
+
+    let openedMenuTemporarily = false;
+    if (menuVm && !menuVm.isActive) {
+      const existingPickers = findAllVueComponents(menuVm, isDatePickerVm);
+      if (existingPickers.length === 0) {
+        menuVm.isActive = true;
+        openedMenuTemporarily = true;
+        await new Promise(r => setTimeout(r, 60));
+      }
+    }
+
+    let pickerEmitted = false;
+    if (menuVm) {
+      const pickers = findAllVueComponents(menuVm, isDatePickerVm);
+      pickers.forEach(pickerVm => {
+        pickerVm.$emit('input', parts.iso);
+        pickerVm.$emit('change', parts.iso);
+        pickerVm.$emit('click:date', parts.iso);
+        pickerEmitted = true;
+      });
+    }
+
+    if (!pickerEmitted) {
+      const allPickers = [];
+      document.querySelectorAll('*').forEach(n => {
+        if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
+          allPickers.push(n.__vue__);
         }
       });
-    }, 150);
+      const targetPicker = allPickers[targetIndex] || (targetIndex === 0 ? allPickers[0] : null);
+      if (targetPicker) {
+        targetPicker.$emit('input', parts.iso);
+        targetPicker.$emit('change', parts.iso);
+        targetPicker.$emit('click:date', parts.iso);
+        pickerEmitted = true;
+      }
+    }
+
+    if (wrapperVm && wrapperVm.$data) {
+      if ('date' in wrapperVm.$data) wrapperVm.$data.date = parts.iso;
+      if ('dob' in wrapperVm.$data) wrapperVm.$data.dob = parts.iso;
+      if ('date_of_birth' in wrapperVm.$data) wrapperVm.$data.date_of_birth = parts.iso;
+      if ('dateFormatted' in wrapperVm.$data) wrapperVm.$data.dateFormatted = parts.slash;
+    }
+
+    if (openedMenuTemporarily && menuVm) {
+      await new Promise(r => setTimeout(r, 40));
+      menuVm.isActive = false;
+    }
   }
 
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
@@ -152,22 +288,18 @@
         const h = payload.head;
         const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
-        const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
+        const headDobParts = parseDobParts(h.dob);
+        const headModelDob = headDobParts ? headDobParts.iso : String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
         const isVerificationPage = Boolean(
-          document.querySelector('input[placeholder*="ক্যাপচা"], input[id*="captcha"], .captcha-container') ||
-          (!document.querySelector('input[name*="name_bn"], input[id*="name_bn"], #name_bn') && 
-           document.querySelector('input[name*="verification_number"], input[id*="verification_number"], select[name*="verification_type"]'))
+          document.querySelector('input[placeholder*="ক্যাপচা"], input[placeholder*="উত্তর"], input[id*="captcha"], .captcha-container') ||
+          Array.from(document.querySelectorAll('label, span, p')).some(el => el.textContent.includes('ক্যাপচা সম্পূর্ণ করুন'))
         );
 
         setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
         setReactive(vm.data, 'verification_number', cleanHeadId);
-        setReactive(vm.data, 'date_of_birth', headCleanDob);
-        setReactive(vm.data, 'dob', headCleanDob);
-        
-        // Trigger native DOM events so Vuetify registers the DOB mask
-        setNativeDOMValue('birth', headCleanDob);
-        setNativeDOMValue('dob', headCleanDob);
+        setReactive(vm.data, 'date_of_birth', headModelDob);
+        setReactive(vm.data, 'dob', headModelDob);
 
         setReactive(vm.data, 'name_bn', h.name_bn);
         setReactive(vm.data, 'name_en', h.name_en);
@@ -183,10 +315,19 @@
           setReactive(vm.data, 'sex', headGenderId);
           setReactive(vm.data, 'applicant_gender', headGenderId);
         }
+
+        await selectDateViaVuetifyCalendar(h.dob, 0);
       }
 
       // 2. Populate Family Members
       const members = Array.isArray(payload.family_members) ? payload.family_members : [];
+      const allHousehold = payload.head ? [payload.head, ...members] : [...members];
+      const totalMembersCount = allHousehold.length;
+      const childrenUnder18Count = allHousehold.filter(m => {
+        const age = calculateAgeYears(m.dob);
+        return age !== null && age >= 0 && age < 18;
+      }).length;
+
       if (members.length > 0 && Array.isArray(vm.familyMembers)) {
         while (vm.familyMembers.length < members.length) {
           if (typeof vm.addFamilyMember === 'function') {
@@ -206,6 +347,7 @@
           const isNID = determineIsNID(m.doc_type, cleanId);
           const genderId = resolveGenderId(m);
           const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
+          const memAge = calculateAgeYears(m.dob);
 
           setReactive(row, 'verification_type', isNID ? 1 : 2);
           
@@ -219,10 +361,14 @@
             setReactive(row, 'verification_number', cleanId);
           }
 
-          const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
-          setReactive(row, 'dob', memCleanDob);
-          setReactive(row, 'date_of_birth', memCleanDob);
-          
+          const memDobParts = parseDobParts(m.dob);
+          const memModelDob = memDobParts ? memDobParts.iso : String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
+          setReactive(row, 'dob', memModelDob);
+          setReactive(row, 'date_of_birth', memModelDob);
+          if (memAge !== null && 'age' in row) {
+            setReactive(row, 'age', memAge);
+          }
+
           setReactive(row, 'name_bn', m.name_bn);
           setReactive(row, 'name_en', m.name_en);
           setReactive(row, 'father_name_bn', m.father_name_bn);
@@ -242,10 +388,13 @@
             setReactive(row, 'estimate_annual_income', 60000);
           }
         });
+      }
 
-        if (vm.data) {
-          setReactive(vm.data, 'house_size', members.length + 1);
-        }
+      if (vm.data) {
+        setReactive(vm.data, 'house_size', totalMembersCount);
+        setReactive(vm.data, 'children_count', childrenUnder18Count);
+        setReactive(vm.data, 'is_ethnic', 0);
+        setReactive(vm.data, 'location_type', 1);
       }
 
       if (typeof vm.$forceUpdate === 'function') {
@@ -256,7 +405,7 @@
         new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
           detail: {
             success: true,
-            message: `Auto-filled Head + ${members.length} family member(s) with Names & DOB.`
+            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18), Polli/Union & Khudro Nrigosthi: No!`
           }
         })
       );

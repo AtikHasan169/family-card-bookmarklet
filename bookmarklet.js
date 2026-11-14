@@ -9,7 +9,6 @@
     return;
   }
 
-  // Foolproof script resolution
   const fallbackUrl = 'https://atikhasan169.github.io/family-card-bookmarklet/bookmarklet.js';
   const currentScript = document.currentScript;
   const scriptSrc = (currentScript && currentScript.src) ? currentScript.src : fallbackUrl;
@@ -17,7 +16,6 @@
   const cleanScriptSrc = scriptSrc.split('?')[0];
   const baseUrl = new URL('.', cleanScriptSrc).href;
   
-  // Cache-buster ensures you NEVER get stuck on broken old versions
   const panelUrl = new URL('sidepanel.html?t=' + Date.now(), baseUrl).href;
   const panelOrigin = new URL(panelUrl).origin;
 
@@ -88,6 +86,373 @@
       return true;
     }
 
+    function parseDobParts(rawDob) {
+      if (!rawDob) return null;
+      const clean = String(rawDob).replace(/\[.*?\]/g, '').trim();
+      let dd, mm, yyyy;
+      const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+      if (dmy) {
+        dd = dmy[1].padStart(2, '0');
+        mm = dmy[2].padStart(2, '0');
+        yyyy = dmy[3];
+      } else {
+        const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+        if (ymd) {
+          yyyy = ymd[1];
+          mm = ymd[2].padStart(2, '0');
+          dd = ymd[3].padStart(2, '0');
+        } else {
+          return null;
+        }
+      }
+      return {
+        dd,
+        mm,
+        yyyy,
+        iso: `${yyyy}-${mm}-${dd}`,
+        slash: `${dd}/${mm}/${yyyy}`,
+        dash: `${dd}-${mm}-${yyyy}`
+      };
+    }
+
+    function calculateAgeYears(rawDob) {
+      const parts = parseDobParts(rawDob);
+      if (!parts) return null;
+      const yyyy = parseInt(parts.yyyy, 10);
+      const mm = parseInt(parts.mm, 10);
+      const dd = parseInt(parts.dd, 10);
+      const today = new Date();
+      let age = today.getFullYear() - yyyy;
+      const mDiff = (today.getMonth() + 1) - mm;
+      if (mDiff < 0 || (mDiff === 0 && today.getDate() < dd)) {
+        age--;
+      }
+      return age;
+    }
+
+    function findAllVueComponents(rootVm, filterFn, visited = new Set()) {
+      const results = [];
+      if (!rootVm || visited.has(rootVm)) return results;
+      visited.add(rootVm);
+      if (filterFn(rootVm)) results.push(rootVm);
+      if (Array.isArray(rootVm.$children)) {
+        rootVm.$children.forEach(child => {
+          results.push(...findAllVueComponents(child, filterFn, visited));
+        });
+      }
+      return results;
+    }
+
+    function isDatePickerVm(v) {
+      if (!v || !v.$options) return false;
+      const tag = String(v.$options._componentTag || v.$options.name || '').toLowerCase();
+      return tag.includes('date-picker') || tag.includes('datepicker') || ('tableDate' in v && 'activePicker' in v);
+    }
+
+    function isMenuOrDialogVm(v) {
+      if (!v || !v.$options) return false;
+      const tag = String(v.$options._componentTag || v.$options.name || '').toLowerCase();
+      return (tag.includes('v-menu') || tag.includes('v-dialog')) && 'isActive' in v;
+    }
+
+    async function selectDateViaVuetifyCalendar(rawDob, targetIndex = 0) {
+      const parts = parseDobParts(rawDob);
+      if (!parts) return;
+
+      const setReactive = (vmTarget, targetObj, key, val) => {
+        if (!targetObj || val === undefined || val === null) return;
+        if (vmTarget && typeof vmTarget.$set === 'function') vmTarget.$set(targetObj, key, val);
+        else targetObj[key] = val;
+      };
+
+      const dobContainers = [];
+      document.querySelectorAll('.v-input, .form-group').forEach(wrap => {
+        if (wrap.closest('#fc-floating-root')) return;
+        const txt = (wrap.textContent || '').toLowerCase();
+        const inp = wrap.querySelector('input');
+        const meta = inp ? `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''}`.toLowerCase() : '';
+        if (txt.includes('জন্ম তারিখ') || txt.includes('date of birth') || /birth|dob/.test(meta)) {
+          if (!dobContainers.some(c => c.contains(wrap) || wrap.contains(c))) {
+            dobContainers.push(wrap);
+          }
+        }
+      });
+
+      const targetWrap = dobContainers[targetIndex];
+      let menuVm = null;
+      let wrapperVm = null;
+
+      if (targetWrap) {
+        let curr = targetWrap.__vue__;
+        let depth = 0;
+        while (curr && depth < 6) {
+          if (!menuVm && isMenuOrDialogVm(curr)) menuVm = curr;
+          if (!menuVm && Array.isArray(curr.$children)) {
+            const childMenu = curr.$children.find(isMenuOrDialogVm);
+            if (childMenu) menuVm = childMenu;
+          }
+          if (curr.$data && ('date' in curr.$data || 'dateFormatted' in curr.$data || 'dob' in curr.$data || 'date_of_birth' in curr.$data)) {
+            wrapperVm = curr;
+          }
+          curr = curr.$parent;
+          depth++;
+        }
+      }
+
+      let openedMenuTemporarily = false;
+      if (menuVm && !menuVm.isActive) {
+        const existingPickers = findAllVueComponents(menuVm, isDatePickerVm);
+        if (existingPickers.length === 0) {
+          menuVm.isActive = true;
+          openedMenuTemporarily = true;
+          await new Promise(r => setTimeout(r, 60));
+        }
+      }
+
+      let pickerEmitted = false;
+      if (menuVm) {
+        const pickers = findAllVueComponents(menuVm, isDatePickerVm);
+        pickers.forEach(pickerVm => {
+          pickerVm.$emit('input', parts.iso);
+          pickerVm.$emit('change', parts.iso);
+          pickerVm.$emit('click:date', parts.iso);
+          pickerEmitted = true;
+        });
+      }
+
+      if (!pickerEmitted) {
+        const allPickers = [];
+        document.querySelectorAll('*').forEach(n => {
+          if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
+            allPickers.push(n.__vue__);
+          }
+        });
+        const targetPicker = allPickers[targetIndex] || (targetIndex === 0 ? allPickers[0] : null);
+        if (targetPicker) {
+          targetPicker.$emit('input', parts.iso);
+          targetPicker.$emit('change', parts.iso);
+          targetPicker.$emit('click:date', parts.iso);
+          pickerEmitted = true;
+        }
+      }
+
+      if (wrapperVm && wrapperVm.$data) {
+        if ('date' in wrapperVm.$data) setReactive(wrapperVm, wrapperVm.$data, 'date', parts.iso);
+        if ('dob' in wrapperVm.$data) setReactive(wrapperVm, wrapperVm.$data, 'dob', parts.iso);
+        if ('date_of_birth' in wrapperVm.$data) setReactive(wrapperVm, wrapperVm.$data, 'date_of_birth', parts.iso);
+        if ('dateFormatted' in wrapperVm.$data) setReactive(wrapperVm, wrapperVm.$data, 'dateFormatted', parts.slash);
+        if (typeof wrapperVm.formatDate === 'function') {
+          try { wrapperVm.formatDate(parts.iso); } catch (e) {}
+        }
+      }
+
+      if (targetWrap) {
+        const inp = targetWrap.querySelector('input');
+        if (inp) {
+          if (inp._flatpickr) {
+            inp._flatpickr.setDate(parts.iso, true);
+          } else {
+            const displayVal = inp.type === 'date' ? parts.iso : parts.slash;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (nativeSetter) nativeSetter.call(inp, displayVal);
+            else inp.value = displayVal;
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      }
+
+      if (openedMenuTemporarily && menuVm) {
+        await new Promise(r => setTimeout(r, 40));
+        menuVm.isActive = false;
+      }
+    }
+
+    function applySmartFormDefaults(vmHead, vmMembers, totalMembers, childrenUnder18, isEthnic = 0, areaTypeId = 1) {
+      const setReactive = (vmTarget, targetObj, key, val) => {
+        if (!targetObj || val === undefined || val === null) return;
+        if (vmTarget && typeof vmTarget.$set === 'function') vmTarget.$set(targetObj, key, val);
+        else targetObj[key] = val;
+      };
+
+      const d = (vmHead && vmHead.data) ? vmHead.data : null;
+
+      let resolvedAreaId = areaTypeId;
+      if (vmHead && vmHead.$data && areaTypeId === 1) {
+        Object.entries(vmHead.$data).forEach(([k, list]) => {
+          if (Array.isArray(list) && list.length > 0 && list.length <= 20 && typeof list[0] === 'object' && list[0] !== null) {
+            const matchItem = list.find(item => {
+              const txt = `${item.name_bn || ''} ${item.name_en || ''} ${item.name || ''} ${item.title_bn || ''} ${item.label || ''} ${item.text || ''}`.toLowerCase();
+              return /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/.test(txt);
+            });
+            if (matchItem) {
+              const idKey = ('id' in matchItem) ? 'id' : (('value' in matchItem) ? 'value' : (('code' in matchItem) ? 'code' : null));
+              if (idKey) resolvedAreaId = matchItem[idKey];
+            }
+          }
+        });
+      }
+
+      if (d) {
+        [
+          'house_size', 'total_member', 'total_members', 'family_member_count',
+          'total_family_member', 'total_family_members', 'member_count',
+          'no_of_family_member', 'number_of_family_members', 'household_size', 'khana_member'
+        ].forEach(k => {
+          if (k in d || k === 'house_size') setReactive(vmHead, d, k, totalMembers);
+        });
+
+        [
+          'children_count', 'child_count', 'no_of_children', 'number_of_children',
+          'total_children', 'total_child', 'under_18_member', 'children_under_18',
+          'sishu_count', 'shishu_count', 'child_member', 'children'
+        ].forEach(k => {
+          if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, childrenUnder18);
+        });
+
+        Object.keys(d).forEach(k => {
+          const low = k.toLowerCase();
+          if (/child|shishu|sishu|under_18/.test(low) && typeof d[k] !== 'object') {
+            setReactive(vmHead, d, k, childrenUnder18);
+          }
+          if ((/^(total_member|member_count|family_size|house_size|khana_size)$/.test(low)) && typeof d[k] !== 'object') {
+            setReactive(vmHead, d, k, totalMembers);
+          }
+          if (/ethnic|tribal|nrigosthi|nrigosthy|adibashi|indigenous|minority/.test(low)) {
+            if (typeof d[k] === 'boolean') setReactive(vmHead, d, k, Boolean(isEthnic));
+            else if (!low.endsWith('_name') && !low.endsWith('_type_id')) setReactive(vmHead, d, k, Number(isEthnic));
+          }
+          if (/^(location_type|location_type_id|area_type|area_type_id|geo_type|present_location_type|permanent_location_type|residence_area_type)$/.test(low)) {
+            setReactive(vmHead, d, k, resolvedAreaId);
+          }
+        });
+      }
+
+      if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
+        vmMembers.familyMembers.forEach(row => {
+          if (!row || typeof row !== 'object') return;
+          Object.keys(row).forEach(k => {
+            if (/ethnic|tribal|nrigosthi|nrigosthy|adibashi|indigenous|minority/i.test(k)) {
+              if (typeof row[k] === 'boolean') setReactive(vmMembers, row, k, Boolean(isEthnic));
+              else setReactive(vmMembers, row, k, Number(isEthnic));
+            }
+          });
+        });
+      }
+
+      document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
+        if (wrap.closest('#fc-floating-root')) return;
+        const labelEl = wrap.querySelector('label, .v-label, legend');
+        const labelTxt = (labelEl ? labelEl.textContent : wrap.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const vInst = wrap.__vue__;
+
+        // A. Khudro Nrigosthi Kina -> No (না)
+        if (/ক্ষুদ্র|নৃ-গোষ্ঠী|নৃগোষ্ঠী|ethnic|tribal/.test(labelTxt)) {
+          const wantYes = Number(isEthnic) === 1;
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0) {
+            const targetItem = vInst.items.find(it => {
+              if (typeof it === 'object' && it !== null) {
+                const t = `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title || ''}`.trim().toLowerCase();
+                const v = String(it.value ?? it.id ?? '').toLowerCase();
+                return wantYes
+                  ? (t === 'হ্যাঁ' || t === 'yes' || v === '1' || v === 'true')
+                  : (t === 'না' || t === 'no' || v === '0' || v === 'false');
+              }
+              return wantYes
+                ? (String(it).toLowerCase() === 'হ্যাঁ' || String(it) === '1')
+                : (String(it).toLowerCase() === 'না' || String(it) === '0');
+            });
+            if (targetItem !== undefined) {
+              const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? 0) : targetItem;
+              vInst.$emit('input', val);
+              vInst.$emit('change', val);
+            }
+          }
+          wrap.querySelectorAll('input[type="radio"]').forEach(rad => {
+            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
+            const rVal = String(rad.value || '').toLowerCase();
+            const match = wantYes
+              ? (rLbl === 'হ্যাঁ' || rLbl === 'yes' || rVal === '1' || rVal === 'true')
+              : (rLbl === 'না' || rLbl === 'no' || rVal === '0' || rVal === 'false');
+            if (match && !rad.checked) {
+              rad.click();
+              rad.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+          wrap.querySelectorAll('select').forEach(sel => {
+            const opt = Array.from(sel.options).find(o => {
+              const t = o.textContent.trim().toLowerCase();
+              const v = String(o.value).toLowerCase();
+              return wantYes
+                ? (t === 'হ্যাঁ' || t === 'yes' || v === '1' || v === 'true')
+                : (t === 'না' || t === 'no' || v === '0' || v === 'false');
+            });
+            if (opt && sel.value !== opt.value) {
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+        }
+
+        // B. Area Type / Elaka -> Polli / Union (পল্লী / ইউনিয়ন)
+        if (/এলাকার ধরন|বাসস্থানের ধরন|অবস্থান|এলাকা নির্বাচন|location type|area type/.test(labelTxt) ||
+            (vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(JSON.stringify(it))))) {
+          const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0) {
+            const areaItem = vInst.items.find(it => {
+              const t = typeof it === 'object' && it !== null
+                ? `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title_bn || ''} ${it.name || ''}`
+                : String(it);
+              return areaPattern.test(t);
+            });
+            if (areaItem !== undefined) {
+              const val = (typeof areaItem === 'object' && areaItem !== null) ? (areaItem.value ?? areaItem.id ?? areaItem.code) : areaItem;
+              vInst.$emit('input', val);
+              vInst.$emit('change', val);
+            }
+          }
+          wrap.querySelectorAll('input[type="radio"]').forEach(rad => {
+            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
+            if (areaPattern.test(rLbl) && !rad.checked) {
+              rad.click();
+              rad.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+          wrap.querySelectorAll('select').forEach(sel => {
+            const opt = Array.from(sel.options).find(o => areaPattern.test(o.textContent));
+            if (opt && sel.value !== opt.value) {
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+        }
+
+        // C. Children Under 18 (শিশু সংখ্যা) DOM Input
+        if (/শিশু সংখ্যা|শিশুর সংখ্যা|১৮ বছরের নিচে|কতজন শিশু|number of children|children count/.test(labelTxt)) {
+          const inp = wrap.querySelector('input[type="text"], input[type="number"]');
+          if (inp) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (nativeSetter) nativeSetter.call(inp, String(childrenUnder18));
+            else inp.value = String(childrenUnder18);
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+
+        // D. Total Household Members (পরিবারের সদস্য সংখ্যা / খানার সদস্য সংখ্যা) DOM Input
+        if (/সদস্য সংখ্যা|খানার সদস্য|পরিবারের সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
+          const inp = wrap.querySelector('input[type="text"], input[type="number"]');
+          if (inp) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (nativeSetter) nativeSetter.call(inp, String(totalMembers));
+            else inp.value = String(totalMembers);
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      });
+    }
+
     function parseMemberRow(m) {
       const relId = Number(m.relationship_id || m.relation_id || 0);
       const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
@@ -132,27 +497,6 @@
       );
     }
 
-    // Robust DOM setter for Vuetify masked inputs (forces component state to register value immediately)
-    function setNativeDOMValue(selectorHint, val) {
-      if (!val) return;
-      setTimeout(() => {
-        document.querySelectorAll('input').forEach(inp => {
-          const meta = `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''} ${inp.getAttribute('aria-label') || ''}`.toLowerCase();
-          if (meta.includes(selectorHint) || inp.classList.contains('v-input__input')) {
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-            if (nativeSetter) {
-              nativeSetter.call(inp, val);
-            } else {
-              inp.value = val;
-            }
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-            inp.dispatchEvent(new Event('blur', { bubbles: true }));
-          }
-        });
-      }, 150);
-    }
-
     window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
       const payload = event.detail;
       if (!payload) return;
@@ -175,7 +519,7 @@
         if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
         if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
-        // 0. Restore Full Website Dump & Tab Editor changes (Vue state + DOM controls)
+        // 0. Restore Full Website Dump & Tab Editor changes
         if (payload.full_form_dump) {
           const dump = payload.full_form_dump;
           if (dump.head_data && vmHead && vmHead.data) {
@@ -229,13 +573,12 @@
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-          // Format DOB with slashes (DD/MM/YYYY) for Vuetify mask compatibility
-          const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
+          const headDobParts = parseDobParts(h.dob);
+          const headModelDob = headDobParts ? headDobParts.iso : String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
           const isVerificationPage = Boolean(
-            document.querySelector('input[placeholder*="ক্যাপচা"], input[id*="captcha"], .captcha-container') ||
-            (!document.querySelector('input[name*="name_bn"], input[id*="name_bn"], #name_bn') && 
-             document.querySelector('input[name*="verification_number"], input[id*="verification_number"], select[name*="verification_type"]'))
+            document.querySelector('input[placeholder*="ক্যাপচা"], input[placeholder*="উত্তর"], input[id*="captcha"], .captcha-container') ||
+            Array.from(document.querySelectorAll('label, span, p')).some(el => el.textContent.includes('ক্যাপচা সম্পূর্ণ করুন'))
           );
 
           if (vmHead && vmHead.data) {
@@ -243,14 +586,9 @@
             setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
             setReactive(vmHead, vmHead.data, 'nid', headIsNID ? cleanHeadId : '');
             setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
-            setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
-            setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
+            setReactive(vmHead, vmHead.data, 'date_of_birth', headModelDob);
+            setReactive(vmHead, vmHead.data, 'dob', headModelDob);
 
-            // Trigger native DOM events to force Vuetify mask recognition
-            setNativeDOMValue('birth', headCleanDob);
-            setNativeDOMValue('dob', headCleanDob);
-
-            // Names & parents are always filled on all pages
             setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
             setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
             setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
@@ -266,6 +604,8 @@
               setReactive(vmHead, vmHead.data, 'applicant_gender', headGenderId);
             }
           }
+
+          await selectDateViaVuetifyCalendar(h.dob, 0);
         }
 
         // 2. Combine Head as Member 1, then the rest of the family
@@ -285,6 +625,17 @@
           fullFamilyList.push(...payload.family_members);
         }
 
+        const calcChildrenCount = fullFamilyList.filter(m => {
+          const age = calculateAgeYears(m.dob);
+          return age !== null && age >= 0 && age < 18;
+        }).length;
+
+        const defs = payload.form_defaults || {};
+        const totalMembersCount = defs.total_members !== undefined ? Number(defs.total_members) : fullFamilyList.length;
+        const childrenUnder18Count = defs.children_under_18 !== undefined ? Number(defs.children_under_18) : calcChildrenCount;
+        const isEthnicVal = defs.is_ethnic !== undefined ? Number(defs.is_ethnic) : 0;
+        const areaTypeVal = defs.area_type_id !== undefined ? Number(defs.area_type_id) : 1;
+
         // 3. Inject into the Member Array
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
@@ -294,14 +645,16 @@
 
           await new Promise((r) => setTimeout(r, 150));
 
-          fullFamilyList.forEach((m, idx) => {
+          for (let idx = 0; idx < fullFamilyList.length; idx++) {
+            const m = fullFamilyList[idx];
             const row = vmMembers.familyMembers[idx];
-            if (!row) return;
+            if (!row) continue;
 
             const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
             const isNID = determineIsNID(m.doc_type, cleanId);
             const genderId = resolveGenderId(m);
             const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
+            const memAge = calculateAgeYears(m.dob);
 
             setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
             
@@ -315,10 +668,14 @@
               setReactive(vmMembers, row, 'verification_number', cleanId);
             }
 
-            // Format member DOB with slashes (DD/MM/YYYY)
-            const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
-            setReactive(vmMembers, row, 'dob', memCleanDob);
-            setReactive(vmMembers, row, 'date_of_birth', memCleanDob);
+            const memDobParts = parseDobParts(m.dob);
+            const memModelDob = memDobParts ? memDobParts.iso : String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
+            setReactive(vmMembers, row, 'dob', memModelDob);
+            setReactive(vmMembers, row, 'date_of_birth', memModelDob);
+            if (memAge !== null && 'age' in row) {
+              setReactive(vmMembers, row, 'age', memAge);
+            }
+
             setReactive(vmMembers, row, 'name_bn', m.name_bn);
             setReactive(vmMembers, row, 'name_en', m.name_en);
             setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
@@ -337,18 +694,20 @@
             if (m.relation === 'Husband' && !row.estimate_annual_income) {
               setReactive(vmMembers, row, 'estimate_annual_income', 60000);
             }
-          });
-
-          if (vmHead && vmHead.data) {
-            setReactive(vmHead, vmHead.data, 'house_size', fullFamilyList.length);
           }
         }
+
+        // 4. Apply Smart Defaults: Total Members, Children (<18), Khudro Nrigosthi = No, Area Type = Polli/Union
+        applySmartFormDefaults(vmHead, vmMembers, totalMembersCount, childrenUnder18Count, isEthnicVal, areaTypeVal);
 
         if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
         if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) successfully.` }
+          detail: {
+            success: true,
+            message: `Auto-filled ${totalMembersCount} member(s) (${childrenUnder18Count} children <18), Polli/Union & Khudro Nrigosthi: No!`
+          }
         }));
       } catch (err) {
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {

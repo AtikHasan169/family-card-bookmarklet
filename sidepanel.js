@@ -2,7 +2,7 @@
 
 const STORAGE_KEY = 'fc_pro_api_key';
 const STORAGE_MODEL = 'fc_pro_model';
-const CURRENT_VERSION_TAG = 'v3.8-live';
+const CURRENT_VERSION_TAG = 'v4.0-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -32,6 +32,17 @@ const GENDER_OPTIONS = [
   { value: 'Male', label: 'Male (পুরুষ)', id: 1 },
   { value: 'Female', label: 'Female (মহিলা)', id: 2 },
   { value: 'Other', label: 'Other (অন্যান্য)', id: 3 }
+];
+
+const AREA_TYPE_OPTIONS = [
+  { value: 1, label: 'পল্লী / ইউনিয়ন (Polli / Union)' },
+  { value: 2, label: 'পৌরসভা (Pourashava)' },
+  { value: 3, label: 'সিটি কর্পোরেশন (City Corporation)' }
+];
+
+const ETHNIC_OPTIONS = [
+  { value: 0, label: 'না (No)' },
+  { value: 1, label: 'হ্যাঁ (Yes)' }
 ];
 
 const RELATION_ID_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id]));
@@ -224,7 +235,7 @@ function handleIncomingMessages(e) {
       renderPreviews('head');
       renderPreviews('other');
       if (s.lastExtracted && !state.lastExtracted) {
-        state.lastExtracted = s.lastExtracted;
+        state.lastExtracted = normalizeOutput(s.lastExtracted, true);
         renderExtractedCards(state.lastExtracted);
         $('autofillBtn').disabled = false;
         setStatus('Restored previous session data automatically!', 'ok');
@@ -301,6 +312,34 @@ function normalizeDob(rawDob) {
   return `${dd}-${mm}${monStr}-${yyyy}`;
 }
 
+function calculateAgeYears(rawDob) {
+  const clean = toEnglishDigits(String(rawDob || '')).replace(/\[.*?\]/g, '').trim();
+  if (!clean) return null;
+  let dd, mm, yyyy;
+  const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    dd = parseInt(dmy[1], 10);
+    mm = parseInt(dmy[2], 10);
+    yyyy = parseInt(dmy[3], 10);
+  } else {
+    const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (ymd) {
+      yyyy = parseInt(ymd[1], 10);
+      mm = parseInt(ymd[2], 10);
+      dd = parseInt(ymd[3], 10);
+    } else {
+      return null;
+    }
+  }
+  const today = new Date();
+  let age = today.getFullYear() - yyyy;
+  const mDiff = (today.getMonth() + 1) - mm;
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < dd)) {
+    age--;
+  }
+  return age >= 0 && age < 130 ? age : null;
+}
+
 function dobToSortable(dobStr) {
   const clean = String(dobStr || '').replace(/\[.*?\]/g, '');
   const dmy = clean.match(/^(\d{2})-(\d{2})-(\d{4})$/);
@@ -346,8 +385,57 @@ function saveSessionState() {
   } catch (e) {}
 }
 
+function recalculateHouseholdSummary(data) {
+  if (!data) return;
+  const allPeople = [];
+  if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
+    data.head.age = calculateAgeYears(data.head.dob);
+    allPeople.push(data.head);
+  }
+  if (Array.isArray(data.family_members)) {
+    data.family_members.forEach((m) => {
+      m.age = calculateAgeYears(m.dob);
+      m.is_child_under_18 = m.age !== null && m.age < 18;
+      allPeople.push(m);
+    });
+  }
+
+  const totalMembers = allPeople.length || 1;
+  const childrenUnder18 = allPeople.filter((p) => {
+    const a = calculateAgeYears(p.dob);
+    return a !== null && a >= 0 && a < 18;
+  }).length;
+
+  if (!data.form_defaults) {
+    data.form_defaults = {
+      total_members: totalMembers,
+      children_under_18: childrenUnder18,
+      is_ethnic: 0,
+      khudro_nrigosthi_label: 'না (No)',
+      area_type_id: 1,
+      area_type_label: 'পল্লী / ইউনিয়ন (Polli / Union)'
+    };
+  } else {
+    data.form_defaults.total_members = totalMembers;
+    data.form_defaults.children_under_18 = childrenUnder18;
+    if (data.form_defaults.is_ethnic === undefined) data.form_defaults.is_ethnic = 0;
+    if (data.form_defaults.area_type_id === undefined) data.form_defaults.area_type_id = 1;
+  }
+
+  // Update summary UI inputs if rendered
+  const totalInp = $('fcSummaryTotalMembers');
+  const childInp = $('fcSummaryChildrenCount');
+  const totalPill = $('fcPillTotalMembers');
+  const childPill = $('fcPillChildrenCount');
+  if (totalInp) totalInp.value = String(data.form_defaults.total_members);
+  if (childInp) childInp.value = String(data.form_defaults.children_under_18);
+  if (totalPill) totalPill.textContent = `${data.form_defaults.total_members} জন`;
+  if (childPill) childPill.textContent = `${data.form_defaults.children_under_18} জন`;
+}
+
 function syncJsonOutput() {
   if (!state.lastExtracted) return;
+  recalculateHouseholdSummary(state.lastExtracted);
   $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
   saveSessionState();
 }
@@ -484,6 +572,8 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
       if (f.key === 'dob') {
         targetObj.dob = normalizeDob(inputEl.value);
         inputEl.value = targetObj.dob;
+        targetObj.age = calculateAgeYears(targetObj.dob);
+        if (onUpdateMeta) onUpdateMeta();
         syncJsonOutput();
       }
       toggleWarning(inputEl);
@@ -494,6 +584,10 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
       if (f.key === 'nid' || f.key === 'nid_or_brn') val = toEnglishDigits(val).replace(/\s+/g, '');
       else if (f.key.endsWith('_en')) val = val.toUpperCase();
       targetObj[f.key] = val;
+      if (f.key === 'dob') {
+        targetObj.age = calculateAgeYears(val);
+        if (onUpdateMeta) onUpdateMeta();
+      }
       toggleWarning(inputEl);
       syncJsonOutput();
     });
@@ -583,9 +677,11 @@ function showImageViewer(item) {
       personHeader.style.cssText = 'font-size:12px; font-weight:700; color:#38bdf8; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #27272a; display:flex; justify-content:space-between;';
 
       const updatePersonTitle = () => {
+        const age = calculateAgeYears(targetObj.dob);
+        const ageTxt = age !== null ? ` • ${age} yrs${age < 18 ? ' (শিশু <18)' : ''}` : '';
         personHeader.innerHTML = isHead
-          ? `<span>Person #${refIdx + 1}: Primary Applicant (Wife)</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.doc_type || 'NID'}</span>`
-          : `<span>Person #${refIdx + 1}: Member #${ref.index + 2} (${targetObj.relation})</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.gender} • ${targetObj.doc_type || 'NID'}</span>`;
+          ? `<span>Person #${refIdx + 1}: Primary Applicant (Wife)</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.doc_type || 'NID'}${ageTxt}</span>`
+          : `<span>Person #${refIdx + 1}: Member #${ref.index + 2} (${targetObj.relation})</span><span style="color:#a1a1aa; font-size:11px;">${targetObj.gender} • ${targetObj.doc_type || 'NID'}${ageTxt}</span>`;
       };
       updatePersonTitle();
       personBox.appendChild(personHeader);
@@ -980,6 +1076,9 @@ function normalizeOutput(raw, preserveOrder = false) {
   const h = raw?.head || {};
   const cleanHeadId = toEnglishDigits(s(h.nid)).replace(/\s+/g, '');
   const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
+  const headDob = normalizeDob(h.dob);
+  const headAge = calculateAgeYears(headDob);
+
   const head = {
     doc_type: inferDocType(cleanHeadId, h.doc_type),
     gender: headGender,
@@ -991,7 +1090,8 @@ function normalizeOutput(raw, preserveOrder = false) {
     mother_name_bn: s(h.mother_name_bn),
     mother_name_en: formatEnglishName(h.mother_name_en),
     nid: cleanHeadId,
-    dob: normalizeDob(h.dob),
+    dob: headDob,
+    age: headAge,
     source_images: Array.isArray(h.source_images) ? h.source_images : []
   };
 
@@ -1008,6 +1108,8 @@ function normalizeOutput(raw, preserveOrder = false) {
 
     const cleanMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
     const memGender = inferGender(rel, m?.gender, m?.name_en, m?.name_bn);
+    const memDob = normalizeDob(m?.dob);
+    const memAge = calculateAgeYears(memDob);
 
     const entry = {
       relation: rel,
@@ -1020,7 +1122,9 @@ function normalizeOutput(raw, preserveOrder = false) {
       father_name_bn: s(m?.father_name_bn),
       mother_name_bn: s(m?.mother_name_bn),
       nid_or_brn: cleanMemId,
-      dob: normalizeDob(m?.dob),
+      dob: memDob,
+      age: memAge,
+      is_child_under_18: memAge !== null && memAge >= 0 && memAge < 18,
       is_disabled: Number(m?.is_disabled) === 1 ? 1 : 0,
       source_images: Array.isArray(m?.source_images) ? m.source_images : []
     };
@@ -1055,7 +1159,19 @@ function normalizeOutput(raw, preserveOrder = false) {
     });
   }
 
-  const result = { head, family_members: deduped };
+  const allPeople = [head, ...deduped];
+  const childrenCount = allPeople.filter((p) => p.age !== null && p.age >= 0 && p.age < 18).length;
+
+  const form_defaults = {
+    total_members: allPeople.length,
+    children_under_18: childrenCount,
+    is_ethnic: raw?.form_defaults?.is_ethnic !== undefined ? Number(raw.form_defaults.is_ethnic) : 0,
+    khudro_nrigosthi_label: Number(raw?.form_defaults?.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
+    area_type_id: raw?.form_defaults?.area_type_id !== undefined ? Number(raw.form_defaults.area_type_id) : 1,
+    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(raw?.form_defaults?.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)'
+  };
+
+  const result = { head, family_members: deduped, form_defaults };
   if (raw && raw.full_form_dump && typeof raw.full_form_dump === 'object') {
     result.full_form_dump = raw.full_form_dump;
   }
@@ -1154,10 +1270,115 @@ function bindExtractedDataToThumbnails(data) {
   renderPreviews('other');
 }
 
+function renderHouseholdSummaryCard(data) {
+  const wrap = $('householdSummaryWrap');
+  if (!wrap) return;
+  wrap.replaceChildren();
+
+  recalculateHouseholdSummary(data);
+  const defs = data.form_defaults;
+
+  const card = document.createElement('div');
+  card.className = 'record-card';
+  card.style.borderColor = '#bfdbfe';
+
+  const headEl = document.createElement('div');
+  headEl.className = 'record-head';
+  headEl.style.background = '#eff6ff';
+  headEl.innerHTML = `<span style="color:#1e40af;">Household Summary &amp; Auto-Defaults</span><span class="record-tag child-badge">Auto-Fill Ready</span>`;
+  card.appendChild(headEl);
+
+  const pills = document.createElement('div');
+  pills.className = 'summary-pills';
+  pills.innerHTML = `
+    <div class="summary-pill">
+      <span class="summary-pill-label">মোট সদস্য (Members)</span>
+      <span class="summary-pill-val" id="fcPillTotalMembers">${defs.total_members} জন</span>
+    </div>
+    <div class="summary-pill">
+      <span class="summary-pill-label">শিশু &lt;18 (Children)</span>
+      <span class="summary-pill-val" id="fcPillChildrenCount">${defs.children_under_18} জন</span>
+    </div>
+  `;
+  card.appendChild(pills);
+
+  const rows = document.createElement('div');
+  rows.className = 'record-rows';
+
+  // 1. Total Members Row
+  const totalInp = document.createElement('input');
+  totalInp.id = 'fcSummaryTotalMembers';
+  totalInp.type = 'number';
+  totalInp.value = String(defs.total_members);
+  totalInp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid #cbd5e1; background:#fff; border-radius:5px; width:100%;';
+  totalInp.addEventListener('input', () => {
+    defs.total_members = parseInt(totalInp.value, 10) || 0;
+    if ($('fcPillTotalMembers')) $('fcPillTotalMembers').textContent = `${defs.total_members} জন`;
+    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+    saveSessionState();
+  });
+  rows.appendChild(buildCopyRow('মোট সদস্য (Total)', totalInp, () => defs.total_members));
+
+  // 2. Children Under 18 (শিশু সংখ্যা) Row
+  const childInp = document.createElement('input');
+  childInp.id = 'fcSummaryChildrenCount';
+  childInp.type = 'number';
+  childInp.value = String(defs.children_under_18);
+  childInp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid #cbd5e1; background:#fff; border-radius:5px; width:100%;';
+  childInp.addEventListener('input', () => {
+    defs.children_under_18 = parseInt(childInp.value, 10) || 0;
+    if ($('fcPillChildrenCount')) $('fcPillChildrenCount').textContent = `${defs.children_under_18} জন`;
+    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+    saveSessionState();
+  });
+  rows.appendChild(buildCopyRow('শিশু সংখ্যা (<18)', childInp, () => defs.children_under_18));
+
+  // 3. Khudro Nrigosthi (ক্ষুদ্র নৃ-গোষ্ঠী কিনা) Row -> Default: No (না)
+  const ethnicSel = document.createElement('select');
+  ethnicSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#f0fdf4; color:#065f46; border-radius:5px; cursor:pointer; width:100%;';
+  ETHNIC_OPTIONS.forEach((opt) => {
+    const o = document.createElement('option');
+    o.value = String(opt.value);
+    o.textContent = opt.label;
+    ethnicSel.appendChild(o);
+  });
+  ethnicSel.value = String(defs.is_ethnic ?? 0);
+  ethnicSel.addEventListener('change', (e) => {
+    defs.is_ethnic = Number(e.target.value);
+    defs.khudro_nrigosthi_label = defs.is_ethnic === 1 ? 'হ্যাঁ (Yes)' : 'না (No)';
+    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+    saveSessionState();
+  });
+  rows.appendChild(buildCopyRow('ক্ষুদ্র নৃ-গোষ্ঠী কিনা', ethnicSel, () => defs.is_ethnic === 1 ? 'হ্যাঁ' : 'না'));
+
+  // 4. Area Type / Elaka (এলাকার ধরন) Row -> Default: Polli / Union (পল্লী / ইউনিয়ন)
+  const areaSel = document.createElement('select');
+  areaSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px; cursor:pointer; width:100%;';
+  AREA_TYPE_OPTIONS.forEach((opt) => {
+    const o = document.createElement('option');
+    o.value = String(opt.value);
+    o.textContent = opt.label;
+    areaSel.appendChild(o);
+  });
+  areaSel.value = String(defs.area_type_id ?? 1);
+  areaSel.addEventListener('change', (e) => {
+    defs.area_type_id = Number(e.target.value);
+    defs.area_type_label = AREA_TYPE_OPTIONS.find(a => a.value === defs.area_type_id)?.label || 'পল্লী / ইউনিয়ন (Polli / Union)';
+    $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
+    saveSessionState();
+  });
+  rows.appendChild(buildCopyRow('এলাকার ধরন (Elaka)', areaSel, () => defs.area_type_label));
+
+  card.appendChild(rows);
+  wrap.appendChild(card);
+}
+
 function renderExtractedCards(data) {
   const container = $('visualCards');
   container.replaceChildren();
   $('resultsWrap').classList.add('visible');
+
+  renderHouseholdSummaryCard(data);
 
   const buildEditableCard = (targetObj, fields, isMember = false, memberIdx = 0) => {
     const card = document.createElement('div');
@@ -1170,12 +1391,18 @@ function renderExtractedCards(data) {
     tagSpan.className = 'record-tag';
 
     const refreshHeader = () => {
+      const age = calculateAgeYears(targetObj.dob);
+      const isChild = age !== null && age >= 0 && age < 18;
+      const ageLabel = age !== null ? ` • ${age}y${isChild ? ' (শিশু <18)' : ''}` : '';
+      if (isChild) tagSpan.classList.add('child-badge');
+      else tagSpan.classList.remove('child-badge');
+
       if (!isMember) {
         titleSpan.textContent = `Member #1 — Head (${targetObj.gender || 'Female'})`;
-        tagSpan.textContent = `Primary • ${targetObj.doc_type || 'NID'}`;
+        tagSpan.textContent = `Primary • ${targetObj.doc_type || 'NID'}${ageLabel}`;
       } else {
         titleSpan.textContent = `Member #${memberIdx + 2} — ${targetObj.relation} (${targetObj.gender || 'Male'})`;
-        tagSpan.textContent = `${targetObj.doc_type || 'NID'} • Rel ID: ${targetObj.relationship_id}`;
+        tagSpan.textContent = `${targetObj.doc_type || 'NID'}${ageLabel}`;
       }
     };
     refreshHeader();
@@ -1240,7 +1467,9 @@ const KNOWN_KEY_OPTIONS = {
   relation_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
   is_member_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
   is_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
-  is_gov_job_holder: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }]
+  is_gov_job_holder: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
+  is_ethnic: [{ value: 0, label: '0 — না (No)' }, { value: 1, label: '1 — হ্যাঁ (Yes)' }],
+  location_type: AREA_TYPE_OPTIONS
 };
 
 function prettifyKey(key) {
@@ -1264,9 +1493,9 @@ function guessOptionsForKey(key, val, vueOptions = {}) {
 
 function categorizeHeadKey(k) {
   const s = k.toLowerCase();
-  if (/division|district|upazila|thana|union|ward|village|house|road|post|address|pourashava|city/.test(s)) return 'Tab — Address & Location (ঠিকানা)';
+  if (/division|district|upazila|thana|union|ward|village|house|road|post|address|pourashava|city|location_type|area_type/.test(s)) return 'Tab — Address & Location (ঠিকানা)';
   if (/mobile|phone|email|contact|bank|account|branch|routing|mfs|bkash|nagad|rocket|payment/.test(s)) return 'Tab — Contact & Bank/Payment (যোগাযোগ ও ব্যাংক)';
-  if (/income|occupation|profession|job|land|house_type|latrine|electricity|asset|allowance|poverty|marital|education|religion/.test(s)) return 'Tab — Socio-Economic & Info (আর্থ-সামাজিক তথ্য)';
+  if (/income|occupation|profession|job|land|house_type|latrine|electricity|asset|allowance|poverty|marital|education|religion|ethnic|tribal|child/.test(s)) return 'Tab — Socio-Economic & Info (আর্থ-সামাজিক তথ্য)';
   return 'Tab — Applicant & General Info (আবেদনকারীর সব তথ্য)';
 }
 
@@ -1545,7 +1774,8 @@ async function runExtraction() {
 
     renderExtractedCards(normalized);
     $('autofillBtn').disabled = false;
-    setStatus(`Ready! Extracted Head + ${normalized.family_members.length} member(s). Verify empty red fields before Auto-Fill.`, 'ok');
+    const defs = normalized.form_defaults;
+    setStatus(`Ready! Total: ${defs.total_members} member(s), Children (<18): ${defs.children_under_18}. Verify red fields before Auto-Fill.`, 'ok');
   } catch (err) {
     if (err.name === 'AbortError') {
       setStatus('Extraction cancelled by user.', 'err');
@@ -1561,6 +1791,7 @@ async function runExtraction() {
 
 function triggerFormAutofill() {
   if (!state.lastExtracted) return;
+  recalculateHouseholdSummary(state.lastExtracted);
   window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
   setStatus('Sent auto-fill data to form!', 'ok');
 }
