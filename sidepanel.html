@@ -111,6 +111,7 @@
     .settings-drawer { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-sm); }
     .settings-drawer.open { display: block; }
     .form-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .settings-divider { border-top: 1px dashed var(--border); margin: 4px 0 2px; padding-top: 8px; font-size: 11.5px; font-weight: 700; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
     .field-label { display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--text-sub); margin-bottom: 4px; }
     .input-group { display: flex; gap: 6px; }
     input[type="text"], input[type="number"], input[type="password"], select { width: 100%; padding: 7px 10px; font: inherit; font-size: 12.5px; color: var(--text-main); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--transition), box-shadow var(--transition); }
@@ -203,7 +204,7 @@
         <span class="conn-dot"></span>
         <span id="connText">Checking...</span>
       </div>
-      <button type="button" class="icon-btn" id="settingsToggleBtn" title="API Settings">
+      <button type="button" class="icon-btn" id="settingsToggleBtn" title="API &amp; Area Settings">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -213,6 +214,7 @@
   </nav>
 
   <main class="container">
+    <!-- Settings Drawer: API Key + Saved Area Address (Village/Road, Ward No, Post Code) -->
     <section class="settings-drawer" id="settingsDrawer">
       <div class="form-grid">
         <div>
@@ -232,50 +234,55 @@
             <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
           </select>
         </div>
+
+        <div class="settings-divider">
+          <span>📌 Saved Area &amp; Defaults (Auto-Saved)</span>
+        </div>
+
+        <div>
+          <div class="field-label"><span>গ্রাম / রাস্তা (Village / Road)</span></div>
+          <div class="input-group">
+            <input id="presetVillageInput" type="text" placeholder="যেমন: চর আমলা" autocomplete="off">
+            <button type="button" class="btn btn-xs" id="copyPresetVillageBtn">Copy</button>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <div class="field-label"><span>ওয়ার্ড নং (Ward No)</span></div>
+            <div class="input-group">
+              <input id="presetWardInput" type="text" placeholder="যেমন: 4" autocomplete="off">
+              <button type="button" class="btn btn-xs" id="copyPresetWardBtn">Copy</button>
+            </div>
+          </div>
+          <div>
+            <div class="field-label"><span>পোস্ট কোড (Post Code)</span></div>
+            <div class="input-group">
+              <input id="presetPostCodeInput" type="text" placeholder="যেমন: 7030" autocomplete="off">
+              <button type="button" class="btn btn-xs" id="copyPresetPostCodeBtn">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+          <div>
+            <div class="field-label"><span>এলাকার ধরন (Elaka)</span></div>
+            <select id="presetAreaTypeSelect">
+              <option value="1" selected>পল্লী / ইউনিয়ন</option>
+              <option value="2">পৌরসভা</option>
+              <option value="3">সিটি কর্পোরেশন</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label"><span>ক্ষুদ্র নৃ-গোষ্ঠী কিনা</span></div>
+            <select id="presetEthnicSelect">
+              <option value="0" selected>না (No)</option>
+              <option value="1">হ্যাঁ (Yes)</option>
+            </select>
+          </div>
+        </div>
       </div>
     </section>
-
-    <!-- Persistent Saved Area & Defaults Card (Saved in localStorage like API Key) -->
-    <details class="record-card" id="areaPresetDrawer" open style="border-color:#bfdbfe;">
-      <summary class="record-head" style="cursor:pointer; background:#eff6ff;">
-        <span style="color:#1e40af;">📌 Saved Area &amp; Defaults (স্থায়ী এলাকা সেটিংস)</span>
-        <span class="record-tag child-badge">Auto-Saved</span>
-      </summary>
-      <div class="record-rows">
-        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
-          <span class="row-key">গ্রাম / রাস্তা (Village)</span>
-          <input id="presetVillageInput" type="text" placeholder="যেমন: চর আমলা" autocomplete="off">
-          <button type="button" class="btn btn-xs" id="copyPresetVillageBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
-        </div>
-        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
-          <span class="row-key">ওয়ার্ড নং (Ward No)</span>
-          <input id="presetWardInput" type="text" placeholder="যেমন: 04 বা 4" autocomplete="off">
-          <button type="button" class="btn btn-xs" id="copyPresetWardBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
-        </div>
-        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
-          <span class="row-key">পোস্ট কোড (Post Code)</span>
-          <input id="presetPostCodeInput" type="text" placeholder="যেমন: 7030" autocomplete="off">
-          <button type="button" class="btn btn-xs" id="copyPresetPostCodeBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
-        </div>
-        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
-          <span class="row-key">এলাকার ধরন (Elaka)</span>
-          <select id="presetAreaTypeSelect" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px;">
-            <option value="1">পল্লী / ইউনিয়ন (Polli / Union)</option>
-            <option value="2">পৌরসভা (Pourashava)</option>
-            <option value="3">সিটি কর্পোরেশন (City Corporation)</option>
-          </select>
-          <button type="button" class="btn btn-xs" id="copyPresetAreaBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
-        </div>
-        <div class="record-row" style="grid-template-columns:115px 1fr auto;">
-          <span class="row-key">ক্ষুদ্র নৃ-গোষ্ঠী কিনা</span>
-          <select id="presetEthnicSelect" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#f0fdf4; color:#065f46; border-radius:5px;">
-            <option value="0">না (No)</option>
-            <option value="1">হ্যাঁ (Yes)</option>
-          </select>
-          <button type="button" class="btn btn-xs" id="copyPresetEthnicBtn" style="padding:2px 7px; font-size:10px;">Copy</button>
-        </div>
-      </div>
-    </details>
 
     <section class="card">
       <div class="card-head">
