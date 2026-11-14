@@ -126,11 +126,12 @@
         }
       }
 
-      // 1. Populate Primary Applicant (Wife / Head) - GENDER EXCLUDED, ALL NAMES INCLUDED
+      // 1. Populate Primary Applicant (Wife / Head) - Names, NID, DOB filled; Gender touched only on main form
       if (payload.head && vm.data) {
         const h = payload.head;
         const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
+        const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
         const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
 
         const isVerificationPage = Boolean(
@@ -139,30 +140,26 @@
            document.querySelector('input[name*="verification_number"], input[id*="verification_number"], select[name*="verification_type"]'))
         );
 
-        if (isVerificationPage) {
-          setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
-          setReactive(vm.data, 'verification_number', cleanHeadId);
-          setReactive(vm.data, 'date_of_birth', headCleanDob);
-          setReactive(vm.data, 'dob', headCleanDob);
-          window.dispatchEvent(
-            new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-              detail: { success: true, message: `Filled NID & DOB for verification. Gender left untouched!` }
-            })
-          );
-          return;
-        }
-
         setReactive(vm.data, 'verification_type', headIsNID ? 1 : 2);
         setReactive(vm.data, 'verification_number', cleanHeadId);
         setReactive(vm.data, 'date_of_birth', headCleanDob);
         setReactive(vm.data, 'dob', headCleanDob);
-        // GENDER EXCLUDED
+        
+        // Names & parents are always filled
         setReactive(vm.data, 'name_bn', h.name_bn);
         setReactive(vm.data, 'name_en', h.name_en);
         setReactive(vm.data, 'father_name_bn', h.father_name_bn);
         setReactive(vm.data, 'father_name_en', h.father_name_en);
         setReactive(vm.data, 'mother_name_bn', h.mother_name_bn);
         setReactive(vm.data, 'mother_name_en', h.mother_name_en);
+
+        // GENDER: Excluded on captcha page, filled normally on main form
+        if (!isVerificationPage) {
+          setReactive(vm.data, 'gender', headGenderId);
+          setReactive(vm.data, 'gender_id', headGenderId);
+          setReactive(vm.data, 'sex', headGenderId);
+          setReactive(vm.data, 'applicant_gender', headGenderId);
+        }
       }
 
       // 2. Populate Family Members
@@ -184,6 +181,7 @@
 
           const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
           const isNID = determineIsNID(m.doc_type, cleanId);
+          const genderId = resolveGenderId(m);
           const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
 
           setReactive(row, 'verification_type', isNID ? 1 : 2);
@@ -210,7 +208,9 @@
           setReactive(row, 'relation_id', relId);
           if (m.relation) setReactive(row, 'relation', m.relation);
 
-          // GENDER EXCLUDED for members as well
+          setReactive(row, 'gender', genderId);
+          setReactive(row, 'gender_id', genderId);
+
           setReactive(row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
           setReactive(row, 'is_gov_job_holder', 0);
 
@@ -232,7 +232,7 @@
         new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
           detail: {
             success: true,
-            message: `Auto-filled Head + ${members.length} family member(s) (Names & DOB included, Gender untouched).`
+            message: `Auto-filled Head + ${members.length} family member(s) with Names & DOB.`
           }
         })
       );

@@ -202,11 +202,12 @@
           }
         }
 
-        // 1. Populate Primary Applicant (Head) in main form & First-Page Verification
+        // 1. Populate Primary Applicant (Head) in main form & Verification
         if (payload.head) {
           const h = payload.head;
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
+          const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
           const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '');
 
           // Robust detection of the NID Verification / Captcha page
@@ -216,23 +217,6 @@
              document.querySelector('input[name*="verification_number"], input[id*="verification_number"], select[name*="verification_type"]'))
           );
 
-          if (isVerificationPage) {
-            // CAPTCHA PAGE: Fill NID & DOB only, completely ignoring gender so it never glitches
-            if (vmHead && vmHead.data) {
-              setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
-              setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
-              setReactive(vmHead, vmHead.data, 'nid', headIsNID ? cleanHeadId : '');
-              setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
-              setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
-              setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
-            }
-            window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-              detail: { success: true, message: `Filled NID & DOB for verification. Gender left untouched!` }
-            }));
-            return;
-          }
-
-          // MAIN FORM PAGE: Fill names, NID, DOB, parents' names (Gender untouched)
           if (vmHead && vmHead.data) {
             setReactive(vmHead, vmHead.data, 'verification_type', headIsNID ? 1 : 2);
             setReactive(vmHead, vmHead.data, 'verification_number', cleanHeadId);
@@ -240,13 +224,22 @@
             setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
             setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
             setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
-            // GENDER EXCLUDED: Left completely untouched per your instructions
+
+            // Names & parents are always filled on all pages
             setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
             setReactive(vmHead, vmHead.data, 'name_en', h.name_en);
             setReactive(vmHead, vmHead.data, 'father_name_bn', h.father_name_bn);
             setReactive(vmHead, vmHead.data, 'father_name_en', h.father_name_en);
             setReactive(vmHead, vmHead.data, 'mother_name_bn', h.mother_name_bn);
             setReactive(vmHead, vmHead.data, 'mother_name_en', h.mother_name_en);
+
+            // GENDER: Excluded strictly on the verification/captcha page, filled normally on main form
+            if (!isVerificationPage) {
+              setReactive(vmHead, vmHead.data, 'gender', headGenderId);
+              setReactive(vmHead, vmHead.data, 'gender_id', headGenderId);
+              setReactive(vmHead, vmHead.data, 'sex', headGenderId);
+              setReactive(vmHead, vmHead.data, 'applicant_gender', headGenderId);
+            }
           }
         }
 
@@ -267,7 +260,7 @@
           fullFamilyList.push(...payload.family_members);
         }
 
-        // 3. Inject into the Member Array (Names, NID, DOB, Relations filled; Gender untouched)
+        // 3. Inject into the Member Array
         if (fullFamilyList.length > 0 && vmMembers && Array.isArray(vmMembers.familyMembers)) {
           while (vmMembers.familyMembers.length < fullFamilyList.length) {
             if (typeof vmMembers.addFamilyMember === 'function') vmMembers.addFamilyMember();
@@ -282,6 +275,7 @@
 
             const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
             const isNID = determineIsNID(m.doc_type, cleanId);
+            const genderId = resolveGenderId(m);
             const relId = Number(m.relationship_id || RELATION_ID_MAP[m.relation] || 160);
 
             setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
@@ -308,7 +302,9 @@
             setReactive(vmMembers, row, 'relation_id', relId);
             if (m.relation) setReactive(vmMembers, row, 'relation', m.relation);
 
-            // GENDER EXCLUDED for family members as well
+            setReactive(vmMembers, row, 'gender', genderId);
+            setReactive(vmMembers, row, 'gender_id', genderId);
+
             setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
             setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
@@ -326,7 +322,7 @@
         if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) (Gender untouched).` }
+          detail: { success: true, message: `Auto-filled Head + ${fullFamilyList.length - 1} family member(s) successfully.` }
         }));
       } catch (err) {
         window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
