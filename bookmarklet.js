@@ -185,7 +185,7 @@
       if (targetWrap) {
         let curr = targetWrap.__vue__;
         let depth = 0;
-        while (curr && depth < 6) {
+        while (curr && depth < 7) {
           if (!menuVm && isMenuOrDialogVm(curr)) menuVm = curr;
           if (!menuVm && Array.isArray(curr.$children)) {
             const childMenu = curr.$children.find(isMenuOrDialogVm);
@@ -201,39 +201,27 @@
 
       let openedMenuTemporarily = false;
       if (menuVm && !menuVm.isActive) {
-        const existingPickers = findAllVueComponents(menuVm, isDatePickerVm);
-        if (existingPickers.length === 0) {
-          menuVm.isActive = true;
-          openedMenuTemporarily = true;
-          await new Promise(r => setTimeout(r, 60));
-        }
+        menuVm.isActive = true;
+        openedMenuTemporarily = true;
+        await new Promise(r => setTimeout(r, 80));
       }
 
-      let pickerEmitted = false;
-      if (menuVm) {
-        const pickers = findAllVueComponents(menuVm, isDatePickerVm);
-        pickers.forEach(pickerVm => {
-          pickerVm.$emit('input', parts.iso);
-          pickerVm.$emit('change', parts.iso);
-          pickerVm.$emit('click:date', parts.iso);
-          pickerEmitted = true;
-        });
-      }
-
-      if (!pickerEmitted) {
-        const allPickers = [];
-        document.querySelectorAll('*').forEach(n => {
-          if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
-            allPickers.push(n.__vue__);
-          }
-        });
-        const targetPicker = allPickers[targetIndex] || (targetIndex === 0 ? allPickers[0] : null);
-        if (targetPicker) {
-          targetPicker.$emit('input', parts.iso);
-          targetPicker.$emit('change', parts.iso);
-          targetPicker.$emit('click:date', parts.iso);
-          pickerEmitted = true;
+      // Find all mounted <v-date-picker> instances (including detached Vuetify menu portals)
+      const allPickers = [];
+      document.querySelectorAll('.v-picker, .v-date-picker-table, *').forEach(n => {
+        if (n.__vue__ && isDatePickerVm(n.__vue__) && !allPickers.includes(n.__vue__)) {
+          allPickers.push(n.__vue__);
         }
+      });
+
+      const targetPicker = (menuVm && findAllVueComponents(menuVm, isDatePickerVm)[0]) || allPickers[targetIndex] || allPickers[allPickers.length - 1];
+      if (targetPicker) {
+        // Set table month/year and emit official Vuetify date selection events
+        if ('tableDate' in targetPicker) targetPicker.tableDate = `${parts.yyyy}-${parts.mm}`;
+        if ('internalActivePicker' in targetPicker) targetPicker.internalActivePicker = 'DATE';
+        targetPicker.$emit('input', parts.iso);
+        targetPicker.$emit('change', parts.iso);
+        targetPicker.$emit('click:date', parts.iso);
       }
 
       if (wrapperVm && wrapperVm.$data) {
@@ -246,27 +234,27 @@
         }
       }
 
+      // Only directly set DOM input if it is NOT a readonly Vuetify menu activator
       if (targetWrap) {
         const inp = targetWrap.querySelector('input');
-        if (inp) {
-          if (inp._flatpickr) {
-            inp._flatpickr.setDate(parts.iso, true);
-          } else {
-            const displayVal = inp.type === 'date' ? parts.iso : parts.slash;
-            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-            if (nativeSetter) nativeSetter.call(inp, displayVal);
-            else inp.value = displayVal;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-            inp.dispatchEvent(new Event('change', { bubbles: true }));
-          }
+        if (inp && inp._flatpickr) {
+          inp._flatpickr.setDate(parts.iso, true);
+        } else if (inp && !inp.readOnly && !menuVm) {
+          const displayVal = inp.type === 'date' ? parts.iso : parts.slash;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (nativeSetter) nativeSetter.call(inp, displayVal);
+          else inp.value = displayVal;
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
         }
       }
 
       if (openedMenuTemporarily && menuVm) {
-        await new Promise(r => setTimeout(r, 40));
+        await new Promise(r => setTimeout(r, 50));
         menuVm.isActive = false;
       }
     }
+
 
     function applySmartFormDefaults(vmHead, vmMembers, totalMembers, childrenUnder18, isEthnic = 0, areaTypeId = 1) {
       const setReactive = (vmTarget, targetObj, key, val) => {

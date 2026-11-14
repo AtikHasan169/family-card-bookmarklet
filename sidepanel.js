@@ -1791,7 +1791,6 @@ async function runExtraction() {
 
 function triggerFormAutofill() {
   if (!state.lastExtracted) return;
-  recalculateHouseholdSummary(state.lastExtracted);
   window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
   setStatus('Sent auto-fill data to form!', 'ok');
 }
