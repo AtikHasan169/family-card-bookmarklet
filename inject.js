@@ -68,6 +68,27 @@
     return null;
   }
 
+  // Robust DOM setter for Vuetify masked inputs (forces component state to register value)
+  function setNativeDOMValue(selectorHint, val) {
+    if (!val) return;
+    setTimeout(() => {
+      document.querySelectorAll('input').forEach(inp => {
+        const meta = `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''} ${inp.getAttribute('aria-label') || ''}`.toLowerCase();
+        if (meta.includes(selectorHint) || inp.classList.contains('v-input__input')) {
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          if (nativeSetter) {
+            nativeSetter.call(inp, val);
+          } else {
+            inp.value = val;
+          }
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.dispatchEvent(new Event('blur', { bubbles: true }));
+        }
+      });
+    }, 150);
+  }
+
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
     const payload = event.detail;
     if (!payload) return;
@@ -126,13 +147,11 @@
         }
       }
 
-      // 1. Populate Primary Applicant (Wife / Head) - Names, NID, DOB with slashes filled; Gender untouched on verification page
+      // 1. Populate Primary Applicant (Wife / Head)
       if (payload.head && vm.data) {
         const h = payload.head;
         const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
         const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
-        const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-        // Format DOB with slashes (DD/MM/YYYY)
         const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
         const isVerificationPage = Boolean(
@@ -146,7 +165,10 @@
         setReactive(vm.data, 'date_of_birth', headCleanDob);
         setReactive(vm.data, 'dob', headCleanDob);
         
-        // Names & parents are always filled
+        // Trigger native DOM events so Vuetify registers the DOB mask
+        setNativeDOMValue('birth', headCleanDob);
+        setNativeDOMValue('dob', headCleanDob);
+
         setReactive(vm.data, 'name_bn', h.name_bn);
         setReactive(vm.data, 'name_en', h.name_en);
         setReactive(vm.data, 'father_name_bn', h.father_name_bn);
@@ -154,8 +176,8 @@
         setReactive(vm.data, 'mother_name_bn', h.mother_name_bn);
         setReactive(vm.data, 'mother_name_en', h.mother_name_en);
 
-        // GENDER: Excluded on verification page, filled normally on main form
         if (!isVerificationPage) {
+          const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
           setReactive(vm.data, 'gender', headGenderId);
           setReactive(vm.data, 'gender_id', headGenderId);
           setReactive(vm.data, 'sex', headGenderId);
@@ -197,10 +219,10 @@
             setReactive(row, 'verification_number', cleanId);
           }
 
-          // Format member DOB with slashes (DD/MM/YYYY)
           const memCleanDob = String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
           setReactive(row, 'dob', memCleanDob);
           setReactive(row, 'date_of_birth', memCleanDob);
+          
           setReactive(row, 'name_bn', m.name_bn);
           setReactive(row, 'name_en', m.name_en);
           setReactive(row, 'father_name_bn', m.father_name_bn);

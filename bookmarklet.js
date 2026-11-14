@@ -132,6 +132,27 @@
       );
     }
 
+    // Robust DOM setter for Vuetify masked inputs (forces component state to register value immediately)
+    function setNativeDOMValue(selectorHint, val) {
+      if (!val) return;
+      setTimeout(() => {
+        document.querySelectorAll('input').forEach(inp => {
+          const meta = `${inp.name || ''} ${inp.id || ''} ${inp.placeholder || ''} ${inp.getAttribute('aria-label') || ''}`.toLowerCase();
+          if (meta.includes(selectorHint) || inp.classList.contains('v-input__input')) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+            if (nativeSetter) {
+              nativeSetter.call(inp, val);
+            } else {
+              inp.value = val;
+            }
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            inp.dispatchEvent(new Event('blur', { bubbles: true }));
+          }
+        });
+      }, 150);
+    }
+
     window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
       const payload = event.detail;
       if (!payload) return;
@@ -208,7 +229,7 @@
           const cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
           const headIsNID = determineIsNID(h.doc_type, cleanHeadId);
           const headGenderId = resolveGenderId({ ...h, relation: 'Head/Self' });
-          // Format DOB with slashes (DD/MM/YYYY) to match website input mask expectations
+          // Format DOB with slashes (DD/MM/YYYY) for Vuetify mask compatibility
           const headCleanDob = String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
           const isVerificationPage = Boolean(
@@ -224,6 +245,10 @@
             setReactive(vmHead, vmHead.data, 'brn_id', !headIsNID ? cleanHeadId : '');
             setReactive(vmHead, vmHead.data, 'date_of_birth', headCleanDob);
             setReactive(vmHead, vmHead.data, 'dob', headCleanDob);
+
+            // Trigger native DOM events to force Vuetify mask recognition
+            setNativeDOMValue('birth', headCleanDob);
+            setNativeDOMValue('dob', headCleanDob);
 
             // Names & parents are always filled on all pages
             setReactive(vmHead, vmHead.data, 'name_bn', h.name_bn);
