@@ -1844,6 +1844,17 @@ function renderFullWebsiteTabs(container, dump) {
     });
   }
 }
+let currentKeyIndex = 0;
+function getNextApiKey() {
+  const raw = $('apiKeyInput').value.trim();
+  if (!raw) return '';
+  // Support comma-separated or space-separated keys
+  const keys = raw.split(/[,;\s]+/).map(k => k.trim()).filter(Boolean);
+  if (keys.length === 0) return '';
+  const key = keys[currentKeyIndex % keys.length];
+  currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+  return key;
+}
 
 async function runExtraction() {
   if (!state.head.length) {
@@ -1851,7 +1862,7 @@ async function runExtraction() {
     return;
   }
 
-  const apiKey = $('apiKeyInput').value.trim();
+  const apiKey = getNextApiKey();
   const model = getActiveModel();
   if (!apiKey) {
     $('settingsDrawer').classList.add('open');
