@@ -205,7 +205,7 @@ function applyModelToUI(modelName) {
   const sel = $('modelSelect');
   const customInp = $('customModelInput');
   if (!sel) return;
-  const cleanModel = (modelName || 'gemini-2.5-flash').trim();
+  const cleanModel = (modelName || 'gemini-3.5-flash').trim();
   const isPreset = Array.from(sel.options).some((o) => o.value !== 'custom' && o.value === cleanModel);
 
   if (isPreset) {
@@ -224,17 +224,17 @@ function getActiveModel() {
   const sel = $('modelSelect');
   const customInp = $('customModelInput');
   if (sel && sel.value === 'custom') {
-    return (customInp ? customInp.value.trim() : '') || 'gemini-2.5-flash';
+    return (customInp ? customInp.value.trim() : '') || 'gemini-3.5-flash';
   }
-  return (sel ? sel.value.trim() : '') || 'gemini-2.5-flash';
+  return (sel ? sel.value.trim() : '') || 'gemini-3.5-flash';
 }
 
 function initApp() {
   let savedKey = '';
-  let savedModel = 'gemini-2.5-flash';
+  let savedModel = 'gemini-3.5-flash';
   try {
     savedKey = localStorage.getItem(STORAGE_KEY) || '';
-    savedModel = localStorage.getItem(STORAGE_MODEL) || 'gemini-2.5-flash';
+    savedModel = localStorage.getItem(STORAGE_MODEL) || 'gemini-3.5-flash';
   } catch (err) {}
 
   $('apiKeyInput').value = savedKey;
