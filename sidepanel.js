@@ -6,8 +6,8 @@ const STORAGE_AREA_PRESETS = 'fc_pro_area_presets';
 const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
-const STORAGE_CUSTOM_ADMIN = 'fc_pro_custom_admin';
 const CURRENT_VERSION_TAG = 'v4.2-live';
+
 
 
 const RELATION_OPTIONS = [
@@ -244,7 +244,6 @@ function initApp() {
     if($('apiProviderSelect')) $('apiProviderSelect').value = localStorage.getItem(STORAGE_PROVIDER) || 'google';
     if($('customBaseUrl')) $('customBaseUrl').value = localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app';
     if($('customBearerToken')) $('customBearerToken').value = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
-    if($('customAdminToken')) $('customAdminToken').value = localStorage.getItem(STORAGE_CUSTOM_ADMIN) || '';
   } catch (err) {}
 
   $('apiKeyInput').value = savedKey;
@@ -267,7 +266,6 @@ function initApp() {
   
   if($('customBaseUrl')) $('customBaseUrl').addEventListener('input', e => localStorage.setItem(STORAGE_CUSTOM_URL, e.target.value.trim()));
   if($('customBearerToken')) $('customBearerToken').addEventListener('input', e => localStorage.setItem(STORAGE_CUSTOM_BEARER, e.target.value.trim()));
-  if($('customAdminToken')) $('customAdminToken').addEventListener('input', e => localStorage.setItem(STORAGE_CUSTOM_ADMIN, e.target.value.trim()));
   
   if($('refreshModelsBtn')) {
     $('refreshModelsBtn').addEventListener('click', async () => {
@@ -276,8 +274,7 @@ function initApp() {
         $('refreshModelsBtn').textContent = '...';
         const res = await fetch(`${baseUrl}/v1/models`, {
           headers: {
-            'Authorization': `Bearer ${$('customBearerToken').value}`,
-            'X-Admin-Token': $('customAdminToken').value
+            'Authorization': `Bearer ${$('customBearerToken').value}`
           }
         });
         if (!res.ok) throw new Error(res.status);
@@ -1965,7 +1962,6 @@ async function runExtraction() {
     if (provider === 'custom') {
       const baseUrl = (localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app').replace(/\/$/, "");
       const customBearer = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
-      const customAdmin = localStorage.getItem(STORAGE_CUSTOM_ADMIN) || '';
       
       const allImagesBase64 = [
         ...state.head.map(item => `data:image/jpeg;base64,${item.base64}`),
@@ -1986,8 +1982,7 @@ async function runExtraction() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${customBearer}`,
-          'X-Admin-Token': customAdmin
+          'Authorization': `Bearer ${customBearer}`
         },
         body: JSON.stringify({
           model: model,
