@@ -201,6 +201,34 @@ function bindQuickCopyBtn(btnId, getValFn) {
   });
 }
 
+function applyModelToUI(modelName) {
+  const sel = $('modelSelect');
+  const customInp = $('customModelInput');
+  if (!sel) return;
+  const cleanModel = (modelName || 'gemini-2.5-flash').trim();
+  const isPreset = Array.from(sel.options).some((o) => o.value !== 'custom' && o.value === cleanModel);
+
+  if (isPreset) {
+    sel.value = cleanModel;
+    if (customInp) customInp.style.display = 'none';
+  } else {
+    sel.value = 'custom';
+    if (customInp) {
+      customInp.style.display = 'block';
+      customInp.value = cleanModel;
+    }
+  }
+}
+
+function getActiveModel() {
+  const sel = $('modelSelect');
+  const customInp = $('customModelInput');
+  if (sel && sel.value === 'custom') {
+    return (customInp ? customInp.value.trim() : '') || 'gemini-2.5-flash';
+  }
+  return (sel ? sel.value.trim() : '') || 'gemini-2.5-flash';
+}
+
 function initApp() {
   let savedKey = '';
   let savedModel = 'gemini-2.5-flash';
@@ -210,13 +238,34 @@ function initApp() {
   } catch (err) {}
 
   $('apiKeyInput').value = savedKey;
-  $('modelSelect').value = savedModel;
+  applyModelToUI(savedModel);
   if (!savedKey) $('settingsDrawer').classList.add('open');
 
   loadAreaPresetsFromLocal();
 
   $('apiKeyInput').addEventListener('input', (e) => saveCredentialsEverywhere(e.target.value.trim(), undefined, undefined));
-  $('modelSelect').addEventListener('change', (e) => saveCredentialsEverywhere(undefined, e.target.value, undefined));
+  $('modelSelect').addEventListener('change', (e) => {
+    const val = e.target.value;
+    const customInp = $('customModelInput');
+    if (val === 'custom') {
+      if (customInp) {
+        customInp.style.display = 'block';
+        customInp.focus();
+        const customVal = customInp.value.trim();
+        if (customVal) saveCredentialsEverywhere(undefined, customVal, undefined);
+      }
+    } else {
+      if (customInp) customInp.style.display = 'none';
+      saveCredentialsEverywhere(undefined, val, undefined);
+    }
+  });
+
+  if ($('customModelInput')) {
+    $('customModelInput').addEventListener('input', (e) => {
+      const customVal = e.target.value.trim() || 'gemini-2.5-flash';
+      saveCredentialsEverywhere(undefined, customVal, undefined);
+    });
+  }
 
   // Bind Persistent Area Preset inputs & Copy buttons
   ['presetVillageInput', 'presetWardInput', 'presetPostCodeInput'].forEach(id => {
@@ -351,7 +400,7 @@ function handleIncomingMessages(e) {
       $('settingsDrawer').classList.remove('open');
     }
     if (e.data.model) {
-      $('modelSelect').value = e.data.model;
+      applyModelToUI(e.data.model);
       try { localStorage.setItem(STORAGE_MODEL, e.data.model); } catch (_) {}
     }
     if (e.data.areaPresets && typeof e.data.areaPresets === 'object') {
@@ -1801,7 +1850,7 @@ async function runExtraction() {
   }
 
   const apiKey = $('apiKeyInput').value.trim();
-  const model = $('modelSelect').value.trim() || 'gemini-2.5-flash';
+  const model = getActiveModel();
   if (!apiKey) {
     $('settingsDrawer').classList.add('open');
     $('apiKeyInput').focus();

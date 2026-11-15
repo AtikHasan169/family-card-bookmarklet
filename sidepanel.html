@@ -228,11 +228,18 @@
           </div>
         </div>
         <div>
-          <div class="field-label"><span>Model Endpoint</span></div>
+          <div class="field-label">
+            <span>Model Endpoint</span>
+            <span style="font-size:10.5px; color:var(--text-muted); font-weight:500;">Preset or Custom</span>
+          </div>
           <select id="modelSelect">
             <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
             <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
+            <option value="custom">Custom Gemini Version...</option>
           </select>
+          <input id="customModelInput" type="text" placeholder="e.g. gemini-2.5-pro-preview" autocomplete="off" spellcheck="false" style="display:none; margin-top:6px;">
         </div>
 
         <div class="settings-divider">
