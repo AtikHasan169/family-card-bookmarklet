@@ -1192,7 +1192,9 @@ STRICT NAME EXTRACTION & CROSS-VERIFICATION RULES:
 1. NEVER READ FROM SIGNATURE:
    - Extract 'name_bn' and 'name_en' ONLY from the printed "নাম:" (Name) and "Name:" text fields in the main body of the NID card.
    - NEVER extract, guess, or copy the name from the handwritten signature ("স্বাক্ষর" / Signature).
-2. CROSS-CHECK HEAD (WIFE) WITH CHILDREN'S MOTHER'S NAME:
+2. PARENTS' ENGLISH NAMES (father_name_en & mother_name_en — HEAD ONLY):
+   - For the primary applicant ('head') ONLY, since NID cards print parents' names ONLY in Bengali, explicitly phonetically transliterate ("Banglish" spelling using English letters) the Bengali father and mother names into standard uppercase English letters (e.g., "আব্দুল করিম" -> "ABDUL KARIM"). Always transliterate "মোঃ" or "মো:" as "MD." and "মোছাঃ" or "মোসাঃ" as "MST." Do not extract or include English parent names for any other family members.
+3. CROSS-CHECK HEAD (WIFE) WITH CHILDREN'S MOTHER'S NAME:
    - Use the children's "মাতার নাম" (Mother's Name) and "পিতার নাম" (Father's Name) fields to cross-verify which card belongs to the Mother/Wife ('head') and Husband.
 
 CRITICAL ROLE & GENDER RULE:
