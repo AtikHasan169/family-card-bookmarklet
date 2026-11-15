@@ -199,7 +199,7 @@
       </div>
     </div>
     <div class="nav-right">
-      <button type="button" class="btn btn-xs" id="updateCheckBtn" title="Check for script updates" style="font-size:10.5px; padding:3px 8px;">Update</button>
+      <button type="button" class="btn btn-xs" id="updateCheckBtn" title="Check for script updates" style="font-size:10.5px; padding:3px 8px; background:#eef2ff; color:#4f46e5; border-color:#c7d2fe;">Update</button>
       <div class="conn-pill" id="connStatus">
         <span class="conn-dot"></span>
         <span id="connText">Checking...</span>
@@ -298,15 +298,15 @@
           <h2 class="card-title">Household Head (Wife) &amp; Husband</h2>
         </div>
         <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
-          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull every field and tab from web form">Pull All</button>
-          <button type="button" class="btn btn-xs" id="importJsonBtn" title="Import JSON backup file">Import</button>
+          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull every field and tab from web form" style="background:#0284c7; color:#ffffff; border-color:#0284c7;">Pull All</button>
+          <button type="button" class="btn btn-xs" id="importJsonBtn" title="Import JSON backup file" style="background:#7c3aed; color:#ffffff; border-color:#7c3aed;">Import</button>
           <input type="file" id="importJsonInput" accept=".json,application/json" hidden>
           <span class="badge" id="headCount">0 files</span>
         </div>
       </div>
       <div class="upload-Zone" id="headDropZone">
         <button type="button" class="btn btn-dark" id="uploadHeadBtn">Upload Photos</button>
-        <button type="button" class="btn" id="captureHeadBtn">Live Camera</button>
+        <button type="button" class="btn btn-emerald" id="captureHeadBtn">Live Camera</button>
         <input type="file" id="headUpload" accept="image/*" multiple hidden>
       </div>
       <div class="thumb-grid" id="headPreviews"></div>
@@ -322,7 +322,7 @@
       </div>
       <div class="upload-Zone" id="otherDropZone">
         <button type="button" class="btn btn-dark" id="uploadOtherBtn">Upload Photos</button>
-        <button type="button" class="btn" id="captureOtherBtn">Live Camera</button>
+        <button type="button" class="btn btn-emerald" id="captureOtherBtn">Live Camera</button>
         <input type="file" id="otherUpload" accept="image/*" multiple hidden>
       </div>
       <div class="thumb-grid" id="otherPreviews"></div>
@@ -339,9 +339,9 @@
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted &amp; Website Records</span>
         <div style="display:flex; gap:5px;">
-          <button type="button" class="btn btn-xs" id="exportJsonBtn" style="border-color:#2563eb; color:#2563eb;">Export JSON</button>
-          <button type="button" class="btn btn-xs" id="copyJsonBtn">Copy JSON</button>
-          <button type="button" class="btn btn-xs" id="clearAllBtn">Reset</button>
+          <button type="button" class="btn btn-xs" id="exportJsonBtn" style="background:#2563eb; color:#ffffff; border-color:#2563eb;">Export JSON</button>
+          <button type="button" class="btn btn-xs" id="copyJsonBtn" style="background:#d97706; color:#ffffff; border-color:#d97706;">Copy JSON</button>
+          <button type="button" class="btn btn-xs btn-danger" id="clearAllBtn">Reset</button>
         </div>
       </div>
 
