@@ -218,6 +218,14 @@
     <section class="settings-drawer" id="settingsDrawer">
       <div class="form-grid">
         <div>
+          <div class="field-label"><span>API Provider</span></div>
+          <select id="apiProviderSelect" style="margin-bottom: 8px;">
+            <option value="google">Google Generative AI</option>
+            <option value="custom">Custom Vercel API</option>
+          </select>
+        </div>
+        
+        <div id="googleSettingsGroup">
           <div class="field-label">
             <span>Gemini API Key</span>
             <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent); text-decoration:none;">Get Key</a>
@@ -227,10 +235,19 @@
             <button type="button" class="btn btn-xs" id="toggleKeyBtn">Show</button>
           </div>
         </div>
+        
+        <div id="customSettingsGroup" style="display: none; padding: 10px; background: #f1f5f9; border-radius: 6px; margin-bottom: 8px;">
+          <div class="field-label"><span>Base URL</span></div>
+          <input id="customBaseUrl" type="text" value="https://geminiwebapi-teal.vercel.app" style="margin-bottom: 6px;">
+          <div class="field-label"><span>Bearer Token</span></div>
+          <input id="customBearerToken" type="password" style="margin-bottom: 6px;">
+          <div class="field-label"><span>Admin Token</span></div>
+          <input id="customAdminToken" type="password">
+        </div>
         <div>
-          <div class="field-label">
+          <div class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
             <span>Model Endpoint</span>
-            <span style="font-size:10.5px; color:var(--text-muted); font-weight:500;">Preset or Custom</span>
+            <button type="button" class="btn btn-xs" id="refreshModelsBtn" style="display:none; padding: 2px 6px; font-size: 10px;">Refresh</button>
           </div>
           <select id="modelSelect">
             <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
