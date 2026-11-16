@@ -260,26 +260,13 @@
         else targetObj[key] = val;
       };
 
+      const toBnDigits = (str) => String(str ?? '').replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[d]);
+      const toEnDigits = (str) => String(str ?? '').replace(/[০-৯]/g, d => '০১২৩৪৫৬৭৮৯'.indexOf(d));
+
       const d = (vmHead && vmHead.data) ? vmHead.data : null;
       const villageVal = String(defs?.village || '').trim();
-      const wardVal = String(defs?.ward_no || '').trim();
-      const postVal = String(defs?.post_code || '').trim();
-
-      let resolvedAreaId = areaTypeId;
-      if (vmHead && vmHead.$data && areaTypeId === 1) {
-        Object.entries(vmHead.$data).forEach(([k, list]) => {
-          if (Array.isArray(list) && list.length > 0 && list.length <= 20 && typeof list[0] === 'object' && list[0] !== null) {
-            const matchItem = list.find(item => {
-              const txt = `${item.name_bn || ''} ${item.name_en || ''} ${item.name || ''} ${item.title_bn || ''} ${item.label || ''} ${item.text || ''}`.toLowerCase();
-              return /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/.test(txt);
-            });
-            if (matchItem) {
-              const idKey = ('id' in matchItem) ? 'id' : (('value' in matchItem) ? 'value' : (('code' in matchItem) ? 'code' : null));
-              if (idKey) resolvedAreaId = matchItem[idKey];
-            }
-          }
-        });
-      }
+      const wardVal = toEnDigits(String(defs?.ward_no || '').trim());
+      const postVal = toEnDigits(String(defs?.post_code || '').trim());
 
       if (d) {
         [
@@ -315,7 +302,7 @@
           });
         }
         if (wardVal) {
-          ['ward', 'ward_no', 'ward_number', 'present_ward', 'permanent_ward'].forEach(k => {
+          ['ward', 'ward_no', 'ward_id', 'ward_number', 'present_ward', 'permanent_ward'].forEach(k => {
             if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, wardVal);
           });
         }
@@ -330,21 +317,18 @@
           if (/child|shishu|sishu|under_18/.test(low) && typeof d[k] !== 'object') {
             setReactive(vmHead, d, k, childrenUnder18);
           }
-          if ((/^(total_member|member_count|family_size|house_size|khana_size)$/.test(low)) && typeof d[k] !== 'object') {
+          if (/^(total_member|member_count|family_size|house_size|khana_size|khana_member)$/.test(low) && typeof d[k] !== 'object') {
             setReactive(vmHead, d, k, totalMembers);
           }
           if (/ethnic|tribal|nrigosthi|nrigosthy|adibashi|indigenous|minority/.test(low)) {
             if (typeof d[k] === 'boolean') setReactive(vmHead, d, k, Boolean(isEthnic));
             else if (!low.endsWith('_name') && !low.endsWith('_type_id')) setReactive(vmHead, d, k, Number(isEthnic));
           }
-          if (/^(location_type|location_type_id|residence_location|household_location|khana_location|বাসস্থান|residence_area_type)$/.test(low)) {
-            setReactive(vmHead, d, k, resolvedAreaId);
+          if (/account_owner|ownership|malikana|account_type_owner/.test(low) && typeof d[k] !== 'object') {
+            // Do not overwrite if already set by Vuetify component below
           }
           if (villageVal && /village|road|gram|para|moholla/.test(low) && !/id$/.test(low) && typeof d[k] !== 'object') {
             setReactive(vmHead, d, k, villageVal);
-          }
-          if (wardVal && /(^|_)(ward|word)(_no|_number)?$/.test(low) && typeof d[k] !== 'object') {
-            setReactive(vmHead, d, k, wardVal);
           }
           if (postVal && /post_code|postal_code|postcode|zip/.test(low) && typeof d[k] !== 'object') {
             setReactive(vmHead, d, k, postVal);
@@ -364,50 +348,131 @@
         });
       }
 
+      // Helper to resolve the actual Vuetify select/radio/input Vue instance
+      const getActiveVm = (wrap) => {
+        let v = wrap.__vue__;
+        if (v && (!Array.isArray(v.items) || !v.items.length) && Array.isArray(v.$children)) {
+          const childWithItems = v.$children.find(c => Array.isArray(c.items) && c.items.length > 0);
+          if (childWithItems) return childWithItems;
+        }
+        if (!v) {
+          const inner = wrap.querySelector('.v-select, .v-radio-group, .v-input');
+          if (inner && inner.__vue__) v = inner.__vue__;
+        }
+        return v;
+      };
+
+      const itemToStr = (it) => (typeof it === 'object' && it !== null)
+        ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.title ?? ''} ${it.name ?? ''} ${it.value ?? ''} ${it.id ?? ''} ${it.code ?? ''}`
+        : String(it ?? '');
+
+      const selectVuetifyItem = (vInst, matchFn) => {
+        if (!vInst || !Array.isArray(vInst.items) || !vInst.items.length || vInst.disabled || vInst.readonly) return false;
+        const targetItem = vInst.items.find(matchFn);
+        if (targetItem === undefined) return false;
+        let val = targetItem;
+        if (typeof targetItem === 'object' && targetItem !== null && !vInst.returnObject) {
+          const valKey = (typeof vInst.itemValue === 'string' && vInst.itemValue in targetItem) ? vInst.itemValue : null;
+          val = valKey ? targetItem[valKey] : (targetItem.value ?? targetItem.id ?? targetItem.code ?? targetItem);
+        }
+        if (typeof vInst.selectItem === 'function') {
+          try { vInst.selectItem(targetItem); } catch (_) {}
+        }
+        vInst.$emit('input', val);
+        vInst.$emit('change', val);
+        if ('internalValue' in vInst) {
+          try { vInst.internalValue = val; } catch (_) {}
+        }
+        return true;
+      };
+
+      // Find the exact label text belonging ONLY to this single input/select/radio-group
+      const getControlLabel = (wrap) => {
+        const parts = [];
+        // 1. Direct labels inside this v-input (excluding radio option texts & selected dropdown chips)
+        wrap.querySelectorAll('label, .v-label, legend').forEach(el => {
+          if (!el.classList.contains('v-radio') && !el.closest('.v-radio') && !el.closest('.v-select__selections')) {
+            parts.push(el.textContent || '');
+          }
+        });
+        // 2. Immediately preceding sibling label/header (common in Bootstrap + Vuetify layouts)
+        let prev = wrap.previousElementSibling;
+        while (prev && !prev.classList.contains('v-input') && !prev.querySelector('.v-input, input, select')) {
+          parts.push(prev.textContent || '');
+          prev = prev.previousElementSibling;
+        }
+        // 3. If wrapped inside a dedicated single-field column/form-group, check its direct label
+        const col = wrap.closest('.col-md-6, .col-md-4, .col-md-3, .col-sm-6, .col-12, .form-group');
+        if (col && col.querySelectorAll('.v-input, select, input:not([type="hidden"]):not([type="radio"])').length <= 1) {
+          col.querySelectorAll('label, .v-label, legend, p, h5, h6, span').forEach(el => {
+            if (!wrap.contains(el) && !el.closest('.v-radio') && !el.closest('.v-select__selections')) {
+              parts.push(el.textContent || '');
+            }
+          });
+        }
+        // 4. Placeholder / aria-label fallback
+        const inp = wrap.querySelector('input, select, textarea');
+        if (inp) {
+          parts.push(inp.getAttribute('placeholder') || '');
+          parts.push(inp.getAttribute('aria-label') || '');
+        }
+        return parts.join(' ').replace(/\*/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      };
+
       document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
         if (wrap.closest('#fc-floating-root')) return;
-        const parentCol = wrap.closest('.col-md-6, .col-md-4, .col-md-3, .col-sm-6, .col-12, .form-group');
-        const hasSingleControl = parentCol && parentCol.querySelectorAll('.v-input').length <= 1;
-        const searchRoot = hasSingleControl ? parentCol : wrap;
+        // Skip outer wrappers that contain inner .v-input elements to prevent cross-field collisions
+        if (!wrap.classList.contains('v-input') && wrap.querySelector('.v-input')) return;
 
-        const allLabels = Array.from(searchRoot.querySelectorAll('label, .v-label, legend, p, h4, h5, h6, span'))
-          .filter(el => !el.classList.contains('v-radio') && !el.closest('.v-radio') && !el.closest('.v-select__selections'))
-          .map(el => el.textContent || '')
-          .join(' ');
-        const prevHeader = wrap.previousElementSibling ? (wrap.previousElementSibling.textContent || '') : '';
-        const rawTxt = `${allLabels} ${prevHeader}`;
-        const labelTxt = rawTxt.replace(/\*/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-        const vInst = wrap.__vue__;
+        const labelTxt = getControlLabel(wrap);
+        if (!labelTxt) return;
+        const vInst = getActiveVm(wrap);
 
-        const fillEditableInput = (valToSet) => {
-          // 1. If it's a Vuetify v-select / v-autocomplete with items
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
-            const strVal = String(valToSet);
-            const matchedItem = vInst.items.find(it => {
-              if (typeof it === 'object' && it !== null) {
-                return String(it.value ?? it.id ?? it.text ?? it.name_bn ?? it.label ?? '') === strVal;
-              }
-              return String(it) === strVal;
+        const fillNumericOrTextInput = (valToSet) => {
+          const enStr = toEnDigits(valToSet);
+          const bnStr = toBnDigits(valToSet);
+
+          // 1. Try Vuetify dropdown if it's a select
+          selectVuetifyItem(vInst, it => {
+            const s = toEnDigits(itemToStr(it)).trim();
+            return s === enStr || new RegExp(`(^|\\D)0?${enStr}(\\D|$)`).test(s);
+          });
+
+          // 2. Try native <select>
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
+            const opt = Array.from(sel.options).find(o => {
+              const s = toEnDigits(`${o.value} ${o.textContent}`).trim();
+              return s === enStr || new RegExp(`(^|\\D)0?${enStr}(\\D|$)`).test(s);
             });
-            if (matchedItem !== undefined) {
-              const outVal = (typeof matchedItem === 'object' && matchedItem !== null)
-                ? (matchedItem.value ?? matchedItem.id ?? matchedItem)
-                : matchedItem;
-              vInst.$emit('input', outVal);
-              vInst.$emit('change', outVal);
+            if (opt && sel.value !== opt.value) {
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
             }
-          }
-          // 2. If it's a standard text/number input
-          const inp = wrap.querySelector('input[type="text"], input[type="number"], input:not([type]):not([type="radio"]):not([type="checkbox"]), textarea');
-          if (!inp || inp.readOnly || inp.disabled) return;
+          });
+
+          // 3. Fill text/number <input>
+          const inp = wrap.querySelector('input[type="text"], input[type="number"], input[type="tel"], input:not([type]), textarea');
+          if (!inp || inp.readOnly || inp.disabled || inp.type === 'radio' || inp.type === 'checkbox') return;
+
+          // Use English digits for type="number", or match placeholder language
+          const ph = inp.getAttribute('placeholder') || '';
+          const preferBn = inp.type !== 'number' && /[০-৯]/.test(ph);
+          const finalStr = preferBn ? bnStr : enStr;
+
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-          if (nativeSetter) nativeSetter.call(inp, String(valToSet));
-          else inp.value = String(valToSet);
+          if (nativeSetter) nativeSetter.call(inp, finalStr);
+          else inp.value = finalStr;
           inp.dispatchEvent(new Event('input', { bubbles: true }));
           inp.dispatchEvent(new Event('change', { bubbles: true }));
           inp.dispatchEvent(new Event('blur', { bubbles: true }));
-          if (vInst && 'internalValue' in vInst) {
-            try { vInst.internalValue = valToSet; } catch (_) {}
+
+          if (vInst) {
+            const parsedNum = (!isNaN(Number(enStr)) && enStr !== '') ? Number(enStr) : finalStr;
+            vInst.$emit('input', parsedNum);
+            vInst.$emit('change', parsedNum);
+            if ('internalValue' in vInst) {
+              try { vInst.internalValue = parsedNum; } catch (_) {}
+            }
           }
         };
 
@@ -427,27 +492,15 @@
               : (cleanV === '0' || cleanV === '2' || cleanV === 'false' || cleanV === 'no' || cleanV === 'না');
           };
 
-          // 1. Handle Vuetify <v-select>
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
-            const targetItem = vInst.items.find(it => {
-              if (typeof it === 'object' && it !== null) {
-                const t = `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title || ''}`;
-                const v = it.value ?? it.id;
-                return isMatchText(t) || isMatchVal(v);
-              }
-              return isMatchText(it) || isMatchVal(it);
-            });
-            if (targetItem !== undefined) {
-              const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? 0) : targetItem;
-              vInst.$emit('input', val);
-              vInst.$emit('change', val);
-              if ('internalValue' in vInst) {
-                try { vInst.internalValue = val; } catch (_) {}
-              }
+          selectVuetifyItem(vInst, it => {
+            if (typeof it === 'object' && it !== null) {
+              const t = `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title ?? ''}`;
+              const v = it.value ?? it.id;
+              return isMatchText(t) || isMatchVal(v);
             }
-          }
+            return isMatchText(it) || isMatchVal(it);
+          });
 
-          // 2. Handle Vuetify <v-radio-group> & <v-radio>
           wrap.querySelectorAll('.v-radio').forEach(vRadEl => {
             const rLbl = (vRadEl.textContent || '').trim();
             const radVm = vRadEl.__vue__;
@@ -455,11 +508,8 @@
             if (isMatchText(rLbl) || isMatchVal(radVal)) {
               const inp = vRadEl.querySelector('input[type="radio"]');
               if (inp && !inp.disabled && !inp.checked) inp.click();
-              if (radVm && typeof radVm.toggle === 'function') {
-                const isAlreadyActive = radVm.isActive;
-                if (!isAlreadyActive) radVm.toggle();
-              }
-              const groupVm = radVm && radVm.radioGroup ? radVm.radioGroup : (vInst && vInst._isVue ? vInst : null);
+              if (radVm && typeof radVm.toggle === 'function' && !radVm.isActive) radVm.toggle();
+              const groupVm = (radVm && radVm.radioGroup) ? radVm.radioGroup : vInst;
               if (groupVm && radVal !== undefined) {
                 groupVm.$emit('input', radVal);
                 groupVm.$emit('change', radVal);
@@ -470,16 +520,6 @@
             }
           });
 
-          // 3. Handle standard HTML radio buttons
-          wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
-            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim();
-            if ((isMatchText(rLbl) || isMatchVal(rad.value)) && !rad.checked) {
-              rad.click();
-              rad.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          });
-
-          // 4. Handle standard HTML <select>
           wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
             const opt = Array.from(sel.options).find(o => isMatchText(o.textContent) || isMatchVal(o.value));
             if (opt && sel.value !== opt.value) {
@@ -489,28 +529,12 @@
           });
         }
 
-        // B. Where is the household/residence located -> খানাটি বা বাসস্থানটি কোথায় অবস্থিত *
-        const itemToStr = (it) => (typeof it === 'object' && it !== null) 
-          ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.name ?? ''}` 
-          : String(it ?? '');
-
-        if ((/খানাটি|বাসস্থানটি|কোথায় অবস্থিত|কোথায় অবস্থিত|residence|household location/.test(labelTxt) && !/এলাকার ধরন/.test(labelTxt)) ||
-            (!/এলাকার ধরন/.test(labelTxt) && vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(itemToStr(it))))) {
+        // B. STRICTLY ONLY "খানাটি বা বাসস্থানটি কোথায় অবস্থিত *" — NEVER touch "এলাকার ধরন*"
+        if (/খানাটি\s*বা\s*বাসস্থানটি|বাসস্থানটি\s*কোথায়|বাসস্থানটি\s*কোথায়|খানাটি\s*কোথায়|খানাটি\s*কোথায়|কোথায়\s*অবস্থিত|কোথায়\s*অবস্থিত/.test(labelTxt) && !/এলাকার\s*ধরন/.test(labelTxt)) {
           const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
 
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
-            const areaItem = vInst.items.find(it => {
-              const t = typeof it === 'object' && it !== null
-                ? `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title_bn || ''} ${it.name || ''}`
-                : String(it);
-              return areaPattern.test(t);
-            });
-            if (areaItem !== undefined) {
-              const val = (typeof areaItem === 'object' && areaItem !== null) ? (areaItem.value ?? areaItem.id ?? areaItem.code) : areaItem;
-              vInst.$emit('input', val);
-              vInst.$emit('change', val);
-            }
-          }
+          selectVuetifyItem(vInst, it => areaPattern.test(itemToStr(it)));
+
           wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
             const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
             if (areaPattern.test(rLbl) && !rad.checked) {
@@ -528,74 +552,87 @@
         }
 
         // C. Village / Road No (গ্রাম / রাস্তা / পাড়া / মহল্লা / বাসা / হোল্ডিং)
-        if (villageVal && /গ্রাম|রাস্তা|পাড়া|মহল্লা|বাসা|হোল্ডিং|village|road|street|house no/.test(labelTxt) && !/সদস্য|member|size/.test(labelTxt)) {
-          fillEditableInput(villageVal);
+        if (villageVal && /গ্রাম|রাস্তা|পাড়া|মহল্লা|বাসা|হোল্ডিং|village|road|street|house no/.test(labelTxt) && !/সদস্য|member|size|কোথায়|কোথায়|অবস্থিত|এলাকার/.test(labelTxt)) {
+          fillNumericOrTextInput(villageVal);
         }
 
-        // D. Ward No (ওয়ার্ড নং) — supports both text/number input and Vuetify/native dropdown
+        // D. Ward No (ওয়ার্ড নং) — supports both Bengali (৪, ০৪) and English (4, 04) in Vuetify/native dropdowns & inputs
         if (wardVal && /ওয়ার্ড|ওয়ার্ড|ward/.test(labelTxt)) {
-          const cleanW = String(parseInt(wardVal, 10) || wardVal);
-          const padW = cleanW.padStart(2, '0');
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
-            const wItem = vInst.items.find(it => {
-              const str = (typeof it === 'object' && it !== null) ? `${it.value ?? ''} ${it.id ?? ''} ${it.text ?? ''}` : String(it);
-              return new RegExp(`\\b(${cleanW}|${padW})\\b`).test(str);
-            });
+          const cleanEn = String(parseInt(wardVal, 10) || wardVal);
+          const padEn = cleanEn.padStart(2, '0');
+          const numRegex = new RegExp(`(^|\\D)(${cleanEn}|${padEn})(\\D|$)`);
 
-            if (wItem !== undefined) {
-              const val = (typeof wItem === 'object' && wItem !== null) ? (wItem.value ?? wItem.id ?? wItem.code ?? cleanW) : wItem;
-              vInst.$emit('input', val);
-              vInst.$emit('change', val);
-            }
-          }
+          const matchedDropdown = selectVuetifyItem(vInst, it => {
+            const normStr = toEnDigits(itemToStr(it));
+            return normStr.trim() === cleanEn || normStr.trim() === padEn || numRegex.test(normStr);
+          });
+
           wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
-            const opt = Array.from(sel.options).find(o => new RegExp(`\\b(${cleanW}|${padW})\\b`).test(`${o.value} ${o.textContent}`));
+            const opt = Array.from(sel.options).find(o => {
+              const normStr = toEnDigits(`${o.value} ${o.textContent}`);
+              return normStr.trim() === cleanEn || normStr.trim() === padEn || numRegex.test(normStr);
+            });
             if (opt && sel.value !== opt.value) {
               sel.value = opt.value;
               sel.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });
-          fillEditableInput(wardVal);
+
+          if (!matchedDropdown) {
+            fillNumericOrTextInput(cleanEn);
+          }
         }
 
         // E. Post Code (পোস্ট কোড / ডাকঘর কোড)
-        if (postVal && /পোস্ট কোড|পোষ্ট কোড|ডাকঘর|post code|postal code|postcode|zip/.test(labelTxt)) {
-          fillEditableInput(postVal);
+        if (postVal && /পোস্ট\s*কোড|পোষ্ট\s*কোড|ডাকঘর|post\s*code|postal\s*code|postcode|zip/.test(labelTxt)) {
+          fillNumericOrTextInput(postVal);
         }
 
         // F. Children Under 18 (খানার শিশু সংখ্যা * / শিশু সংখ্যা)
-        if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number of children|children count/.test(labelTxt)) {
-          fillEditableInput(childrenUnder18);
+        if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number\s*of\s*children|children\s*count/.test(labelTxt)) {
+          fillNumericOrTextInput(childrenUnder18);
         }
 
         // G. Total Household Members (খানার সদস্য সংখ্যা * / পরিবারের সদস্য সংখ্যা)
-        if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
-          fillEditableInput(totalMembers);
+        if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total\s*member|family\s*size|house\s*size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
+          fillNumericOrTextInput(totalMembers);
         }
 
         // H. Account Ownership (অ্যাকাউন্টের মালিকানা*) -> Self (নিজ)
-        if (/অ্যাকাউন্টের মালিকানা|account ownership/i.test(labelTxt)) {
-          const wantNij = /নিজ|self/i;
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
-            const targetItem = vInst.items.find(it => {
-              const t = typeof it === 'object' && it !== null ? `${it.text || ''} ${it.name_bn || ''} ${it.name || ''}` : String(it);
-              return wantNij.test(t);
-            });
-            if (targetItem !== undefined) {
-              const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? targetItem.code) : targetItem;
-              vInst.$emit('input', val);
-              vInst.$emit('change', val);
+        if (/অ্যাকাউন্টের\s*মালিকানা|হিসাবের\s*মালিকানা|একাউন্টের\s*মালিকানা|মালিকানা|account\s*ownership|ownership/i.test(labelTxt)) {
+          const wantNij = /নিজ|স্বীয়|স্বীয়|নিজের|self|own/i;
+
+          selectVuetifyItem(vInst, it => wantNij.test(itemToStr(it)));
+
+          wrap.querySelectorAll('.v-radio').forEach(vRadEl => {
+            const rLbl = (vRadEl.textContent || '').trim();
+            const radVm = vRadEl.__vue__;
+            const radVal = radVm ? radVm.value : vRadEl.querySelector('input')?.value;
+            if (wantNij.test(rLbl) || wantNij.test(String(radVal || ''))) {
+              const inp = vRadEl.querySelector('input[type="radio"]');
+              if (inp && !inp.disabled && !inp.checked) inp.click();
+              if (radVm && typeof radVm.toggle === 'function' && !radVm.isActive) radVm.toggle();
+              const groupVm = (radVm && radVm.radioGroup) ? radVm.radioGroup : vInst;
+              if (groupVm && radVal !== undefined) {
+                groupVm.$emit('input', radVal);
+                groupVm.$emit('change', radVal);
+                if ('internalValue' in groupVm) {
+                  try { groupVm.internalValue = radVal; } catch (_) {}
+                }
+              }
             }
-          }
+          });
+
           wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
-            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
+            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim();
             if (wantNij.test(rLbl) && !rad.checked) {
               rad.click();
               rad.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });
+
           wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
-            const opt = Array.from(sel.options).find(o => wantNij.test(o.textContent));
+            const opt = Array.from(sel.options).find(o => wantNij.test(o.textContent) || wantNij.test(o.value));
             if (opt && sel.value !== opt.value) {
               sel.value = opt.value;
               sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -603,13 +640,19 @@
           });
         }
 
-        // I. Bank Branch Name (ব্যাংক শাখার নাম*) -> Auto-select ONLY if exactly 1 option exists
-        if (/ব্যাংক শাখা|branch name|শাখার নাম/i.test(labelTxt)) {
-          if (vInst && Array.isArray(vInst.items) && vInst.items.length === 1 && !vInst.disabled && !vInst.readonly) {
-            const targetItem = vInst.items[0];
-            const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? targetItem.code) : targetItem;
-            vInst.$emit('input', val);
-            vInst.$emit('change', val);
+        // I. Bank Branch Name (ব্যাংক শাখার নাম*) -> Auto-select ONLY if exactly 1 valid option exists
+        if (/ব্যাংক\s*শাখা|শাখার\s*নাম|branch\s*name/i.test(labelTxt)) {
+          if (vInst && Array.isArray(vInst.items) && !vInst.disabled && !vInst.readonly) {
+            const validItems = vInst.items.filter(it => {
+              if (typeof it === 'object' && it !== null) {
+                const v = it.value ?? it.id ?? it.code;
+                return v !== undefined && v !== null && String(v).trim() !== '';
+              }
+              return String(it ?? '').trim() !== '';
+            });
+            if (validItems.length === 1) {
+              selectVuetifyItem(vInst, it => it === validItems[0]);
+            }
           }
           wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
             const validOptions = Array.from(sel.options).filter(o => o.value && o.value.trim() !== '');
@@ -621,6 +664,7 @@
         }
       });
     }
+
 
     function parseMemberRow(m) {
       const relId = Number(m.relationship_id || m.relation_id || 0);
