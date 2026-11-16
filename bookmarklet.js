@@ -266,7 +266,8 @@
       const d = (vmHead && vmHead.data) ? vmHead.data : null;
       const villageVal = String(defs?.village || '').trim();
       const wardVal = toEnDigits(String(defs?.ward_no || '').trim());
-      const postVal = toEnDigits(String(defs?.post_code || '').trim());
+      const postValEn = toEnDigits(String(defs?.post_code || '').trim());
+      const postVal = postValEn ? toBnDigits(postValEn) : '';
 
       if (d) {
         [
@@ -467,11 +468,11 @@
           inp.dispatchEvent(new Event('blur', { bubbles: true }));
 
           if (vInst) {
-            const parsedNum = (!isNaN(Number(enStr)) && enStr !== '') ? Number(enStr) : finalStr;
-            vInst.$emit('input', parsedNum);
-            vInst.$emit('change', parsedNum);
+            const outVal = preferBn ? bnStr : ((!isNaN(Number(enStr)) && enStr !== '') ? Number(enStr) : finalStr);
+            vInst.$emit('input', outVal);
+            vInst.$emit('change', outVal);
             if ('internalValue' in vInst) {
-              try { vInst.internalValue = parsedNum; } catch (_) {}
+              try { vInst.internalValue = outVal; } catch (_) {}
             }
           }
         };
@@ -583,19 +584,19 @@
           }
         }
 
-        // E. Post Code (পোস্ট কোড / ডাকঘর কোড) -> Strictly English digits (e.g. 7000)
+        // E. Post Code (পোস্ট কোড / ডাকঘর কোড) -> Convert 7000 to Bangla (৭০০০) so validation passes
         if (postVal && /পোস্ট\s*কোড|পোষ্ট\s*কোড|ডাকঘর|post\s*code|postal\s*code|postcode|zip/.test(labelTxt)) {
-          fillNumericOrTextInput(postVal, true, false);
+          fillNumericOrTextInput(postVal, false, true);
         }
 
         // F. Children Under 18 (খানার শিশু সংখ্যা * / শিশু সংখ্যা)
         if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number\s*of\s*children|children\s*count/.test(labelTxt)) {
-          fillNumericOrTextInput(childrenUnder18, true, false);
+          fillNumericOrTextInput(childrenUnder18, false, true);
         }
 
         // G. Total Household Members (খানার সদস্য সংখ্যা * / পরিবারের সদস্য সংখ্যা)
         if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total\s*member|family\s*size|house\s*size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
-          fillNumericOrTextInput(totalMembers, true, false);
+          fillNumericOrTextInput(totalMembers, false, true);
         }
 
         // H. Account Ownership (অ্যাকাউন্টের মালিকানা*) -> Self (নিজ)
