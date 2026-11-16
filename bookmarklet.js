@@ -428,7 +428,7 @@
         if (!labelTxt) return;
         const vInst = getActiveVm(wrap);
 
-        const fillNumericOrTextInput = (valToSet) => {
+        const fillNumericOrTextInput = (valToSet, forceEn = false, forceBn = false) => {
           const enStr = toEnDigits(valToSet);
           const bnStr = toBnDigits(valToSet);
 
@@ -454,9 +454,9 @@
           const inp = wrap.querySelector('input[type="text"], input[type="number"], input[type="tel"], input:not([type]), textarea');
           if (!inp || inp.readOnly || inp.disabled || inp.type === 'radio' || inp.type === 'checkbox') return;
 
-          // Use English digits for type="number", or match placeholder language
+          // Force English digits when forceEn is true (e.g. Post Code), or force Bengali when forceBn is true
           const ph = inp.getAttribute('placeholder') || '';
-          const preferBn = inp.type !== 'number' && /[০-৯]/.test(ph);
+          const preferBn = !forceEn && inp.type !== 'number' && (forceBn || /[০-৯]/.test(ph));
           const finalStr = preferBn ? bnStr : enStr;
 
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
@@ -583,19 +583,19 @@
           }
         }
 
-        // E. Post Code (পোস্ট কোড / ডাকঘর কোড)
+        // E. Post Code (পোস্ট কোড / ডাকঘর কোড) -> Strictly English digits (e.g. 7000)
         if (postVal && /পোস্ট\s*কোড|পোষ্ট\s*কোড|ডাকঘর|post\s*code|postal\s*code|postcode|zip/.test(labelTxt)) {
-          fillNumericOrTextInput(postVal);
+          fillNumericOrTextInput(postVal, true, false);
         }
 
         // F. Children Under 18 (খানার শিশু সংখ্যা * / শিশু সংখ্যা)
         if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number\s*of\s*children|children\s*count/.test(labelTxt)) {
-          fillNumericOrTextInput(childrenUnder18);
+          fillNumericOrTextInput(childrenUnder18, true, false);
         }
 
         // G. Total Household Members (খানার সদস্য সংখ্যা * / পরিবারের সদস্য সংখ্যা)
         if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total\s*member|family\s*size|house\s*size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
-          fillNumericOrTextInput(totalMembers);
+          fillNumericOrTextInput(totalMembers, true, false);
         }
 
         // H. Account Ownership (অ্যাকাউন্টের মালিকানা*) -> Self (নিজ)
