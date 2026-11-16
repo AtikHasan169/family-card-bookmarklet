@@ -6,6 +6,7 @@ const STORAGE_AREA_PRESETS = 'fc_pro_area_presets';
 const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
+const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
 const CURRENT_VERSION_TAG = 'v4.2-live';
 
 
@@ -244,16 +245,75 @@ function initApp() {
     if($('apiProviderSelect')) $('apiProviderSelect').value = localStorage.getItem(STORAGE_PROVIDER) || 'google';
     if($('customBaseUrl')) $('customBaseUrl').value = localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app';
     if($('customBearerToken')) $('customBearerToken').value = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
+    if($('customThinkingMode')) $('customThinkingMode').value = localStorage.getItem(STORAGE_CUSTOM_THINKING) || 'off';
   } catch (err) {}
 
   $('apiKeyInput').value = savedKey;
   applyModelToUI(savedModel);
   
+  async function fetchCustomApiModels() {
+    const prov = $('apiProviderSelect').value;
+    if (prov !== 'custom' && prov !== 'custom_fast') return;
+    const baseUrl = $('customBaseUrl').value.replace(/\/$/, "");
+    const bearer = $('customBearerToken').value.trim();
+    if (!baseUrl) return;
+    
+    const btn = $('refreshModelsBtn');
+    if (btn) btn.textContent = '...';
+    
+    try {
+      const res = await fetch(`${baseUrl}/api/models`, {
+        headers: bearer ? { 'Authorization': `Bearer ${bearer}` } : {}
+      });
+      if (!res.ok) throw new Error(res.status);
+      const data = await res.json();
+      const sel = $('modelSelect');
+      
+      Array.from(sel.options).forEach(o => { 
+        if(!['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.8-flash', 'custom'].includes(o.value)) o.remove(); 
+      });
+      
+      const modelList = Array.isArray(data.models) ? data.models : (Array.isArray(data.data) ? data.data : []);
+      modelList.forEach(m => {
+        if (!Array.from(sel.options).some(o => o.value === m.id)) {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.displayName ? `${m.displayName} — ${m.description || m.id}` : m.id;
+          sel.insertBefore(opt, sel.lastElementChild);
+        }
+      });
+      
+      const savedModel = localStorage.getItem(STORAGE_MODEL);
+      if (savedModel && Array.from(sel.options).some(o => o.value === savedModel)) {
+        sel.value = savedModel;
+        if ($('customModelInput')) $('customModelInput').style.display = 'none';
+      } else if (data.defaultModel && Array.from(sel.options).some(o => o.value === data.defaultModel)) {
+        sel.value = data.defaultModel;
+        if ($('customModelInput')) $('customModelInput').style.display = 'none';
+      }
+      if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = 'Refresh', 1200); }
+    } catch(e) {
+      if (btn) { btn.textContent = 'Error'; setTimeout(() => btn.textContent = 'Refresh', 1500); }
+    }
+  }
+
   const toggleProviderUI = () => {
-    const isCustom = $('apiProviderSelect').value === 'custom';
-    $('googleSettingsGroup').style.display = isCustom ? 'none' : 'block';
-    $('customSettingsGroup').style.display = isCustom ? 'block' : 'none';
-    $('refreshModelsBtn').style.display = isCustom ? 'block' : 'none';
+    const prov = $('apiProviderSelect').value;
+    const isCustomAny = prov === 'custom' || prov === 'custom_fast';
+    
+    $('googleSettingsGroup').style.display = isCustomAny ? 'none' : 'block';
+    $('customSettingsGroup').style.display = isCustomAny ? 'block' : 'none';
+    $('refreshModelsBtn').style.display = isCustomAny ? 'block' : 'none';
+    
+    const thinkingSelect = $('customThinkingMode');
+    if (thinkingSelect) {
+      thinkingSelect.style.display = prov === 'custom_fast' ? 'block' : 'none';
+      if (thinkingSelect.previousElementSibling) {
+        thinkingSelect.previousElementSibling.style.display = prov === 'custom_fast' ? 'block' : 'none';
+      }
+    }
+
+    if (isCustomAny) fetchCustomApiModels();
   };
   
   if($('apiProviderSelect')) {
@@ -264,37 +324,18 @@ function initApp() {
     });
   }
   
-  if($('customBaseUrl')) $('customBaseUrl').addEventListener('input', e => localStorage.setItem(STORAGE_CUSTOM_URL, e.target.value.trim()));
-  if($('customBearerToken')) $('customBearerToken').addEventListener('input', e => localStorage.setItem(STORAGE_CUSTOM_BEARER, e.target.value.trim()));
+  if($('customBaseUrl')) $('customBaseUrl').addEventListener('input', e => {
+    localStorage.setItem(STORAGE_CUSTOM_URL, e.target.value.trim());
+    fetchCustomApiModels();
+  });
+  if($('customBearerToken')) $('customBearerToken').addEventListener('input', e => {
+    localStorage.setItem(STORAGE_CUSTOM_BEARER, e.target.value.trim());
+    fetchCustomApiModels();
+  });
+  if($('customThinkingMode')) $('customThinkingMode').addEventListener('change', e => localStorage.setItem(STORAGE_CUSTOM_THINKING, e.target.value));
   
   if($('refreshModelsBtn')) {
-    $('refreshModelsBtn').addEventListener('click', async () => {
-      try {
-        const baseUrl = $('customBaseUrl').value.replace(/\/$/, "");
-        $('refreshModelsBtn').textContent = '...';
-        const res = await fetch(`${baseUrl}/v1/models`, {
-          headers: {
-            'Authorization': `Bearer ${$('customBearerToken').value}`
-          }
-        });
-        if (!res.ok) throw new Error(res.status);
-        const data = await res.json();
-        const sel = $('modelSelect');
-        Array.from(sel.options).forEach(o => { if(o.value !== 'gemini-3.5-flash' && o.value !== 'gemini-2.5-flash' && o.value !== 'custom') o.remove(); });
-        data.data.forEach(m => {
-          if (!Array.from(sel.options).some(o => o.value === m.id)) {
-            const opt = document.createElement('option');
-            opt.value = m.id; opt.textContent = m.id;
-            sel.insertBefore(opt, sel.lastElementChild);
-          }
-        });
-        $('refreshModelsBtn').textContent = 'Refresh';
-        setTimeout(() => $('refreshModelsBtn').textContent = 'Refresh', 1500);
-      } catch(e) {
-        $('refreshModelsBtn').textContent = 'Error';
-        setTimeout(() => $('refreshModelsBtn').textContent = 'Refresh', 1500);
-      }
-    });
+    $('refreshModelsBtn').addEventListener('click', fetchCustomApiModels);
   }
 
   if (!savedKey && $('apiProviderSelect').value === 'google') $('settingsDrawer').classList.add('open');
@@ -1958,26 +1999,54 @@ async function runExtraction() {
     }
 
     let text = "";
+    
+    const allImagesBase64 = [
+      ...state.head.map(item => item.base64),
+      ...state.other.map(item => item.base64)
+    ];
 
-    if (provider === 'custom') {
+    const imageTagsArray = [
+      ...state.head.map((_, i) => `S1_${i + 1}`),
+      ...state.other.map((_, i) => `S2_${i + 1}`)
+    ];
+    
+    let systemPrompt = buildPrompt();
+    systemPrompt = systemPrompt.replace('IMAGE TRACKING RULE:', 'IMAGE TAG MAPPING:\\nThe uploaded images are provided in the following order:\\n' + imageTagsArray.join(', ') + '\\n\\nIMAGE TRACKING RULE:');
+
+    if (provider === 'custom_fast') {
+      const baseUrl = (localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app').replace(/\/$/, "");
+      const customBearer = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
+      const thinkingMode = localStorage.getItem(STORAGE_CUSTOM_THINKING) || 'off';
+      
+      const formData = new FormData();
+      formData.append("model", model);
+      formData.append("thinking_mode", thinkingMode);
+      formData.append("json_mode", "false");
+      formData.append("prompt", systemPrompt);
+
+      for (let i = 0; i < allImagesBase64.length; i++) {
+        const blob = await fetch(`data:image/jpeg;base64,${allImagesBase64[i]}`).then(r => r.blob());
+        formData.append("files", blob, `image_${i}.jpg`);
+      }
+
+      const headers = {};
+      if (customBearer) headers['Authorization'] = `Bearer ${customBearer}`;
+
+      const res = await fetch(`${baseUrl}/api/generate/fast`, {
+        method: 'POST',
+        headers: headers,
+        body: formData,
+        signal: extractionController.signal
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error?.message || payload?.error || `HTTP ${res.status}`);
+      text = payload?.text || payload?.response || '';
+
+    } else if (provider === 'custom') {
       const baseUrl = (localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app').replace(/\/$/, "");
       const customBearer = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
       
-      const allImagesBase64 = [
-        ...state.head.map(item => `data:image/jpeg;base64,${item.base64}`),
-        ...state.other.map(item => `data:image/jpeg;base64,${item.base64}`)
-      ];
-
-      // Re-map tags cleanly for the Vercel prompt structure
-      const imageTagsArray = [
-        ...state.head.map((_, i) => `S1_${i + 1}`),
-        ...state.other.map((_, i) => `S2_${i + 1}`)
-      ];
-      
-      // Inject tags into the prompt text
-      let systemPrompt = buildPrompt();
-      systemPrompt = systemPrompt.replace('IMAGE TRACKING RULE:', 'IMAGE TAG MAPPING:\\nThe uploaded images are provided in the following order:\\n' + imageTagsArray.join(', ') + '\\n\\nIMAGE TRACKING RULE:');
-
       const res = await fetch(`${baseUrl}/api/generate`, {
         method: 'POST',
         headers: {
@@ -1989,7 +2058,7 @@ async function runExtraction() {
           thinking: false,
           json_mode: false,
           prompt: systemPrompt,
-          images: allImagesBase64
+          images: allImagesBase64.map(img => `data:image/jpeg;base64,${img}`)
         }),
         signal: extractionController.signal
       });
@@ -1997,6 +2066,7 @@ async function runExtraction() {
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload?.error?.message || payload?.error || `HTTP ${res.status}`);
       text = payload?.text || payload?.response || '';
+
     } else {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
       const res = await fetch(endpoint, {
