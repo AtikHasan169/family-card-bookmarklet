@@ -418,8 +418,12 @@
         }
 
         // B. Area Type / Elaka -> Polli / Union (পল্লী / ইউনিয়ন)
+        const itemToStr = (it) => (typeof it === 'object' && it !== null)
+          ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.name ?? ''} ${it.value ?? ''} ${it.id ?? ''} ${it.code ?? ''}`
+          : String(it ?? '');
+
         if (/এলাকার ধরন|বাসস্থানের ধরন|অবস্থান|এলাকা নির্বাচন|location type|area type/.test(labelTxt) ||
-            (vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(JSON.stringify(it))))) {
+            (vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(itemToStr(it))))) {
           const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
           if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const areaItem = vInst.items.find(it => {
@@ -461,7 +465,7 @@
           const padW = cleanW.padStart(2, '0');
           if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const wItem = vInst.items.find(it => {
-              const str = JSON.stringify(it);
+              const str = itemToStr(it);
               return new RegExp(`\\b(${cleanW}|${padW})\\b`).test(str);
             });
             if (wItem !== undefined) {
@@ -800,7 +804,17 @@
         const family_members = memberSlice.filter(isRowPopulated).map(parseMemberRow);
 
         const safeClone = (obj) => {
-          try { return JSON.parse(JSON.stringify(obj || {})); } catch (e) { return {}; }
+          const seen = new WeakSet();
+          try {
+            return JSON.parse(JSON.stringify(obj || {}, (k, v) => {
+              if (k.startsWith('_') || k.startsWith('$') || k === 'vm') return undefined;
+              if (typeof v === 'object' && v !== null) {
+                if (seen.has(v)) return undefined;
+                seen.add(v);
+              }
+              return v;
+            }));
+          } catch (e) { return {}; }
         };
 
         const dom_tabs = [];
