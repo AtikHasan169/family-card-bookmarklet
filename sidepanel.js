@@ -2085,8 +2085,23 @@ async function runExtraction() {
       if (!res.ok) throw new Error(payload?.error?.message || `HTTP ${res.status}`);
       text = payload?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n').trim();
     }
-    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const parsed = JSON.parse(cleaned);
+    let parsed;
+    try {
+      const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr) {
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          parsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+        } catch (innerErr) {
+          throw new Error(`AI response is not valid JSON: ${text.slice(0, 100)}...`);
+        }
+      } else {
+        throw new Error(`AI response is not valid JSON: ${text.slice(0, 100)}...`);
+      }
+    }
 
     const normalized = normalizeOutput(parsed);
     state.lastExtracted = normalized;

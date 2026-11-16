@@ -285,7 +285,8 @@
         [
           'house_size', 'total_member', 'total_members', 'family_member_count',
           'total_family_member', 'total_family_members', 'member_count',
-          'no_of_family_member', 'number_of_family_members', 'household_size', 'khana_member'
+          'no_of_family_member', 'number_of_family_members', 'household_size',
+          'khana_member', 'khana_member_count', 'khana_members', 'household_member', 'household_members'
         ].forEach(k => {
           if (k in d || k === 'house_size') setReactive(vmHead, d, k, totalMembers);
         });
@@ -293,9 +294,19 @@
         [
           'children_count', 'child_count', 'no_of_children', 'number_of_children',
           'total_children', 'total_child', 'under_18_member', 'children_under_18',
-          'sishu_count', 'shishu_count', 'child_member', 'children'
+          'sishu_count', 'shishu_count', 'child_member', 'children',
+          'khana_child', 'khana_children', 'khana_child_count', 'khana_sishu_count', 'household_children'
         ].forEach(k => {
-          if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, childrenUnder18);
+          if (k in d || k === 'children_count') setReactive(vmHead, d, k, childrenUnder18);
+        });
+
+        [
+          'is_ethnic', 'is_ethnic_minority', 'ethnic_minority', 'is_tribal',
+          'khudro_nrigosthi', 'is_khudro_nrigosthi', 'nrigosthi', 'ethnic'
+        ].forEach(k => {
+          if (k in d) {
+            setReactive(vmHead, d, k, typeof d[k] === 'boolean' ? Boolean(isEthnic) : Number(isEthnic));
+          }
         });
 
         if (villageVal) {
@@ -326,7 +337,7 @@
             if (typeof d[k] === 'boolean') setReactive(vmHead, d, k, Boolean(isEthnic));
             else if (!low.endsWith('_name') && !low.endsWith('_type_id')) setReactive(vmHead, d, k, Number(isEthnic));
           }
-          if (/^(location_type|location_type_id|area_type|area_type_id|geo_type|present_location_type|permanent_location_type|residence_area_type)$/.test(low)) {
+          if (/^(location_type|location_type_id|residence_location|household_location|khana_location|বাসস্থান|residence_area_type)$/.test(low)) {
             setReactive(vmHead, d, k, resolvedAreaId);
           }
           if (villageVal && /village|road|gram|para|moholla/.test(low) && !/id$/.test(low) && typeof d[k] !== 'object') {
@@ -355,61 +366,122 @@
 
       document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
         if (wrap.closest('#fc-floating-root')) return;
-        const labelEl = wrap.querySelector('label, .v-label, legend');
-        const labelTxt = (labelEl ? labelEl.textContent : wrap.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const parentCol = wrap.closest('.col-md-6, .col-md-4, .col-md-3, .col-sm-6, .col-12, .form-group');
+        const hasSingleControl = parentCol && parentCol.querySelectorAll('.v-input').length <= 1;
+        const searchRoot = hasSingleControl ? parentCol : wrap;
+
+        const allLabels = Array.from(searchRoot.querySelectorAll('label, .v-label, legend, p, h4, h5, h6, span'))
+          .filter(el => !el.classList.contains('v-radio') && !el.closest('.v-radio') && !el.closest('.v-select__selections'))
+          .map(el => el.textContent || '')
+          .join(' ');
+        const prevHeader = wrap.previousElementSibling ? (wrap.previousElementSibling.textContent || '') : '';
+        const rawTxt = `${allLabels} ${prevHeader}`;
+        const labelTxt = rawTxt.replace(/\*/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
         const vInst = wrap.__vue__;
 
         const fillEditableInput = (valToSet) => {
-          const inp = wrap.querySelector('input[type="text"], input[type="number"], input:not([type]), textarea');
+          // 1. If it's a Vuetify v-select / v-autocomplete with items
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
+            const strVal = String(valToSet);
+            const matchedItem = vInst.items.find(it => {
+              if (typeof it === 'object' && it !== null) {
+                return String(it.value ?? it.id ?? it.text ?? it.name_bn ?? it.label ?? '') === strVal;
+              }
+              return String(it) === strVal;
+            });
+            if (matchedItem !== undefined) {
+              const outVal = (typeof matchedItem === 'object' && matchedItem !== null)
+                ? (matchedItem.value ?? matchedItem.id ?? matchedItem)
+                : matchedItem;
+              vInst.$emit('input', outVal);
+              vInst.$emit('change', outVal);
+            }
+          }
+          // 2. If it's a standard text/number input
+          const inp = wrap.querySelector('input[type="text"], input[type="number"], input:not([type]):not([type="radio"]):not([type="checkbox"]), textarea');
           if (!inp || inp.readOnly || inp.disabled) return;
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
           if (nativeSetter) nativeSetter.call(inp, String(valToSet));
           else inp.value = String(valToSet);
           inp.dispatchEvent(new Event('input', { bubbles: true }));
           inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.dispatchEvent(new Event('blur', { bubbles: true }));
+          if (vInst && 'internalValue' in vInst) {
+            try { vInst.internalValue = valToSet; } catch (_) {}
+          }
         };
 
-        // A. Khudro Nrigosthi Kina -> No (না)
-        if (/ক্ষুদ্র|নৃ-গোষ্ঠী|নৃগোষ্ঠী|ethnic|tribal/.test(labelTxt)) {
+        // A. Khudro Nrigosthi Kina (খানাটি ক্ষুদ্র নৃগোষ্ঠী কি না *) -> No (না)
+        if (/ক্ষুদ্র\s*নৃ\s*[-]?\s*গোষ্ঠী|নৃগোষ্ঠী|ethnic|tribal/.test(labelTxt)) {
           const wantYes = Number(isEthnic) === 1;
+          const isMatchText = (t) => {
+            const cleanT = String(t || '').replace(/\*/g, '').trim().toLowerCase();
+            return wantYes
+              ? (cleanT === 'হ্যাঁ' || cleanT === 'yes' || cleanT.includes('হ্যাঁ'))
+              : (cleanT === 'না' || cleanT === 'no' || cleanT.includes('না'));
+          };
+          const isMatchVal = (v) => {
+            const cleanV = String(v ?? '').trim().toLowerCase();
+            return wantYes
+              ? (cleanV === '1' || cleanV === 'true' || cleanV === 'yes' || cleanV === 'হ্যাঁ')
+              : (cleanV === '0' || cleanV === '2' || cleanV === 'false' || cleanV === 'no' || cleanV === 'না');
+          };
+
+          // 1. Handle Vuetify <v-select>
           if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const targetItem = vInst.items.find(it => {
               if (typeof it === 'object' && it !== null) {
-                const t = `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title || ''}`.trim().toLowerCase();
-                const v = String(it.value ?? it.id ?? '').toLowerCase();
-                return wantYes
-                  ? (t === 'হ্যাঁ' || t === 'yes' || v === '1' || v === 'true')
-                  : (t === 'না' || t === 'no' || v === '0' || v === 'false');
+                const t = `${it.text || ''} ${it.name_bn || ''} ${it.name_en || ''} ${it.label || ''} ${it.title || ''}`;
+                const v = it.value ?? it.id;
+                return isMatchText(t) || isMatchVal(v);
               }
-              return wantYes
-                ? (String(it).toLowerCase() === 'হ্যাঁ' || String(it) === '1')
-                : (String(it).toLowerCase() === 'না' || String(it) === '0');
+              return isMatchText(it) || isMatchVal(it);
             });
             if (targetItem !== undefined) {
               const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? 0) : targetItem;
               vInst.$emit('input', val);
               vInst.$emit('change', val);
+              if ('internalValue' in vInst) {
+                try { vInst.internalValue = val; } catch (_) {}
+              }
             }
           }
+
+          // 2. Handle Vuetify <v-radio-group> & <v-radio>
+          wrap.querySelectorAll('.v-radio').forEach(vRadEl => {
+            const rLbl = (vRadEl.textContent || '').trim();
+            const radVm = vRadEl.__vue__;
+            const radVal = radVm ? radVm.value : vRadEl.querySelector('input')?.value;
+            if (isMatchText(rLbl) || isMatchVal(radVal)) {
+              const inp = vRadEl.querySelector('input[type="radio"]');
+              if (inp && !inp.disabled && !inp.checked) inp.click();
+              if (radVm && typeof radVm.toggle === 'function') {
+                const isAlreadyActive = radVm.isActive;
+                if (!isAlreadyActive) radVm.toggle();
+              }
+              const groupVm = radVm && radVm.radioGroup ? radVm.radioGroup : (vInst && vInst._isVue ? vInst : null);
+              if (groupVm && radVal !== undefined) {
+                groupVm.$emit('input', radVal);
+                groupVm.$emit('change', radVal);
+                if ('internalValue' in groupVm) {
+                  try { groupVm.internalValue = radVal; } catch (_) {}
+                }
+              }
+            }
+          });
+
+          // 3. Handle standard HTML radio buttons
           wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
-            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
-            const rVal = String(rad.value || '').toLowerCase();
-            const match = wantYes
-              ? (rLbl === 'হ্যাঁ' || rLbl === 'yes' || rVal === '1' || rVal === 'true')
-              : (rLbl === 'না' || rLbl === 'no' || rVal === '0' || rVal === 'false');
-            if (match && !rad.checked) {
+            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim();
+            if ((isMatchText(rLbl) || isMatchVal(rad.value)) && !rad.checked) {
               rad.click();
               rad.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });
+
+          // 4. Handle standard HTML <select>
           wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
-            const opt = Array.from(sel.options).find(o => {
-              const t = o.textContent.trim().toLowerCase();
-              const v = String(o.value).toLowerCase();
-              return wantYes
-                ? (t === 'হ্যাঁ' || t === 'yes' || v === '1' || v === 'true')
-                : (t === 'না' || t === 'no' || v === '0' || v === 'false');
-            });
+            const opt = Array.from(sel.options).find(o => isMatchText(o.textContent) || isMatchVal(o.value));
             if (opt && sel.value !== opt.value) {
               sel.value = opt.value;
               sel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -417,14 +489,15 @@
           });
         }
 
-        // B. Area Type / Elaka -> Polli / Union (পল্লী / ইউনিয়ন)
-        const itemToStr = (it) => (typeof it === 'object' && it !== null)
-          ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.name ?? ''} ${it.value ?? ''} ${it.id ?? ''} ${it.code ?? ''}`
+        // B. Where is the household/residence located -> খানাটি বা বাসস্থানটি কোথায় অবস্থিত *
+        const itemToStr = (it) => (typeof it === 'object' && it !== null) 
+          ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.name ?? ''}` 
           : String(it ?? '');
 
-        if (/এলাকার ধরন|বাসস্থানের ধরন|অবস্থান|এলাকা নির্বাচন|location type|area type/.test(labelTxt) ||
-            (vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(itemToStr(it))))) {
+        if ((/খানাটি|বাসস্থানটি|কোথায় অবস্থিত|কোথায় অবস্থিত|residence|household location/.test(labelTxt) && !/এলাকার ধরন/.test(labelTxt)) ||
+            (!/এলাকার ধরন/.test(labelTxt) && vInst && Array.isArray(vInst.items) && vInst.items.some(it => /পৌরসভা|সিটি কর্পোরেশন|পল্লী/.test(itemToStr(it))))) {
           const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
+
           if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const areaItem = vInst.items.find(it => {
               const t = typeof it === 'object' && it !== null
@@ -465,9 +538,10 @@
           const padW = cleanW.padStart(2, '0');
           if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
             const wItem = vInst.items.find(it => {
-              const str = itemToStr(it);
+              const str = (typeof it === 'object' && it !== null) ? `${it.value ?? ''} ${it.id ?? ''} ${it.text ?? ''}` : String(it);
               return new RegExp(`\\b(${cleanW}|${padW})\\b`).test(str);
             });
+
             if (wItem !== undefined) {
               const val = (typeof wItem === 'object' && wItem !== null) ? (wItem.value ?? wItem.id ?? wItem.code ?? cleanW) : wItem;
               vInst.$emit('input', val);
@@ -489,14 +563,61 @@
           fillEditableInput(postVal);
         }
 
-        // F. Children Under 18 (শিশু সংখ্যা)
-        if (/শিশু সংখ্যা|শিশুর সংখ্যা|১৮ বছরের নিচে|কতজন শিশু|number of children|children count/.test(labelTxt)) {
+        // F. Children Under 18 (খানার শিশু সংখ্যা * / শিশু সংখ্যা)
+        if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number of children|children count/.test(labelTxt)) {
           fillEditableInput(childrenUnder18);
         }
 
-        // G. Total Household Members (পরিবারের সদস্য সংখ্যা / খানার সদস্য সংখ্যা)
-        if (/সদস্য সংখ্যা|খানার সদস্য|পরিবারের সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
+        // G. Total Household Members (খানার সদস্য সংখ্যা * / পরিবারের সদস্য সংখ্যা)
+        if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total member|family size|house size/.test(labelTxt) && !/শিশু|child/.test(labelTxt)) {
           fillEditableInput(totalMembers);
+        }
+
+        // H. Account Ownership (অ্যাকাউন্টের মালিকানা*) -> Self (নিজ)
+        if (/অ্যাকাউন্টের মালিকানা|account ownership/i.test(labelTxt)) {
+          const wantNij = /নিজ|self/i;
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0 && !vInst.disabled && !vInst.readonly) {
+            const targetItem = vInst.items.find(it => {
+              const t = typeof it === 'object' && it !== null ? `${it.text || ''} ${it.name_bn || ''} ${it.name || ''}` : String(it);
+              return wantNij.test(t);
+            });
+            if (targetItem !== undefined) {
+              const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? targetItem.code) : targetItem;
+              vInst.$emit('input', val);
+              vInst.$emit('change', val);
+            }
+          }
+          wrap.querySelectorAll('input[type="radio"]:not(:disabled)').forEach(rad => {
+            const rLbl = (rad.closest('.v-radio, label')?.textContent || '').trim().toLowerCase();
+            if (wantNij.test(rLbl) && !rad.checked) {
+              rad.click();
+              rad.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
+            const opt = Array.from(sel.options).find(o => wantNij.test(o.textContent));
+            if (opt && sel.value !== opt.value) {
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+        }
+
+        // I. Bank Branch Name (ব্যাংক শাখার নাম*) -> Auto-select ONLY if exactly 1 option exists
+        if (/ব্যাংক শাখা|branch name|শাখার নাম/i.test(labelTxt)) {
+          if (vInst && Array.isArray(vInst.items) && vInst.items.length === 1 && !vInst.disabled && !vInst.readonly) {
+            const targetItem = vInst.items[0];
+            const val = (typeof targetItem === 'object' && targetItem !== null) ? (targetItem.value ?? targetItem.id ?? targetItem.code) : targetItem;
+            vInst.$emit('input', val);
+            vInst.$emit('change', val);
+          }
+          wrap.querySelectorAll('select:not(:disabled)').forEach(sel => {
+            const validOptions = Array.from(sel.options).filter(o => o.value && o.value.trim() !== '');
+            if (validOptions.length === 1 && sel.value !== validOptions[0].value) {
+              sel.value = validOptions[0].value;
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
         }
       });
     }
