@@ -307,9 +307,9 @@ function initApp() {
     
     const thinkingSelect = $('customThinkingMode');
     if (thinkingSelect) {
-      thinkingSelect.style.display = prov === 'custom_fast' ? 'block' : 'none';
+      thinkingSelect.style.display = isCustomAny ? 'block' : 'none';
       if (thinkingSelect.previousElementSibling) {
-        thinkingSelect.previousElementSibling.style.display = prov === 'custom_fast' ? 'block' : 'none';
+        thinkingSelect.previousElementSibling.style.display = isCustomAny ? 'block' : 'none';
       }
     }
 
@@ -2046,6 +2046,7 @@ async function runExtraction() {
     } else if (provider === 'custom') {
       const baseUrl = (localStorage.getItem(STORAGE_CUSTOM_URL) || 'https://geminiwebapi-teal.vercel.app').replace(/\/$/, "");
       const customBearer = localStorage.getItem(STORAGE_CUSTOM_BEARER) || '';
+      const thinkingMode = localStorage.getItem(STORAGE_CUSTOM_THINKING) || 'off';
       
       const res = await fetch(`${baseUrl}/api/generate`, {
         method: 'POST',
@@ -2055,7 +2056,8 @@ async function runExtraction() {
         },
         body: JSON.stringify({
           model: model,
-          thinking: false,
+          thinking: thinkingMode !== 'off',
+          thinking_mode: thinkingMode,
           json_mode: false,
           prompt: systemPrompt,
           images: allImagesBase64.map(img => `data:image/jpeg;base64,${img}`)
