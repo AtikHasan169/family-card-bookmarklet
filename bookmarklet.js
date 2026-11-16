@@ -454,16 +454,21 @@
           const inp = wrap.querySelector('input[type="text"], input[type="number"], input[type="tel"], input:not([type]), textarea');
           if (!inp || inp.readOnly || inp.disabled || inp.type === 'radio' || inp.type === 'checkbox') return;
 
-          // Force English digits when forceEn is true (e.g. Post Code), or force Bengali when forceBn is true
           const ph = inp.getAttribute('placeholder') || '';
           const preferBn = !forceEn && inp.type !== 'number' && (forceBn || /[০-৯]/.test(ph));
           const finalStr = preferBn ? bnStr : enStr;
 
+          // Fully simulate native typing & framework reactivity
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
           if (nativeSetter) nativeSetter.call(inp, finalStr);
           else inp.value = finalStr;
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
+
+          inp.focus();
+          inp.dispatchEvent(new Event('focus', { bubbles: true }));
+          inp.dispatchEvent(new Event('input', { bubbles: true, inputType: 'insertText', data: finalStr }));
+          inp.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: finalStr }));
           inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.blur();
           inp.dispatchEvent(new Event('blur', { bubbles: true }));
 
           if (vInst) {
@@ -473,6 +478,10 @@
             if ('internalValue' in vInst) {
               try { vInst.internalValue = outVal; } catch (_) {}
             }
+            if ('value' in vInst) {
+              try { vInst.value = outVal; } catch (_) {}
+            }
+            if (typeof vInst.$forceUpdate === 'function') vInst.$forceUpdate();
           }
         };
 
