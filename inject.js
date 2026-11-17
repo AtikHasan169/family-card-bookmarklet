@@ -1905,18 +1905,54 @@
       // Compare stripped labels for equality: substring matching is
       // wrong here ("মাটি" is inside "পোড়ামাটি" in the ঢালাই option).
       const stripLabel = (s) => String(s || '').replace(/\(.*?\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      // Labels of the live question children: a box can still match by
+      // label when its VM value does not read, and label overrides
+      // resolve to ids for the merge filter below.
+      const labelToId = new Map();
+      try {
+        const liveQ = Array.isArray(pmtVariables) ? pmtVariables.find(q => Number(q.id) === Number(qid) || Number(q.variable_id) === Number(qid)) : null;
+        for (const ch of (liveQ && liveQ.children) || []) {
+          const id = Number(ch.id);
+          for (const k of ['name_bn', 'name_en', 'value_bn', 'value_en']) {
+            if (ch[k]) labelToId.set(stripLabel(ch[k]), id);
+          }
+        }
+      } catch (_) {}
+      // Every id this question should hold: numeric wants plus ids
+      // whose labels exactly match a label want (never substring).
+      const wantedIds = new Set(wantIds);
+      for (const w of wantLabels) {
+        const sw = stripLabel(w);
+        for (const [lbl, id] of labelToId) {
+          if (lbl === sw || lbl.startsWith(sw + ' ')) wantedIds.add(id);
+        }
+      }
       const chosen = [];
       grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox').forEach(box => {
         const bvm = box.__vue__;
         const cid = bvm ? Number(bvm.value ?? (bvm.$attrs && bvm.$attrs.value)) : NaN;
         const txt = stripLabel(box.textContent);
-        if (!wantIds.has(cid) && !wantLabels.some(w => w && (txt === stripLabel(w) || txt.startsWith(stripLabel(w) + ' ')))) return;
-        if (!Number.isNaN(cid)) chosen.push(cid);
+        let matchedId = wantIds.has(cid) ? cid : NaN;
+        if (Number.isNaN(matchedId)) {
+          const byLabel = labelToId.get(txt);
+          if (byLabel !== undefined && wantIds.has(byLabel)) matchedId = byLabel;
+          else if (!wantLabels.some(w => w && (txt === stripLabel(w) || txt.startsWith(stripLabel(w) + ' ')))) return;
+        }
+        if (!Number.isNaN(matchedId)) chosen.push(matchedId);
+        else if (!Number.isNaN(cid)) chosen.push(cid);
         const inp = box.querySelector('input[type="checkbox"]');
         const checked = inp ? inp.checked : !!(bvm && bvm.isActive);
         if (!checked && inp && !inp.disabled) inp.click();
       });
-      if (chosen.length && entry) setReactive(pmtOwnerVm, entry, 'sub_variables', chosen);
+      // Merge with what the model already holds, keeping only wanted
+      // ids — never shrink the array if one box failed to match (e.g.
+      // an unreadable value), and never keep a loosely-matched id the
+      // exact grid match rejected (e.g. ঢালাই for a মাটি override).
+      if (chosen.length && entry) {
+        const existing = Array.isArray(entry.sub_variables) ? entry.sub_variables.map(Number).filter(id => wantedIds.has(id)) : [];
+        const merged = [...new Set([...existing, ...chosen.map(Number)])];
+        setReactive(pmtOwnerVm, entry, 'sub_variables', merged);
+      }
       }
       // Re-fire a change on one checked box ONLY while the grid shows
       // its error state — the site's own change handler re-validates
