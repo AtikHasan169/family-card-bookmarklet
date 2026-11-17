@@ -464,7 +464,6 @@ function initApp() {
   setupNativeCropper();
   setupImageViewerModal();
   setupUpdateChecker();
-  fetchPublishedInjectVersion();
 
   window.addEventListener('message', handleIncomingMessages);
 
@@ -525,7 +524,6 @@ function handleIncomingMessages(e) {
   }
 
   if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
-    if (e.data.detail && e.data.detail.version) setInjectVersion(e.data.detail.version, 'loaded');
     setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
   }
   if (e.data.action === 'FC_STATUS_REPLY') {
@@ -538,7 +536,6 @@ function handleIncomingMessages(e) {
 
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
-    if (res.version) setInjectVersion(res.version, 'loaded');
     if (res.success && res.payload) {
       state.lastExtracted = normalizeOutput(res.payload, true);
       renderExtractedCards(state.lastExtracted);
@@ -782,37 +779,6 @@ function moveImage(category, idx, dir) {
   saveSessionState();
 }
 
-// Version display: loaded (from the inject.js running in the page, via the
-// autofill/pull result relay) vs published (fetched same-origin from
-// GitHub Pages, like the update checker fetches sidepanel.js).
-const injectVersionState = { loaded: null, published: null };
-function setInjectVersion(version, which) {
-  if (!version) return;
-  injectVersionState[which] = String(version);
-  const el = $('injectVersion');
-  if (!el) return;
-  const { loaded, published } = injectVersionState;
-  if (loaded && published && loaded !== published) {
-    el.textContent = `inject: ${loaded} (new ${published} — refresh page)`;
-    el.style.color = '#b45309'; el.style.background = '#fef3c7'; el.style.borderColor = '#fcd34d';
-  } else if (loaded) {
-    el.textContent = `inject: ${loaded}`;
-  } else if (published) {
-    el.textContent = `inject: ${published} (not run yet)`;
-  }
-}
-async function fetchPublishedInjectVersion() {
-  try {
-    const cleanUrl = location.href.split('?')[0];
-    const baseDir = cleanUrl.substring(0, cleanUrl.lastIndexOf('/') + 1);
-    const res = await fetch(`${baseDir}inject.js?u=${Date.now()}`, { cache: 'reload' });
-    if (!res.ok) return;
-    const text = await res.text();
-    const m = text.match(/FC_INJECT_VERSION\s*=\s*['"]([^'"]+)['"]/);
-    if (m) setInjectVersion(m[1], 'published');
-  } catch (_) { /* leave the pill as-is; autofill still reports the loaded version */ }
-}
-
 function setupUpdateChecker() {
   const updateBtn = $('updateCheckBtn');
   if (!updateBtn) return;
@@ -830,7 +796,6 @@ function setupUpdateChecker() {
       ]);
       if (jsRes.ok) {
         const jsText = await jsRes.text();
-        fetchPublishedInjectVersion();
         const match = jsText.match(/CURRENT_VERSION_TAG\s*=\s*['"]([^'"]+)['"]/);
         const remoteVer = match ? match[1] : CURRENT_VERSION_TAG;
         setStatus(`Up to Date (${remoteVer})!`, 'ok');
