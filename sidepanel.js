@@ -1069,6 +1069,13 @@ function showImageViewer(item) {
     return;
   }
 
+  if (state.lastExtracted) {
+    $('fcViewerTitle').textContent = 'Card Preview';
+    metaBox.innerHTML = '<div style="color:#a1a1aa; text-align:center; padding:10px;">No person linked to this photo.<br>It was not matched to anyone in the extracted data.</div>';
+    modal.style.display = 'flex';
+    return;
+  }
+
   $('fcViewerTitle').textContent = 'Card Preview';
   metaBox.innerHTML = '<div style="color:#a1a1aa; text-align:center; padding:10px;">Run <b>1. Extract with AI</b> first to inspect &amp; edit parsed fields here.</div>';
   modal.style.display = 'flex';
@@ -1180,9 +1187,6 @@ async function handleUpload(e, category, droppedFiles = null) {
     reader.onload = (evt) => {
       rawImage = new Image();
       rawImage.onload = () => {
-        activeCategory = category;
-        activeCropItem = null;
-        activeCropName = file.name;
         const canvas = $('cropCanvas');
         canvas.width = 900;
         canvas.height = 600;
@@ -1192,9 +1196,17 @@ async function handleUpload(e, category, droppedFiles = null) {
         panX = 0;
         panY = 0;
         $('zoomRange').value = 1;
-        $('cropModal').classList.add('open');
         drawCropCanvas();
       };
+      rawImage.onerror = () => {
+        $('cropModal').classList.remove('open');
+        setStatus('Could not load this photo for cropping.', 'err');
+      };
+      activeCategory = category;
+      activeCropItem = null;
+      activeCropName = file.name;
+      // Show the crop screen immediately; the photo draws as soon as it decodes.
+      $('cropModal').classList.add('open');
       rawImage.src = evt.target.result;
     };
     reader.readAsDataURL(file);
@@ -1252,6 +1264,10 @@ function openCropForImage(item) {
   const titleEl = $('cropModalTitle');
   if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Image';
 
+  // Show the crop screen immediately; the photo draws as soon as it decodes.
+  $('fcViewerModal').style.display = 'none';
+  $('cropModal').classList.add('open');
+
   rawImage = new Image();
   rawImage.onload = () => {
     const canvas = $('cropCanvas');
@@ -1263,10 +1279,11 @@ function openCropForImage(item) {
     panX = 0;
     panY = 0;
     $('zoomRange').value = 1;
-
-    $('fcViewerModal').style.display = 'none';
-    $('cropModal').classList.add('open');
     drawCropCanvas();
+  };
+  rawImage.onerror = () => {
+    $('cropModal').classList.remove('open');
+    setStatus('Could not load this photo for cropping.', 'err');
   };
   rawImage.src = `data:image/jpeg;base64,${item.base64}`;
 }
@@ -1353,8 +1370,11 @@ function setupNativeCropper() {
       return;
     }
     if (activeCropItem) {
-      $('fcViewerModal').style.display = 'flex';
+      const item = activeCropItem;
       activeCropItem = null;
+      // Rebuild the preview for THIS photo instead of reopening
+      // whatever the viewer last showed.
+      showImageViewer(item);
     }
   });
 
@@ -1365,7 +1385,8 @@ function setupNativeCropper() {
     $('cropModal').classList.remove('open');
 
     if (activeCropItem) {
-      activeCropItem.base64 = b64;
+      const croppedItem = activeCropItem;
+      croppedItem.base64 = b64;
       renderPreviews('head');
       renderPreviews('other');
       saveSessionState();
@@ -1376,12 +1397,10 @@ function setupNativeCropper() {
         setStatus(`Cropped ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal}.`, 'ok');
         openNextQueuedCrop();
       } else {
-        if ($('fcViewerModal').style.display !== 'none') {
-          $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
-        } else {
-          $('fcViewerModal').style.display = 'flex';
-        }
         setStatus('Image cropped and updated.', 'ok');
+        // Rebuild the preview so it shows the cropped photo and THIS
+        // photo's person (not a stale image or another person's data).
+        showImageViewer(croppedItem);
       }
     } else if (activeCategory) {
       addImage(activeCategory, b64, activeCropName || 'Cropped_Photo.jpg');
@@ -1638,16 +1657,9 @@ function bindExtractedDataToThumbnails(data) {
       }
     });
 
-    state.head.forEach((item, idx) => {
-      if (getItemRefs(item).length === 0 && idx > 0 && getItemRefs(state.head[idx - 1]).length > 0) {
-        getItemRefs(state.head[idx - 1]).forEach((r) => addItemRef(item, r));
-      }
-    });
-    state.other.forEach((item, idx) => {
-      if (getItemRefs(item).length === 0 && idx > 0 && getItemRefs(state.other[idx - 1]).length > 0) {
-        getItemRefs(state.other[idx - 1]).forEach((r) => addItemRef(item, r));
-      }
-    });
+    // NOTE: photos with no match stay unlinked on purpose. Copying the
+    // previous photo's person onto them showed another person's data
+    // in the preview, which is worse than showing no link at all.
   }
 
   renderPreviews('head');

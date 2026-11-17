@@ -39,26 +39,60 @@
     #fc-floating-root {
       position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; font-family: Inter, system-ui, sans-serif;
     }
-    #fc-trigger-btn {
-      position: fixed; bottom: 20px; right: 20px; pointer-events: auto;
-      display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-      background: #0f172a; color: #ffffff; border: 1px solid #334155;
-      border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
-      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); transition: transform 0.15s ease;
+    @keyframes fc-rise-in {
+      from { opacity: 0; transform: translateY(14px) scale(0.94); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
-    #fc-trigger-btn:hover { transform: scale(1.05); }
-    #fc-trigger-btn.active { transform: scale(0.9); }
+    @keyframes fc-ping {
+      0% { opacity: 0.7; transform: scale(1); }
+      80%, 100% { opacity: 0; transform: scale(1.35); }
+    }
+    #fc-trigger-btn {
+      position: fixed; bottom: 20px; right: 20px;
+      bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+      right: calc(20px + env(safe-area-inset-right, 0px));
+      pointer-events: auto;
+      display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+      background: linear-gradient(135deg, #2563eb, #4f46e5); color: #ffffff;
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 999px; font-family: inherit; font-size: 13px; font-weight: 650; letter-spacing: 0.01em; cursor: pointer;
+      box-shadow: 0 12px 28px -6px rgba(37,99,235,0.55), 0 4px 10px rgba(15,23,42,0.25);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+      animation: fc-rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.1s backwards;
+    }
+    #fc-trigger-btn::after {
+      content: ""; position: absolute; inset: -3px; border-radius: 999px; opacity: 0;
+      border: 2px solid rgba(99,102,241,0.55); pointer-events: none;
+      animation: fc-ping 1.5s ease-out 0.7s 2;
+    }
+    #fc-trigger-btn:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 16px 32px -6px rgba(37,99,235,0.6), 0 6px 14px rgba(15,23,42,0.28); filter: brightness(1.06); }
+    #fc-trigger-btn:active { transform: scale(0.94); }
+    #fc-trigger-btn.active { transform: scale(0.92); box-shadow: 0 8px 20px -6px rgba(37,99,235,0.45); }
+    #fc-trigger-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+    #fc-trigger-btn svg { flex: none; }
+    #fc-trigger-btn .fc-dot {
+      position: absolute; top: -1px; right: -1px; z-index: 1; width: 11px; height: 11px;
+      border-radius: 50%; background: #22c55e; border: 2px solid #ffffff;
+      box-shadow: 0 0 0 2px rgba(34,197,94,0.25);
+    }
+    @media (max-width: 768px) {
+      #fc-trigger-btn { padding: 12px 18px; font-size: 14px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #fc-trigger-btn, #fc-trigger-btn::after { animation: none; }
+      #fc-drawer-iframe { transition: none; }
+    }
 
     #fc-drawer-iframe {
       position: fixed; background: #ffffff; border: none;
-      pointer-events: auto;
+      pointer-events: auto; will-change: transform;
       transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .fc-mobile-view #fc-drawer-iframe {
-      bottom: 0; left: 0; right: 0; width: 100%; height: 90vh; max-height: 850px;
+      bottom: 0; bottom: env(safe-area-inset-bottom, 0px); left: 0; right: 0; width: 100%; height: 90vh; max-height: 850px;
       border-top-left-radius: 20px; border-top-right-radius: 20px;
-      box-shadow: -10px 0 40px rgba(0,0,0,0.3);
+      box-shadow: 0 -12px 40px rgba(15,23,42,0.3);
       transform: translateY(105%);
     }
     .fc-mobile-view #fc-drawer-iframe.open { transform: translateY(0); }
@@ -66,8 +100,8 @@
     .fc-desktop-view #fc-drawer-iframe {
       top: 0; bottom: 0; right: 0; left: auto;
       width: 420px; height: 100%; max-height: none;
-      border-radius: 0; border-left: 1px solid #cbd5e1;
-      box-shadow: -10px 0 40px rgba(0,0,0,0.15);
+      border-top-left-radius: 16px; border-bottom-left-radius: 16px; border-left: 1px solid #e2e8f0;
+      box-shadow: -16px 0 48px rgba(15,23,42,0.22);
       transform: translateX(105%);
     }
     .fc-desktop-view #fc-drawer-iframe.open { transform: translateX(0); }
@@ -81,7 +115,9 @@
   const trigger = document.createElement('button');
   trigger.id = 'fc-trigger-btn';
   trigger.type = 'button';
-  trigger.innerHTML = '<span style="width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;"></span><span>Family Card AI</span>';
+  trigger.setAttribute('aria-label', 'Open Family Card AI panel');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2 5.8 5.8 2-5.8 2-2 5.8-2-5.8-5.8-2 5.8-2z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" opacity="0.65"/></svg><span>Family Card AI</span><span class="fc-dot" aria-hidden="true"></span>';
 
   const iframe = document.createElement('iframe');
   iframe.id = 'fc-drawer-iframe';
@@ -129,6 +165,7 @@
     isOpen = false;
     iframe.classList.remove('open');
     trigger.classList.remove('active');
+    trigger.setAttribute('aria-expanded', 'false');
   }
 
   function toggleSheet() {
@@ -136,6 +173,7 @@
     if (isOpen) {
       iframe.classList.add('open');
       trigger.classList.add('active');
+      trigger.setAttribute('aria-expanded', 'true');
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
       pushSavedCredentials();
     } else {
