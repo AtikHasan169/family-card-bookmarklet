@@ -115,6 +115,8 @@ let isDragging = false;
 let startX = 0;
 let startY = 0;
 let activeCropItem = null;
+let cropQueue = [];
+let cropQueueTotal = 0;
 let viewerZoom = 1;
 
 const $ = (id) => document.getElementById(id);
@@ -1197,6 +1199,7 @@ async function handleUpload(e, category, droppedFiles = null) {
     };
     reader.readAsDataURL(file);
   } else {
+    const beforeCount = state[category].length;
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
@@ -1206,7 +1209,10 @@ async function handleUpload(e, category, droppedFiles = null) {
         setStatus(err.message, 'err');
       }
     }
+    const added = state[category].slice(beforeCount);
     setStatus(`${files.length} images added.`, 'ok');
+    // Many photos at once: crop them one by one, auto-opening each in turn.
+    if (added.length >= 2) queueCrops(added);
   }
   if (e && e.target) e.target.value = '';
 }
@@ -1218,9 +1224,33 @@ function openCamera(category) {
   input.click();
 }
 
+// Auto-crop queue: after a multi-photo upload, the crop editor opens for
+// each new photo one by one. Apply Crop saves and advances; Retake skips.
+function queueCrops(items) {
+  cropQueue.push(...items);
+  cropQueueTotal += items.length;
+  // Fresh queue (nothing was waiting): open the first crop now.
+  // If a queue is already running, the new photos join the end of it.
+  if (cropQueue.length === items.length) openNextQueuedCrop();
+}
+
+function openNextQueuedCrop() {
+  const titleEl = $('cropModalTitle');
+  const item = cropQueue.shift();
+  if (!item) {
+    cropQueueTotal = 0;
+    if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Image';
+    return;
+  }
+  openCropForImage(item);
+  if (titleEl) titleEl.textContent = `Crop ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal} — ${item.name}`;
+}
+
 function openCropForImage(item) {
   activeCropItem = item;
   activeCategory = null;
+  const titleEl = $('cropModalTitle');
+  if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Image';
 
   rawImage = new Image();
   rawImage.onload = () => {
@@ -1316,6 +1346,12 @@ function setupNativeCropper() {
 
   $('cancelCropBtn').addEventListener('click', () => {
     $('cropModal').classList.remove('open');
+    // Cropping queue: Retake skips this photo and opens the next one.
+    if (cropQueue.length) {
+      activeCropItem = null;
+      openNextQueuedCrop();
+      return;
+    }
     if (activeCropItem) {
       $('fcViewerModal').style.display = 'flex';
       activeCropItem = null;
@@ -1333,15 +1369,20 @@ function setupNativeCropper() {
       renderPreviews('head');
       renderPreviews('other');
       saveSessionState();
-
-      if ($('fcViewerModal').style.display !== 'none') {
-        $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
-      } else {
-        $('fcViewerModal').style.display = 'flex';
-      }
-
-      setStatus('Image cropped and updated.', 'ok');
       activeCropItem = null;
+
+      // Cropping queue: advance to the next photo instead of the viewer.
+      if (cropQueue.length) {
+        setStatus(`Cropped ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal}.`, 'ok');
+        openNextQueuedCrop();
+      } else {
+        if ($('fcViewerModal').style.display !== 'none') {
+          $('fcViewerImg').src = `data:image/jpeg;base64,${b64}`;
+        } else {
+          $('fcViewerModal').style.display = 'flex';
+        }
+        setStatus('Image cropped and updated.', 'ok');
+      }
     } else if (activeCategory) {
       addImage(activeCategory, b64, activeCropName || 'Cropped_Photo.jpg');
       setStatus('Cropped photo added.', 'ok');

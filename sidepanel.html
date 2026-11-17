@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Family Card Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #f8fafc;
@@ -41,7 +44,7 @@
 
     body {
       margin: 0;
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: Inter, "Hind Siliguri", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
       color: var(--text-main);
       font-size: 13px;
@@ -111,6 +114,14 @@
     .credit-line { grid-column: 1 / -1; text-align: center; font-size: 11px; color: var(--text-muted); padding-top: 2px; }
     .credit-line a { color: var(--accent); font-weight: 650; text-decoration: none; }
     .credit-line a:hover { text-decoration: underline; }
+    .credit-line .heart-beat { display: inline-block; transform-origin: center; animation: fc-heartbeat 1.5s ease-in-out infinite; }
+    @keyframes fc-heartbeat {
+      0% { transform: scale(1); }
+      14% { transform: scale(1.35); }
+      28% { transform: scale(1); }
+      42% { transform: scale(1.25); }
+      70%, 100% { transform: scale(1); }
+    }
 
     .settings-drawer { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-sm); }
     .settings-drawer.open { display: block; }
@@ -190,7 +201,159 @@
     .crop-container { flex: 1; width: 100%; background: #000; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; }
     #cropCanvas { max-width: 100%; max-height: 100%; cursor: grab; touch-action: none; }
     #cropCanvas:active { cursor: grabbing; }
+
+    /* ---- Dark theme (toggle in the header, saved for next time) ---- */
+    html[data-theme="dark"] { color-scheme: dark; }
+    html[data-theme="dark"] {
+      --bg: #09090b;
+      --surface: #18181b;
+      --surface-muted: #27272a;
+      --border: #3f3f46;
+      --border-hover: #52525b;
+      --text-main: #fafafa;
+      --text-sub: #d4d4d8;
+      --text-muted: #a1a1aa;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.16);
+      --emerald: #34d399;
+      --emerald-soft: rgba(52, 211, 153, 0.14);
+      --danger: #f87171;
+      --danger-soft: rgba(248, 113, 113, 0.14);
+      --ring: rgba(59, 130, 246, 0.28);
+      --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.35), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    html[data-theme="dark"] .navbar { background: rgba(24, 24, 27, 0.98); }
+    html[data-theme="dark"] .brand-logo { background: #fafafa; color: #09090b; }
+    html[data-theme="dark"] .bottom-dock { background: rgba(24, 24, 27, 0.95); }
+    html[data-theme="dark"] .btn-dark { background: #fafafa; color: #09090b; border-color: #fafafa; }
+    html[data-theme="dark"] .btn-dark:hover:not(:disabled) { background: #e4e4e7; border-color: #e4e4e7; }
+    html[data-theme="dark"] .upload-Zone { background: #131316; }
+    html[data-theme="dark"] .upload-Zone.drag-over { background: rgba(59, 130, 246, 0.16); }
+    html[data-theme="dark"] .thumb-item.has-data { border-color: rgba(52, 211, 153, 0.5); background: rgba(5, 150, 105, 0.14); }
+    html[data-theme="dark"] .record-tag.child-badge { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.45); color: #93c5fd; }
+    html[data-theme="dark"] .summary-pills { background: #131316; }
+    html[data-theme="dark"] #customSettingsGroup { background: var(--surface-muted) !important; }
+    html[data-theme="dark"] ::selection { background: rgba(59, 130, 246, 0.35); }
+    #themeToggleBtn .icon-sun { display: none; }
+    html[data-theme="dark"] #themeToggleBtn .icon-sun { display: block; }
+    html[data-theme="dark"] #themeToggleBtn .icon-moon { display: none; }
+
+    /* ---- Polish: entrance, focus, scrollbars ---- */
+    @keyframes fc-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .container > * { animation: fc-rise 0.3s ease both; }
+    .container > *:nth-child(2) { animation-delay: 0.04s; }
+    .container > *:nth-child(3) { animation-delay: 0.08s; }
+    .container > *:nth-child(4) { animation-delay: 0.12s; }
+    .container > *:nth-child(5) { animation-delay: 0.16s; }
+    .card:hover { border-color: var(--border-hover); }
+    .status-banner, .conn-pill { transition: all var(--transition); }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    ::selection { background: rgba(37, 99, 235, 0.2); }
+    .container { scrollbar-width: thin; scrollbar-color: var(--border-hover) transparent; }
+    .container::-webkit-scrollbar { width: 6px; }
+    .container::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 999px; }
+    .container::-webkit-scrollbar-track { background: transparent; }
+
+    /* ---- Mobile: larger touch targets ---- */
+    @media (max-width: 480px) {
+      body { font-size: 13.5px; }
+      .navbar { padding: 12px 14px; }
+      .btn { padding: 10px 14px; font-size: 13.5px; min-height: 42px; }
+      .btn-xs { padding: 6px 10px; font-size: 12px; min-height: 30px; }
+      .icon-btn { width: 34px; height: 34px; }
+      input[type="text"], input[type="number"], input[type="password"], select { padding: 9px 12px; font-size: 14px; }
+      .upload-Zone { padding: 14px; gap: 10px; }
+      .thumb-item img { height: 90px; }
+      .record-row { grid-template-columns: 96px 1fr; }
+      .bottom-dock { padding: 12px 14px; }
+      .bottom-dock .btn { min-height: 44px; }
+      .credit-line { font-size: 11.5px; }
+      .container { padding: 12px 12px 100px 12px; }
+    }
+
+    /* Respect reduced-motion settings: no heartbeat, no entrance animation. */
+    @media (prefers-reduced-motion: reduce) {
+      .credit-line .heart-beat, .container > * { animation: none; }
+    }
+
+    /* ---- CSS upgrade round 2: theme fade, lively feedback, gradients, modal + type polish ---- */
+    body, .navbar, .card, .bottom-dock, .btn, .icon-btn,
+    input[type="text"], input[type="number"], input[type="password"], select,
+    .status-banner, .record-card, .record-head, .settings-drawer,
+    .upload-Zone, .thumb-item, .conn-pill, .badge, .summary-pill, .record-tag {
+      transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease, transform 0.15s ease;
+    }
+
+    /* Lively feedback */
+    .btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+    .btn:active:not(:disabled) { transform: translateY(0) scale(0.99); }
+    .upload-Zone:hover:not(.drag-over) { border-color: var(--accent); background: var(--accent-soft); }
+    .thumb-item:hover { border-color: var(--border-hover); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+    .record-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-sm); }
+    @keyframes fc-pulse { 0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.45); } 70% { box-shadow: 0 0 0 6px rgba(5, 150, 105, 0); } 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); } }
+    .conn-pill.online .conn-dot { animation: fc-pulse 2s ease-out infinite; }
+
+    /* Gradient accents */
+    body { background: linear-gradient(180deg, #ffffff 0%, var(--bg) 180px); }
+    html[data-theme="dark"] body { background: linear-gradient(180deg, #18181b 0%, var(--bg) 180px); }
+    .brand-logo { background: linear-gradient(135deg, #27272a 0%, #09090b 100%); box-shadow: var(--shadow-sm); }
+    html[data-theme="dark"] .brand-logo { background: linear-gradient(135deg, #fafafa 0%, #d4d4d8 100%); }
+    .btn-accent { background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%); }
+    .btn-accent:hover:not(:disabled) { background: linear-gradient(180deg, #60a5fa 0%, #3b82f6 100%); }
+
+    /* Crop modal polish */
+    .modal { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+    .crop-container { box-shadow: var(--shadow-lg); }
+    #zoomRange { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 999px; background: #334155; outline: none; }
+    #zoomRange::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #ffffff; border: 2px solid var(--accent); box-shadow: var(--shadow-sm); cursor: pointer; }
+    #zoomRange::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #ffffff; border: 2px solid var(--accent); box-shadow: var(--shadow-sm); cursor: pointer; }
+    #zoomRange::-moz-range-track { height: 6px; border-radius: 999px; background: #334155; }
+
+    /* Typography details */
+    .badge, .conn-pill, .record-tag, .summary-pill-val, .step-badge { font-variant-numeric: tabular-nums; }
+    input[type="text"], input[type="number"], input[type="password"], select { caret-color: var(--accent); }
+    .field-label, .record-row { line-height: 1.6; }
+    pre { scrollbar-width: thin; scrollbar-color: #52525b transparent; }
+    pre::-webkit-scrollbar { height: 6px; width: 6px; }
+    pre::-webkit-scrollbar-thumb { background: #52525b; border-radius: 999px; }
+    pre::-webkit-scrollbar-track { background: transparent; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .conn-pill.online .conn-dot { animation: none; }
+    }
+
+    /* ---- Small icons ---- */
+    .btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .btn-xs svg { width: 12px; height: 12px; }
+    .lbl-ic { width: 13px; height: 13px; vertical-align: -2px; margin-right: 5px; flex-shrink: 0; }
+    .card-title-group > svg { width: 14px; height: 14px; color: var(--text-muted); flex-shrink: 0; }
+    .field-label > span:first-child { display: inline-flex; align-items: center; }
+    .field-label a svg { width: 11px; height: 11px; vertical-align: -1px; margin-right: 3px; }
+    .status-banner .status-icon { width: 14px; height: 14px; flex-shrink: 0; }
+    .status-banner.loading .status-icon { display: none; }
+    /* Icons for buttons whose text JS rewrites (an inline SVG would be wiped):
+       CSS ::before icons survive textContent changes. */
+    .btn-ic::before { content: ""; flex-shrink: 0; width: 12px; height: 12px; background-repeat: no-repeat; background-position: center; background-size: contain; }
+    .ic-refresh::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpolyline points='1 20 1 14 7 14'/%3E%3Cpath d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/%3E%3C/svg%3E"); }
+    .ic-refresh-indigo::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234f46e5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpolyline points='1 20 1 14 7 14'/%3E%3Cpath d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/%3E%3C/svg%3E"); }
+    .ic-eye::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+    .ic-copy::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E"); }
+    html[data-theme="dark"] .ic-refresh::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpolyline points='1 20 1 14 7 14'/%3E%3Cpath d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15'/%3E%3C/svg%3E"); }
+    html[data-theme="dark"] .ic-eye::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+    html[data-theme="dark"] .ic-copy::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E"); }
+    /* Crop modal title icon (JS rewrites the title text during the crop queue). */
+    #cropModalTitle::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; background-repeat: no-repeat; background-position: center; background-size: contain; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.13 1L6 16a2 2 0 0 0 2 2h15'/%3E%3Cpath d='M1 6.13L16 6a2 2 0 0 1 2 2v15'/%3E%3C/svg%3E"); }
   </style>
+  <script>
+    // Apply the saved theme (or the OS preference) before first paint.
+    try {
+      var savedTheme = localStorage.getItem('fc_pro_theme');
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (savedTheme === 'dark' || (!savedTheme && prefersDark)) document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  </script>
 </head>
 <body>
 
@@ -199,15 +362,18 @@
       <div class="brand-logo">FC</div>
       <div class="brand-text">
         <h1>Family Card Pro</h1>
-        <span>OCR &amp; Form Injector</span>
       </div>
     </div>
     <div class="nav-right">
-      <button type="button" class="btn btn-xs" id="updateCheckBtn" title="Check for script updates" style="font-size:10.5px; padding:3px 8px; background:#eef2ff; color:#4f46e5; border-color:#c7d2fe;">Update</button>
+      <button type="button" class="btn btn-xs btn-ic ic-refresh-indigo" id="updateCheckBtn" title="Check for script updates" style="font-size:10.5px; padding:3px 8px; background:#eef2ff; color:#4f46e5; border-color:#c7d2fe;">Update</button>
       <div class="conn-pill" id="connStatus">
         <span class="conn-dot"></span>
         <span id="connText">Checking...</span>
       </div>
+      <button type="button" class="icon-btn" id="themeToggleBtn" title="Toggle dark mode">
+        <svg class="icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        <svg class="icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+      </button>
       <button type="button" class="icon-btn" id="settingsToggleBtn" title="API &amp; Area Settings">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"></circle>
@@ -222,7 +388,7 @@
     <section class="settings-drawer" id="settingsDrawer">
       <div class="form-grid">
         <div>
-          <div class="field-label"><span>API Provider</span></div>
+          <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>API Provider</span></div>
           <select id="apiProviderSelect" style="margin-bottom: 8px;">
             <option value="google">Google Generative AI</option>
             <option value="custom">Custom Vercel (JSON)</option>
@@ -232,23 +398,23 @@
         
         <div id="googleSettingsGroup">
           <div class="field-label">
-            <span>Gemini API Key</span>
-            <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent); text-decoration:none;">Get Key</a>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>Gemini API Key</span>
+            <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent); text-decoration:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Get Key</a>
           </div>
           <div class="input-group">
             <input id="apiKeyInput" type="password" placeholder="AIzaSyKey1, AIzaSyKey2..." autocomplete="off" spellcheck="false" title="You can enter multiple comma-separated API keys for rotation">
-            <button type="button" class="btn btn-xs" id="toggleKeyBtn">Show</button>
+            <button type="button" class="btn btn-xs btn-ic ic-eye" id="toggleKeyBtn">Show</button>
           </div>
         </div>
         
         <div id="customSettingsGroup" style="display: none; padding: 10px; background: #f1f5f9; border-radius: 6px; margin-bottom: 8px;">
-          <div class="field-label"><span>Base URL</span></div>
+          <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>Base URL</span></div>
           <input id="customBaseUrl" type="text" value="https://geminiwebapi-teal.vercel.app" style="margin-bottom: 6px;">
           
-          <div class="field-label"><span>Bearer Token (APP_PASSWORD)</span></div>
+          <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>Bearer Token (APP_PASSWORD)</span></div>
           <input id="customBearerToken" type="password" style="margin-bottom: 6px;">
           
-          <div class="field-label"><span>Thinking Mode</span></div>
+          <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>Thinking Mode</span></div>
           <select id="customThinkingMode" style="width: 100%; margin-bottom: 6px; padding: 5px;">
             <option value="off">Off (Fastest)</option>
             <option value="auto">Auto</option>
@@ -260,8 +426,8 @@
         </div>
         <div>
           <div class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>Model Endpoint</span>
-            <button type="button" class="btn btn-xs" id="refreshModelsBtn" style="display:none; padding: 2px 6px; font-size: 10px;">Refresh</button>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>Model Endpoint</span>
+            <button type="button" class="btn btn-xs btn-ic ic-refresh" id="refreshModelsBtn" style="display:none; padding: 2px 6px; font-size: 10px;">Refresh</button>
           </div>
           <select id="modelSelect">
             <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
@@ -278,33 +444,33 @@
         </div>
 
         <div>
-          <div class="field-label"><span>গ্রাম / রাস্তা (Village / Road)</span></div>
+          <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>গ্রাম / রাস্তা (Village / Road)</span></div>
           <div class="input-group">
             <input id="presetVillageInput" type="text" placeholder="যেমন: চর আমলা" autocomplete="off">
-            <button type="button" class="btn btn-xs" id="copyPresetVillageBtn">Copy</button>
+            <button type="button" class="btn btn-xs btn-ic ic-copy" id="copyPresetVillageBtn">Copy</button>
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
-            <div class="field-label"><span>ওয়ার্ড নং (Ward No)</span></div>
+            <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>ওয়ার্ড নং (Ward No)</span></div>
             <div class="input-group">
               <input id="presetWardInput" type="text" placeholder="যেমন: 4" autocomplete="off">
-              <button type="button" class="btn btn-xs" id="copyPresetWardBtn">Copy</button>
+              <button type="button" class="btn btn-xs btn-ic ic-copy" id="copyPresetWardBtn">Copy</button>
             </div>
           </div>
           <div>
-            <div class="field-label"><span>পোস্ট কোড (Post Code)</span></div>
+            <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>পোস্ট কোড (Post Code)</span></div>
             <div class="input-group">
               <input id="presetPostCodeInput" type="text" placeholder="যেমন: 7030" autocomplete="off">
-              <button type="button" class="btn btn-xs" id="copyPresetPostCodeBtn">Copy</button>
+              <button type="button" class="btn btn-xs btn-ic ic-copy" id="copyPresetPostCodeBtn">Copy</button>
             </div>
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
           <div>
-            <div class="field-label"><span>খানাটি কোথায় অবস্থিত *</span></div>
+            <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>খানাটি কোথায় অবস্থিত *</span></div>
             <select id="presetAreaTypeSelect">
               <option value="1" selected>পল্লী / ইউনিয়ন</option>
               <option value="2">পৌরসভা</option>
@@ -312,7 +478,7 @@
             </select>
           </div>
           <div>
-            <div class="field-label"><span>ক্ষুদ্র নৃ-গোষ্ঠী কিনা</span></div>
+            <div class="field-label"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>ক্ষুদ্র নৃ-গোষ্ঠী কিনা</span></div>
             <select id="presetEthnicSelect">
               <option value="0" selected>না (No)</option>
               <option value="1">হ্যাঁ (Yes)</option>
@@ -326,18 +492,19 @@
       <div class="card-head">
         <div class="card-title-group">
           <span class="step-badge">1</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
           <h2 class="card-title">Household Head (Wife) &amp; Husband</h2>
         </div>
         <div style="display:flex; gap:5px; align-items:center; flex-wrap:wrap;">
-          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull every field and tab from web form" style="background:#0284c7; color:#ffffff; border-color:#0284c7;">Pull All</button>
-          <button type="button" class="btn btn-xs" id="importJsonBtn" title="Import JSON backup file" style="background:#7c3aed; color:#ffffff; border-color:#7c3aed;">Import</button>
+          <button type="button" class="btn btn-xs" id="pullFromWebBtn" title="Pull every field and tab from web form" style="background:#0284c7; color:#ffffff; border-color:#0284c7;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="8 17 12 21 16 17"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>Pull All</button>
+          <button type="button" class="btn btn-xs" id="importJsonBtn" title="Import JSON backup file" style="background:#7c3aed; color:#ffffff; border-color:#7c3aed;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>Import</button>
           <input type="file" id="importJsonInput" accept=".json,application/json" hidden>
           <span class="badge" id="headCount">0 files</span>
         </div>
       </div>
       <div class="upload-Zone" id="headDropZone">
-        <button type="button" class="btn btn-dark" id="uploadHeadBtn">Upload Photos</button>
-        <button type="button" class="btn btn-emerald" id="captureHeadBtn">Live Camera</button>
+        <button type="button" class="btn btn-dark" id="uploadHeadBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>Upload Photos</button>
+        <button type="button" class="btn btn-emerald" id="captureHeadBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>Live Camera</button>
         <input type="file" id="headUpload" accept="image/*" multiple hidden>
       </div>
       <div class="thumb-grid" id="headPreviews"></div>
@@ -347,13 +514,14 @@
       <div class="card-head">
         <div class="card-title-group">
           <span class="step-badge">2</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
           <h2 class="card-title">Other Family Members</h2>
         </div>
         <span class="badge" id="otherCount">0 files</span>
       </div>
       <div class="upload-Zone" id="otherDropZone">
-        <button type="button" class="btn btn-dark" id="uploadOtherBtn">Upload Photos</button>
-        <button type="button" class="btn btn-emerald" id="captureOtherBtn">Live Camera</button>
+        <button type="button" class="btn btn-dark" id="uploadOtherBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>Upload Photos</button>
+        <button type="button" class="btn btn-emerald" id="captureOtherBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>Live Camera</button>
         <input type="file" id="otherUpload" accept="image/*" multiple hidden>
       </div>
       <div class="thumb-grid" id="otherPreviews"></div>
@@ -363,16 +531,17 @@
 
     <div class="status-banner" id="statusBanner">
       <span class="spinner"></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="status-icon"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
       <span id="statusText">Ready — add NID or BRN images to extract.</span>
     </div>
 
     <section class="results-wrap" id="resultsWrap">
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-size:12px; font-weight:650; color:var(--text-sub);">Extracted &amp; Website Records</span>
+        <span style="font-size:12px; font-weight:650; color:var(--text-sub);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>Extracted &amp; Website Records</span>
         <div style="display:flex; gap:5px;">
-          <button type="button" class="btn btn-xs" id="exportJsonBtn" style="background:#2563eb; color:#ffffff; border-color:#2563eb;">Export JSON</button>
-          <button type="button" class="btn btn-xs" id="copyJsonBtn" style="background:#d97706; color:#ffffff; border-color:#d97706;">Copy JSON</button>
-          <button type="button" class="btn btn-xs btn-danger" id="clearAllBtn">Reset</button>
+          <button type="button" class="btn btn-xs" id="exportJsonBtn" style="background:#2563eb; color:#ffffff; border-color:#2563eb;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Export JSON</button>
+          <button type="button" class="btn btn-xs" id="copyJsonBtn" style="background:#d97706; color:#ffffff; border-color:#d97706;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Copy JSON</button>
+          <button type="button" class="btn btn-xs btn-danger" id="clearAllBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>Reset</button>
         </div>
       </div>
 
@@ -382,34 +551,34 @@
       <div id="visualCards" style="display:flex; flex-direction:column; gap:10px;"></div>
 
       <details>
-        <summary style="cursor:pointer; font-size:11.5px; color:var(--text-muted); font-weight:600;">Raw JSON Payload</summary>
+        <summary style="cursor:pointer; font-size:11.5px; color:var(--text-muted); font-weight:600;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lbl-ic"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>Raw JSON Payload</summary>
         <pre id="rawJsonOutput"></pre>
       </details>
     </section>
   </main>
 
   <footer class="bottom-dock">
-    <button type="button" class="btn btn-accent" id="extractBtn">1. Extract with AI</button>
-    <button type="button" class="btn btn-danger" id="stopExtractBtn" style="display:none;">Stop Extraction</button>
-    <button type="button" class="btn btn-emerald" id="autofillBtn" disabled>2. Auto-Fill Form</button>
-    <div class="credit-line">Developed with ❤️ by <a href="https://www.facebook.com/ARAtik169" target="_blank" rel="noopener noreferrer">Atik Hasan</a></div>
+    <button type="button" class="btn btn-accent" id="extractBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>1. Extract with AI</button>
+    <button type="button" class="btn btn-danger" id="stopExtractBtn" style="display:none;"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>Stop Extraction</button>
+    <button type="button" class="btn btn-emerald" id="autofillBtn" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>2. Auto-Fill Form</button>
+    <div class="credit-line">Made with <span class="heart-beat">❤️</span> by <a href="https://www.facebook.com/ARAtik169" target="_blank" rel="noopener noreferrer">Atik Hasan</a></div>
   </footer>
 
   <div class="modal" id="cropModal">
-    <h3 style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Rotate &amp; Zoom Image</h3>
+    <h3 id="cropModalTitle" style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Rotate &amp; Zoom Image</h3>
     <div class="crop-container">
       <canvas id="cropCanvas"></canvas>
     </div>
     
     <div style="padding: 10px 14px; background: #18181b; display: flex; align-items: center; gap: 12px; border-top: 1px solid #334155;">
-      <span style="color: #94a3b8; font-size: 11px; font-weight: 600; min-width: 35px;">ZOOM</span>
+      <span style="color: #94a3b8; font-size: 11px; font-weight: 600; min-width: 35px; display: inline-flex; align-items: center; gap: 5px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>ZOOM</span>
       <input type="range" id="zoomRange" min="0.5" max="3.5" step="0.05" value="1" style="flex: 1; accent-color: #2563eb; cursor: pointer;">
     </div>
 
     <div style="display:flex; gap:8px; padding-top: 10px; background: #09090b;">
-      <button type="button" class="btn" id="rotateCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate 90°">⟳</button>
-      <button type="button" class="btn" id="cancelCropBtn" style="flex:1; background:#dc2626; color:#fff;">Retake</button>
-      <button type="button" class="btn" id="saveCropBtn" style="flex:1; background:#16a34a; color:#fff;">Apply Crop</button>
+      <button type="button" class="btn" id="rotateCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg></button>
+      <button type="button" class="btn" id="cancelCropBtn" style="flex:1; background:#dc2626; color:#fff;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>Retake</button>
+      <button type="button" class="btn" id="saveCropBtn" style="flex:1; background:#16a34a; color:#fff;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Apply Crop</button>
     </div>
   </div>
 
@@ -417,6 +586,19 @@
   <script>
     const v = new URLSearchParams(window.location.search).get('t') || Date.now();
     document.write('<script src="sidepanel.js?t=' + v + '"><' + '/script>');
+  </script>
+  <script>
+    // Dark mode toggle (saved for next time).
+    (function () {
+      var btn = document.getElementById('themeToggleBtn');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (isDark) document.documentElement.removeAttribute('data-theme');
+        else document.documentElement.setAttribute('data-theme', 'dark');
+        try { localStorage.setItem('fc_pro_theme', isDark ? 'light' : 'dark'); } catch (e) {}
+      });
+    })();
   </script>
 </body>
 </html>
