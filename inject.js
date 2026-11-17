@@ -1760,6 +1760,21 @@
     };
     const matchIdItem = (vInst, id) =>
       (vInst.items || []).find(it => Number(optionItemId(vInst, it)) === Number(id)) || null;
+    // Exact single-label match: substring matching is wrong here
+    // ("মাটি" is inside "পোড়ামাটি" in the ঢালাই option), so a string
+    // override/derivation must prefer an exactly-named item.
+    const matchExactLabelItem = (vInst, text) => {
+      const strip = (s) => String(s || '').replace(/\(.*?\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      const want = strip(text);
+      if (!want) return null;
+      return (vInst.items || []).find(it => {
+        for (const k of ['name_bn', 'name_en', 'value_bn', 'value_en', 'label', 'text', 'name']) {
+          const lbl = strip(it[k]);
+          if (lbl && (lbl === want || lbl.startsWith(want + ' '))) return true;
+        }
+        return false;
+      }) || null;
+    };
 
     // Resolve one control's answer: override > derivation. Returns
     // { ids: [...] } or null.
@@ -1772,6 +1787,9 @@
         for (const v of list) {
           const numeric = typeof v === 'number' || /^\d+$/.test(String(v).trim());
           let item = numeric ? matchIdItem(vInst, Number(v)) : null;
+          if (!item && typeof v === 'string' && v.trim()) {
+            item = matchExactLabelItem(vInst, v.trim());
+          }
           if (!item && typeof v === 'string' && v.trim()) {
             const esc = v.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             item = matchOptionItem(vInst, [new RegExp(esc, 'i')]);
@@ -1849,14 +1867,25 @@
       const allQids = new Set([...derivedPmt.keys(), ...Object.keys(pmtOverrides).map(Number)]);
       for (const qid of allQids) {
         const entry = findPmtEntry(qid);
-        if (!entry || !isEmptyModelVal(entry.sub_variables)) continue;
+        if (!entry) continue;
         const question = pmtVariables.find(q => Number(q.id) === Number(qid));
         if (!question || !Array.isArray(question.children) || !question.children.length) continue;
         const fakeVInst = { items: question.children, itemValue: 'id', returnObject: false };
         const choice = resolveChoice(fakeVInst, qid, derivedPmt.get(qid), pmtOverrides);
         if (!choice) continue;
         const isMulti = Number(question.field_type) === 2;
-        setReactive(pmtOwnerVm, entry, 'sub_variables', isMulti ? choice.ids : choice.ids[0]);
+        if (isMulti) {
+          // Multi-answer: COMPLETE a partial entry — add the missing
+          // wanted ids, never remove existing ones. A draft load or a
+          // rebuild can leave a single stale id behind; "non-empty"
+          // must not count as done for a multi-answer question.
+          const existing = Array.isArray(entry.sub_variables) ? entry.sub_variables.map(Number) : [];
+          const merged = [...new Set([...existing, ...choice.ids.map(Number)])];
+          if (merged.length !== existing.length) setReactive(pmtOwnerVm, entry, 'sub_variables', merged);
+        } else {
+          if (!isEmptyModelVal(entry.sub_variables)) continue;
+          setReactive(pmtOwnerVm, entry, 'sub_variables', choice.ids[0]);
+        }
       }
     }
     const { values: progValues, fields: progFields } = resolveProgramState(vmHead, allVms, headTarget);
@@ -1926,8 +1955,13 @@
           if (lbl === sw || lbl.startsWith(sw + ' ')) wantedIds.add(id);
         }
       }
-      const alreadyFilled = entry && !isEmptyModelVal(entry.sub_variables);
+      const entryIds = entry && Array.isArray(entry.sub_variables) ? entry.sub_variables.map(Number) : [];
+      // Multi-answer completeness: "filled" means ALL wanted ids are
+      // present, not merely non-empty — a single stale id (draft load,
+      // rebuild) must be completed, not treated as done.
+      const alreadyFilled = entry && entryIds.length > 0 && [...wantedIds].every(id => entryIds.includes(id));
       if (!(onlyEmpty && alreadyFilled)) {
+      const entryIdSet = new Set(entryIds);
       const chosen = [];
       grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox').forEach(box => {
         const bvm = box.__vue__;
@@ -1941,9 +1975,17 @@
         }
         if (!Number.isNaN(matchedId)) chosen.push(matchedId);
         else if (!Number.isNaN(cid)) chosen.push(cid);
+        // Never click a box whose id is already in the model: the
+        // model is authoritative and Vue renders it checked. Clicking
+        // a stale-unchecked box that the model already holds risks
+        // toggling the id back OUT of the model. Only click genuine
+        // adds (id absent from the model), which are safe under any
+        // checkbox semantics.
+        const effectiveId = !Number.isNaN(matchedId) ? matchedId : cid;
+        const alreadyInModel = !Number.isNaN(effectiveId) && entryIdSet.has(effectiveId);
         const inp = box.querySelector('input[type="checkbox"]');
         const checked = inp ? inp.checked : !!(bvm && bvm.isActive);
-        if (!checked && inp && !inp.disabled) inp.click();
+        if (!checked && !alreadyInModel && inp && !inp.disabled) inp.click();
       });
       // Merge with what the model already holds, keeping only wanted
       // ids — never shrink the array if one box failed to match (e.g.
@@ -1957,12 +1999,11 @@
       }
       // Reconcile + verify on EVERY pass (even when the entry was
       // already filled): if the model holds an id but its box renders
-      // unchecked — stale DOM, a missed click, a late rebuild — click
-      // it once. Clicking a box whose id is already in the model
-      // cannot change the model (Vuetify only adds an absent value),
-      // so this never overrides a manual uncheck: unchecking removes
-      // the id from the model too, and then no click happens. Notes
-      // feed the result message so a stubborn box is visible.
+      // unchecked — stale DOM, a missed click, a late rebuild — fix it
+      // without ever risking a toggle-out. A box whose own VM says
+      // inactive gets one click (a genuine add through its binding);
+      // a box whose VM says active only gets a re-render. Notes feed
+      // the result message so a stubborn box is visible.
       if (entry) {
         const modelIds = new Set(Array.isArray(entry.sub_variables) ? entry.sub_variables.map(Number) : []);
         const seenBoxIds = new Set();
@@ -1981,9 +2022,20 @@
           seenBoxIds.add(bid);
           if (!modelIds.has(bid)) return;
           const inp = box.querySelector('input[type="checkbox"]');
+          const vmActive = !!(bvm && bvm.isActive);
           if (inp && !inp.checked && !inp.disabled) {
-            inp.click();
-            gridNotes.push('Q' + qid + ' grid box re-checked: ' + (box.textContent || '').trim());
+            if (!vmActive) {
+              // The box's own state says unchecked while the model
+              // holds the id (stale binding / missed render): clicking
+              // is a genuine add through the box's own binding, safe
+              // under any checkbox semantics.
+              inp.click();
+              gridNotes.push('Q' + qid + ' grid box re-checked: ' + (box.textContent || '').trim());
+            } else if (bvm && typeof bvm.$forceUpdate === 'function') {
+              // The box knows it is active but the DOM lags: re-render
+              // instead of clicking, so the id can never toggle out.
+              try { bvm.$forceUpdate(); } catch (_) {}
+            }
           }
         });
         if (seenBoxIds.size) {
