@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v13';
+  const FC_INJECT_VERSION = 'v14';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2553,7 +2553,7 @@
       if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
       const unfilledNote = optionUnfilled.length
-        ? ` Not auto-filled (please select manually): ${optionUnfilled.join('; ')}.`
+        ? ` Needs manual selection: ${optionUnfilled.join('; ')}.`
         : '';
       const gridNote = gridCheckNotes.length
         ? ` Grid check: ${[...new Set(gridCheckNotes)].join('; ')}.`
@@ -2562,7 +2562,7 @@
         detail: {
           version: FC_INJECT_VERSION,
           success: true,
-          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!${unfilledNote}${gridNote}`
+          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}`
         }
       }));
     } catch (err) {

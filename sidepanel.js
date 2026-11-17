@@ -235,9 +235,6 @@ function getActiveModel() {
     ? ((customInp ? customInp.value.trim() : '') || 'gemini-2.5-flash')
     : ((sel ? sel.value.trim() : '') || 'gemini-2.5-flash');
 
-  if (prov === 'google' && (chosen === 'gemini-3.5-flash' || chosen === 'gemini-3.8-flash')) {
-    return 'gemini-2.5-flash';
-  }
   return chosen;
 }
 
