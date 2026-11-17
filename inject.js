@@ -1607,6 +1607,51 @@
     return null;
   }
 
+  // PMT model state. Entries live in data.application_pmt (main form)
+  // or applicationPmt (halnagad variant), and are keyed by variable_id
+  // — NOT id (createEmptyApplicationPmtRow builds
+  // {variable_id, sub_variables}). Matching only `id` silently skipped
+  // every direct model write on the real page, leaving PMT to DOM
+  // drives alone — which cannot run while the PMT tab is not open.
+  function resolvePmtState(vmHead, allVms, headTarget) {
+    let pmtArray = null, pmtOwnerVm = null, pmtVariables = null;
+    const consider = (vm, arr) => { if (!pmtArray && Array.isArray(arr)) { pmtArray = arr; pmtOwnerVm = vm; } };
+    if (headTarget) {
+      consider(vmHead, headTarget.application_pmt);
+      if (Array.isArray(headTarget.PMTVariables) && headTarget.PMTVariables.length) pmtVariables = headTarget.PMTVariables;
+    }
+    (allVms || []).forEach(v => {
+      if (!v) return;
+      if (v.data) consider(v, v.data.application_pmt);
+      consider(v, v.applicationPmt);
+      if (!pmtVariables && Array.isArray(v.PMTVariables) && v.PMTVariables.length) pmtVariables = v.PMTVariables;
+      if (!pmtVariables && v.data && Array.isArray(v.data.PMTVariables) && v.data.PMTVariables.length) pmtVariables = v.data.PMTVariables;
+    });
+    return { pmtArray, pmtOwnerVm, pmtVariables };
+  }
+  function findPmtEntryIn(pmtArray, qid) {
+    if (!Array.isArray(pmtArray)) return null;
+    return pmtArray.find(e => e && (Number(e.variable_id) === Number(qid) || Number(e.id) === Number(qid))) || null;
+  }
+  // Program additional-field values + field definitions (the parent
+  // owns both; DynamicAdditionalFields only renders them).
+  function resolveProgramState(vmHead, allVms, headTarget) {
+    let values = null, fields = null;
+    const consider = (v) => {
+      if (!v) return;
+      if (!values && Array.isArray(v.applicationAllowanceValues)) values = v.applicationAllowanceValues;
+      if (!fields && Array.isArray(v.displayAdditionalFields) && v.displayAdditionalFields.length) fields = v.displayAdditionalFields;
+      if (v.data) {
+        if (!values && Array.isArray(v.data.applicationAllowanceValues)) values = v.data.applicationAllowanceValues;
+        if (!fields && Array.isArray(v.data.displayAdditionalFields) && v.data.displayAdditionalFields.length) fields = v.data.displayAdditionalFields;
+      }
+    };
+    consider(vmHead);
+    if (headTarget) consider(headTarget);
+    (allVms || []).forEach(consider);
+    return { values, fields };
+  }
+
   async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty) {
     const unfilled = [];
     const seenPmt = new Set();
@@ -1653,18 +1698,8 @@
     await waitForOptionItems(controls);
 
     // PMT model array owner (for direct writes alongside select drives).
-    let pmtArray = null, pmtOwnerVm = null;
-    if (headTarget && Array.isArray(headTarget.application_pmt)) {
-      pmtOwnerVm = vmHead; pmtArray = headTarget.application_pmt;
-    } else {
-      (allVms || []).some(v => {
-        if (v && v.data && Array.isArray(v.data.application_pmt)) { pmtOwnerVm = v; pmtArray = v.data.application_pmt; return true; }
-        if (v && Array.isArray(v.applicationPmt)) { pmtOwnerVm = v; pmtArray = v.applicationPmt; return true; }
-        return false;
-      });
-    }
-    const findPmtEntry = (qid) => Array.isArray(pmtArray)
-      ? pmtArray.find(e => e && Number(e.id) === Number(qid)) : null;
+    const { pmtArray, pmtOwnerVm, pmtVariables } = resolvePmtState(vmHead, allVms, headTarget);
+    const findPmtEntry = (qid) => findPmtEntryIn(pmtArray, qid);
 
     // Numeric options: itemToStr concatenates every label field plus
     // the item id ("২ 2 ... 443"), so match the FIRST standalone
@@ -1746,6 +1781,42 @@
       }
     }
 
+    // Model-only passes: the PMT and program sections live on their
+    // own tabs, and tab content renders lazily — when a tab was never
+    // opened, its controls do not exist at all, so no select drive can
+    // run. Write the answers straight into the models (resolving
+    // numbers/labels against the live PMTVariables children and
+    // displayAdditionalFields options), so each tab shows filled values
+    // whenever the user opens it. Never overwrites a non-empty entry.
+    if (pmtArray && pmtVariables) {
+      const allQids = new Set([...derivedPmt.keys(), ...Object.keys(pmtOverrides).map(Number)]);
+      for (const qid of allQids) {
+        const entry = findPmtEntry(qid);
+        if (!entry || !isEmptyModelVal(entry.sub_variables)) continue;
+        const question = pmtVariables.find(q => Number(q.id) === Number(qid));
+        if (!question || !Array.isArray(question.children) || !question.children.length) continue;
+        const fakeVInst = { items: question.children, itemValue: 'id', returnObject: false };
+        const choice = resolveChoice(fakeVInst, qid, derivedPmt.get(qid), pmtOverrides);
+        if (!choice) continue;
+        const isMulti = Number(question.field_type) === 2;
+        setReactive(pmtOwnerVm, entry, 'sub_variables', isMulti ? choice.ids : choice.ids[0]);
+      }
+    }
+    const { values: progValues, fields: progFields } = resolveProgramState(vmHead, allVms, headTarget);
+    if (Array.isArray(progValues) && Array.isArray(progFields)) {
+      const allFids = new Set([...derivedProg.keys(), ...Object.keys(progOverrides).map(Number)]);
+      for (const fid of allFids) {
+        const entry = progValues.find(e => e && Number(e.allowance_program_additional_field_id) === Number(fid));
+        if (!entry || !isEmptyModelVal(entry.allowance_program_additional_field_values_id)) continue;
+        const field = progFields.find(f => Number(f.id) === Number(fid));
+        if (!field || !Array.isArray(field.additional_field_value) || !field.additional_field_value.length) continue;
+        const fakeVInst = { items: field.additional_field_value, itemValue: 'id', returnObject: false };
+        const choice = resolveChoice(fakeVInst, fid, derivedProg.get(fid), progOverrides);
+        if (!choice) continue;
+        setReactive(vmHead, entry, 'allowance_program_additional_field_values_id', choice.ids[0]);
+      }
+    }
+
     // Multi-answer PMT questions render as a checkbox grid. Only
     // overrides can answer them (no derivation exists for floor/assets).
     document.querySelectorAll('.fc-pmt-multi-grid').forEach(grid => {
@@ -1806,6 +1877,7 @@
     if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
     let seenAny = false;
     let inFlight = false;
+    let verifiedTicks = 0;
     const t0 = Date.now();
     const timer = setInterval(async () => {
       if (inFlight) return;
@@ -1817,15 +1889,36 @@
         const ht = getHeadTargetObj(vh) || headTarget;
         const res = await syncDynamicSections(vh, fresh.allVms || allVms, ht, memberRows, targetMemberList, headMember, counts, defs, true);
         if (res.seenPmt.size || res.seenProgram.size) seenAny = true;
-        if (!seenAny && Date.now() - t0 > 4000) { clearInterval(timer); return; }
-        const unfilledIds = new Set();
-        for (const n of res.unfilled) {
-          const m = n.match(/(?:PMT Q|Program field )(\d+)/);
-          if (m) unfilledIds.add(Number(m[1]));
+        // Verify against the live MODELS, not just "no unfilled
+        // notes": a drive can appear to succeed and then be wiped by
+        // a late rebuild. Require the values to stay filled for two
+        // consecutive ticks before stopping.
+        const { pmtArray } = resolvePmtState(vh, fresh.allVms || allVms, ht);
+        const { values: progVals } = resolveProgramState(vh, fresh.allVms || allVms, ht);
+        const pmtVerified = wantPmt.every(id => {
+          const e = findPmtEntryIn(pmtArray, id);
+          return e && !isEmptyModelVal(e.sub_variables);
+        });
+        let progVerified;
+        if (Array.isArray(progVals) && progVals.length) {
+          progVerified = wantProg.every(id => {
+            const e = progVals.find(x => x && Number(x.allowance_program_additional_field_id) === Number(id));
+            return e && !isEmptyModelVal(e.allowance_program_additional_field_values_id);
+          });
+        } else {
+          const unfilledIds = new Set();
+          for (const n of res.unfilled) {
+            const m = n.match(/(?:PMT Q|Program field )(\d+)/);
+            if (m) unfilledIds.add(Number(m[1]));
+          }
+          progVerified = wantProg.every(id => res.seenProgram.has(id) && !unfilledIds.has(id));
         }
-        const pmtDone = wantPmt.every(id => res.seenPmt.has(id) && !unfilledIds.has(id));
-        const progDone = wantProg.every(id => res.seenProgram.has(id) && !unfilledIds.has(id));
-        if (pmtDone && progDone) clearInterval(timer);
+        if (pmtVerified && progVerified) {
+          if (++verifiedTicks >= 2) { clearInterval(timer); return; }
+        } else {
+          verifiedTicks = 0;
+        }
+        if (!seenAny && !pmtArray && !(Array.isArray(progVals) && progVals.length) && Date.now() - t0 > 4000) clearInterval(timer);
       } catch (_) {
         // Keep watching; a later pass may succeed.
       } finally {
