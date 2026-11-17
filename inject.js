@@ -1694,6 +1694,7 @@
 
   async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty) {
     const unfilled = [];
+    const gridNotes = [];
     const seenPmt = new Set();
     const seenProgram = new Set();
     const pmtOverrides = (defs && defs.pmt) || {};
@@ -1894,8 +1895,6 @@
       const src = ov !== undefined ? ov : derivedPmt.get(qid);
       if (src === undefined) return;
       const entry = findPmtEntry(qid);
-      const alreadyFilled = entry && !isEmptyModelVal(entry.sub_variables);
-      if (!(onlyEmpty && alreadyFilled)) {
       const wantList = Array.isArray(src) ? src : [src];
       const wantIds = new Set(), wantLabels = [];
       wantList.forEach(v => {
@@ -1927,6 +1926,8 @@
           if (lbl === sw || lbl.startsWith(sw + ' ')) wantedIds.add(id);
         }
       }
+      const alreadyFilled = entry && !isEmptyModelVal(entry.sub_variables);
+      if (!(onlyEmpty && alreadyFilled)) {
       const chosen = [];
       grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox').forEach(box => {
         const bvm = box.__vue__;
@@ -1954,6 +1955,43 @@
         setReactive(pmtOwnerVm, entry, 'sub_variables', merged);
       }
       }
+      // Reconcile + verify on EVERY pass (even when the entry was
+      // already filled): if the model holds an id but its box renders
+      // unchecked — stale DOM, a missed click, a late rebuild — click
+      // it once. Clicking a box whose id is already in the model
+      // cannot change the model (Vuetify only adds an absent value),
+      // so this never overrides a manual uncheck: unchecking removes
+      // the id from the model too, and then no click happens. Notes
+      // feed the result message so a stubborn box is visible.
+      if (entry) {
+        const modelIds = new Set(Array.isArray(entry.sub_variables) ? entry.sub_variables.map(Number) : []);
+        const seenBoxIds = new Set();
+        grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox').forEach(box => {
+          const bvm = box.__vue__;
+          let bid = bvm ? Number(bvm.value ?? (bvm.$attrs && bvm.$attrs.value)) : NaN;
+          const txt = stripLabel(box.textContent);
+          if (Number.isNaN(bid)) {
+            let byLabel = labelToId.get(txt);
+            if (byLabel === undefined) {
+              for (const [lbl, id] of labelToId) { if (txt.startsWith(lbl + ' ')) { byLabel = id; break; } }
+            }
+            if (byLabel !== undefined) bid = byLabel;
+          }
+          if (Number.isNaN(bid)) return;
+          seenBoxIds.add(bid);
+          if (!modelIds.has(bid)) return;
+          const inp = box.querySelector('input[type="checkbox"]');
+          if (inp && !inp.checked && !inp.disabled) {
+            inp.click();
+            gridNotes.push('Q' + qid + ' grid box re-checked: ' + (box.textContent || '').trim());
+          }
+        });
+        if (seenBoxIds.size) {
+          for (const wid of wantIds) {
+            if (!seenBoxIds.has(wid)) gridNotes.push('Q' + qid + ': no matching box found for id ' + wid);
+          }
+        }
+      }
       // Re-fire a change on one checked box ONLY while the grid shows
       // its error state — the site's own change handler re-validates
       // and clears it. Never fire when no error is showing.
@@ -1974,7 +2012,7 @@
       }
     });
 
-    return { unfilled, seenPmt, seenProgram };
+    return { unfilled, seenPmt, seenProgram, gridNotes };
   }
 
   // Background watcher for the PMT + program sections. The program
@@ -2382,6 +2420,7 @@
       // First pass now; a second empty-only pass after a short delay catches
       // selects that render late (disability type, cascaded union/ward lists).
       let optionUnfilled = [];
+      const gridCheckNotes = [];
       try {
         await new Promise(r => setTimeout(r, 250));
         const memberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
@@ -2397,7 +2436,9 @@
         await new Promise(r => setTimeout(r, 600));
         const dynLate = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
         await new Promise(r => setTimeout(r, 2000));
-        const dynLate2 = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
+        const dynLast = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        const dynLate2 = dynLast.unfilled;
+        gridCheckNotes.push(...(dynLast.gridNotes || []));
         optionUnfilled = [...new Set([...optionUnfilled, ...dynUnfilled, ...dynLate, ...dynLate2])];
         // Bank branch: re-apply the single-option pick late, after the
         // site's payment-processors reload has had a chance to null it.
@@ -2445,10 +2486,13 @@
       const unfilledNote = optionUnfilled.length
         ? ` Not auto-filled (please select manually): ${optionUnfilled.join('; ')}.`
         : '';
+      const gridNote = gridCheckNotes.length
+        ? ` Grid check: ${[...new Set(gridCheckNotes)].join('; ')}.`
+        : '';
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: {
           success: true,
-          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!${unfilledNote}`
+          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!${unfilledNote}${gridNote}`
         }
       }));
     } catch (err) {
