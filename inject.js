@@ -558,6 +558,19 @@
       if (!labelTxt) return;
       const vInst = getActiveVm(wrap);
 
+      // PMT + program-additional-field selects are owned by
+      // syncDynamicSections (they need question/field-aware answers).
+      // This loop's loose label/number matching picked WRONG options
+      // there on the real page (e.g. PMT location got "পৌরসভা" because
+      // "উপজেলার পৌরসভা" contains "উপজেলা"), so skip them entirely.
+      if (vInst && Array.isArray(vInst.items) && vInst.items.length) {
+        const firstItem = vInst.items[0];
+        if (firstItem && typeof firstItem === 'object' &&
+          ((firstItem.parent_id != null && 'score' in firstItem) || firstItem.additional_field_id != null)) {
+          return;
+        }
+      }
+
       const fillNumericOrTextInput = (valToSet) => {
         const enStr = toEnDigits(valToSet);
 
@@ -1335,6 +1348,313 @@
     return unfilled;
   }
 
+  /* =====================================================================
+   * PMT + PROGRAM ADDITIONAL FIELDS — the "যোগ্যতার অন্যান্য তথ্য"
+   * (PMT score questions) and "প্রোগ্রাম অনুযায়ী তথ্য" (program
+   * counts) sections. Added 2026-11-17 after the user showed these
+   * sections unfilled on the real page.
+   *
+   * PMT: v-selects bound to `data.application_pmt[i].sub_variables`,
+   * items = the question's `children` (id + name_bn/name_en + score,
+   * parent_id = question id). field_type 2 (multi) renders as a
+   * checkbox grid (.fc-pmt-multi-grid). Question ids/children are the
+   * REAL ones from getApplicationPageData (24 questions, captured
+   * 2026-11-12).
+   *
+   * Program fields (Family Card, program 24): v-selects bound to
+   * `values[i].allowance_program_additional_field_values_id`, items =
+   * additional_field_value (id + value_bn/value_en, additional_field_id
+   * = field id).
+   *
+   * DERIVABLE answers (filled automatically):
+   *   PMT 576 ethnic minority <- is_ethnic; 530 location <- area type;
+   *   1 household size, 7 children count <- household counts;
+   *   12 head age band <- head DOB; 14 head education band <-
+   *   head education_status; 18 spouse education band (or 604 N/A);
+   *   29 remittance = No (no member abroad).
+   *   Program 75/77/142 male/female/hijra counts; 96 DSS = No;
+   *   139/140/141 abroad counts = 0.
+   * Everything else (house materials, water, fuel, land, rooms,
+   * assets, MFS provider, ...) is FACTUAL household data the
+   * bookmarklet does not have — it is left for manual selection
+   * unless preset via overrides:
+   *   form_defaults.pmt = { '571': 572, '47': [435, 559] }
+   *   form_defaults.program_fields = { '138': 679 }
+   * Numeric ids win; strings match option labels; null/false skips.
+   * ===================================================================== */
+
+  // Order matters: Q579's label contains Q548's wording, and Q25's
+  // English name contains Q571's — the more specific pattern goes first.
+  const PMT_QUESTION_LABELS = [
+    { id: 579, re: /এলপিজি.*পরিমান|lpg/i },
+    { id: 548, re: /জ্বালানির প্রধান উপকরণ|primary fuel/i },
+    { id: 25, re: /জমির পরিমাণ|household land/i },
+    { id: 571, re: /মালিকানা ধরণ|land ownership/i },
+    { id: 576, re: /ক্ষুদ্র নৃগোষ্ঠী|ethnic minority/i },
+    { id: 530, re: /কোথায় অবস্থিত|কোথায় অবস্থিত|household location/i },
+    { id: 1, re: /খানার সদস্য সংখ্যা|households size/i },
+    { id: 7, re: /শিশু সংখ্যা|number of children/i },
+    { id: 12, re: /প্রধানের বয়স|head is aged/i },
+    { id: 14, re: /খানা প্রধানের শিক্ষা|head.?s education/i },
+    { id: 18, re: /স্বামীর শিক্ষা|education level of spouse/i },
+    { id: 500, re: /রুম\/কক্ষ সংখ্যা|number of rooms|ঘরের সংখ্যা/i },
+    { id: 36, re: /পৃথক রান্নাঘর|separate kitchen/i },
+    { id: 33, re: /পৃথক খাবার ঘর|separate dining/i },
+    { id: 536, re: /মেঝে বা ফ্লোর|floor/i },
+    { id: 393, re: /ঘরের ছাদ|room roof/i },
+    { id: 30, re: /ঘরের দেয়াল|room wall/i },
+    { id: 40, re: /খাবার পানির উৎস|drinking water/i },
+    { id: 41, re: /পায়খানা|টয়লেট|latrine|toilet/i },
+    { id: 567, re: /বিদ্যুৎ লাইনের উৎস|source of electricity/i },
+    { id: 29, re: /বিদেশে অবস্থানরত কারো|remittance/i },
+    { id: 22, re: /শ্রমিক হিসেবে নিয়োজিত|members.? occupation/i },
+    { id: 595, re: /ডিজেল ব্যবহার|diesel/i },
+    { id: 47, re: /পরিসম্পদ|durable assets/i }
+  ];
+  const PROGRAM_FIELD_LABELS = [
+    { id: 139, re: /বিদেশে.*পুরুষ|male member in abroad/i },
+    { id: 140, re: /বিদেশে.*মহিলা|female member in abroad/i },
+    { id: 141, re: /বিদেশে.*হিজড়া|hijra member in abroad/i },
+    { id: 75, re: /পুরুষ সদস্য সংখ্যা|no\.? of male/i },
+    { id: 77, re: /নারী সদস্য সংখ্যা|no\.? of.? female/i },
+    { id: 142, re: /হিজড়া সদস্য সংখ্যা|hijra member/i },
+    { id: 96, re: /সমাজসেবা অধিদপ্তর থেকে কোন প্রশিক্ষণ|training information from dss/i },
+    { id: 138, re: /মোবাইল ব্যাংকিং|mfs account/i }
+  ];
+  function matchPmtLabel(labelTxt) {
+    const s = String(labelTxt || '');
+    for (const q of PMT_QUESTION_LABELS) if (q.re.test(s)) return q.id;
+    return null;
+  }
+  function matchProgramLabel(labelTxt) {
+    const s = String(labelTxt || '');
+    for (const f of PROGRAM_FIELD_LABELS) if (f.re.test(s)) return f.id;
+    return null;
+  }
+
+  // Education (lookup type 8) -> PMT education band. The two questions
+  // use DIFFERENT child ids for the same bands (Q14: 382/383/384/385,
+  // Q18: 409/410/411/412), so map through a band index, not raw ids.
+  const EDU_ID_TO_BAND = {
+    88: 'illit', 188: 0, 189: 0, 190: 0, 191: 0, 192: 1, 89: 1, 193: 1,
+    90: 1, 91: 1, 92: 2, 93: 2, 194: 2, 195: 2, 196: 2, 197: 2, 198: 2,
+    199: 0, 94: 0
+  };
+  const PMT_EDU_BAND = {
+    14: { illit: 385, 0: 382, 1: 383, 2: 384 },
+    18: { illit: 412, 0: 409, 1: 410, 2: 411 }
+  };
+
+  function identifyDynamicControl(c) {
+    const expr = c.expr || '';
+    const items = c.vInst && Array.isArray(c.vInst.items) ? c.vInst.items : [];
+    const first = items.length ? items[0] : null;
+    // Item keys identify the section exactly: PMT children carry
+    // parent_id (= question id) + score; program values carry
+    // additional_field_id (= field id). Lookup/geo items have neither.
+    if (first && typeof first === 'object') {
+      if (first.parent_id !== undefined && first.parent_id !== null && 'score' in first) {
+        return { kind: 'pmt', id: Number(first.parent_id) };
+      }
+      if (first.additional_field_id !== undefined && first.additional_field_id !== null) {
+        return { kind: 'program', id: Number(first.additional_field_id) };
+      }
+    }
+    if (/application_pmt/.test(expr)) {
+      const qid = matchPmtLabel(c.label);
+      if (qid) return { kind: 'pmt', id: qid };
+    }
+    if (/allowance_program_additional_field_values_id/.test(expr)) {
+      const fid = matchProgramLabel(c.label);
+      if (fid) return { kind: 'program', id: fid };
+    }
+    if (first && typeof first === 'object' && 'score' in first) {
+      const qid = matchPmtLabel(c.label);
+      if (qid) return { kind: 'pmt', id: qid };
+    }
+    return null;
+  }
+
+  async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty) {
+    const unfilled = [];
+    const pmtOverrides = (defs && defs.pmt) || {};
+    const progOverrides = (defs && defs.program_fields) || {};
+    const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
+
+    const headAge = headMember ? calculateAgeYears(headMember.dob) : null;
+    const headEduId = headTarget ? Number(headTarget.education_status || 0) : 0;
+    let spouseEduId = 0;
+    targetMemberList.forEach((m, idx) => {
+      if ((m.relation === 'Husband' || m.relation === 'Wife') && memberRows[idx]) {
+        spouseEduId = Number(memberRows[idx].education_status_id || 0);
+      }
+    });
+
+    const derivedPmt = new Map();
+    derivedPmt.set(576, Number(counts.isEthnic) === 1 ? 577 : 578);
+    derivedPmt.set(530, counts.areaTypeId === 2 ? 532 : (counts.areaTypeId === 3 ? 531 : 534));
+    derivedPmt.set(1, { number: counts.totalMembers });
+    derivedPmt.set(7, { number: counts.childrenUnder18 });
+    if (headAge !== null) derivedPmt.set(12, headAge < 41 ? 439 : (headAge < 60 ? 440 : 441));
+    const headBand = EDU_ID_TO_BAND[headEduId];
+    if (headBand !== undefined) derivedPmt.set(14, PMT_EDU_BAND[14][headBand]);
+    if (!hasSpouseInHousehold) derivedPmt.set(18, 604);
+    else {
+      const spouseBand = EDU_ID_TO_BAND[spouseEduId];
+      if (spouseBand !== undefined) derivedPmt.set(18, PMT_EDU_BAND[18][spouseBand]);
+    }
+    derivedPmt.set(29, 276); // nobody abroad (abroad counts default 0)
+
+    const derivedProg = new Map();
+    derivedProg.set(75, { number: counts.maleCount });
+    derivedProg.set(77, { number: counts.femaleCount });
+    derivedProg.set(142, { number: counts.otherGenderCount || 0 });
+    derivedProg.set(96, 651); // DSS training: No
+    derivedProg.set(139, { number: 0 });
+    derivedProg.set(140, { number: 0 });
+    derivedProg.set(141, { number: 0 });
+    // 138 (MFS provider): override-only, never guessed.
+
+    const controls = collectOptionControls();
+    await waitForOptionItems(controls);
+
+    // PMT model array owner (for direct writes alongside select drives).
+    let pmtArray = null, pmtOwnerVm = null;
+    if (headTarget && Array.isArray(headTarget.application_pmt)) {
+      pmtOwnerVm = vmHead; pmtArray = headTarget.application_pmt;
+    } else {
+      (allVms || []).some(v => {
+        if (v && v.data && Array.isArray(v.data.application_pmt)) { pmtOwnerVm = v; pmtArray = v.data.application_pmt; return true; }
+        if (v && Array.isArray(v.applicationPmt)) { pmtOwnerVm = v; pmtArray = v.applicationPmt; return true; }
+        return false;
+      });
+    }
+    const findPmtEntry = (qid) => Array.isArray(pmtArray)
+      ? pmtArray.find(e => e && Number(e.id) === Number(qid)) : null;
+
+    // Numeric options: itemToStr concatenates every label field plus
+    // the item id ("২ 2 ... 443"), so match the FIRST standalone
+    // number token (the Bengali/English label), never the whole string.
+    const matchNumberItem = (vInst, num) => {
+      const want = String(num);
+      return (vInst.items || []).find(it => {
+        const m = toEnDigits(itemToStr(it)).match(/(^|\s)(\d+)(\s|$)/);
+        return m !== null && m[2] === want;
+      }) || null;
+    };
+    const matchIdItem = (vInst, id) =>
+      (vInst.items || []).find(it => Number(optionItemId(vInst, it)) === Number(id)) || null;
+
+    // Resolve one control's answer: override > derivation. Returns
+    // { ids: [...] } or null.
+    const resolveChoice = (vInst, key, derived, overrides) => {
+      const ov = overrides[key] ?? overrides[String(key)];
+      if (ov === null || ov === false) return null;
+      if (ov !== undefined) {
+        const list = Array.isArray(ov) ? ov : [ov];
+        const ids = [];
+        for (const v of list) {
+          const numeric = typeof v === 'number' || /^\d+$/.test(String(v).trim());
+          let item = numeric ? matchIdItem(vInst, Number(v)) : null;
+          if (!item && typeof v === 'string' && v.trim()) {
+            const esc = v.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            item = matchOptionItem(vInst, [new RegExp(esc, 'i')]);
+          }
+          if (item) ids.push(optionItemId(vInst, item));
+          else if (numeric) ids.push(Number(v)); // trust a numeric override id
+        }
+        return ids.length ? { ids } : null;
+      }
+      if (derived === undefined) return null;
+      if (derived && typeof derived === 'object' && derived.number !== undefined) {
+        const item = matchNumberItem(vInst, derived.number);
+        return item ? { ids: [optionItemId(vInst, item)] } : null;
+      }
+      const item = matchIdItem(vInst, derived);
+      return item ? { ids: [optionItemId(vInst, item)] } : null;
+    };
+
+    for (const c of controls) {
+      if (!c.isSelect) continue;
+      const ident = identifyDynamicControl(c);
+      if (!ident) continue;
+      if (c.vInst.disabled || c.vInst.readonly) continue;
+      const isMulti = !!c.vInst.multiple;
+      const shortLabel = (c.label || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+      if (ident.kind === 'pmt') {
+        const entry = findPmtEntry(ident.id);
+        const currentVal = entry ? entry.sub_variables : (c.vInst.internalValue ?? c.vInst.lazyValue);
+        if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
+        const choice = resolveChoice(c.vInst, ident.id, derivedPmt.get(ident.id), pmtOverrides);
+        if (!choice) { unfilled.push(`PMT Q${ident.id} (${shortLabel})`); continue; }
+        const ids = isMulti ? choice.ids : [choice.ids[0]];
+        if (entry) setReactive(pmtOwnerVm, entry, 'sub_variables', isMulti ? ids : ids[0]);
+        if (isMulti) {
+          try {
+            if ('internalValue' in c.vInst) c.vInst.internalValue = ids;
+            if ('lazyValue' in c.vInst) c.vInst.lazyValue = ids;
+            c.vInst.$emit('input', ids);
+            c.vInst.$emit('change', ids);
+          } catch (_) {}
+        } else {
+          selectVuetifyItem(c.vInst, it => Number(optionItemId(c.vInst, it)) === Number(ids[0]));
+        }
+        triggerVeeValidate(c.wrap);
+      } else {
+        const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
+        if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
+        const choice = resolveChoice(c.vInst, ident.id, derivedProg.get(ident.id), progOverrides);
+        if (!choice) { unfilled.push(`Program field ${ident.id} (${shortLabel})`); continue; }
+        selectVuetifyItem(c.vInst, it => Number(optionItemId(c.vInst, it)) === Number(choice.ids[0]));
+        triggerVeeValidate(c.wrap);
+      }
+    }
+
+    // Multi-answer PMT questions render as a checkbox grid. Only
+    // overrides can answer them (no derivation exists for floor/assets).
+    document.querySelectorAll('.fc-pmt-multi-grid').forEach(grid => {
+      // The question label is a sibling <label> of some ancestor wrapper.
+      let node = grid, labelTxt = '';
+      while (node && node !== document.body && !labelTxt) {
+        const parent = node.parentElement;
+        if (!parent) break;
+        for (const child of parent.children) {
+          if (child !== node && child.tagName === 'LABEL') { labelTxt = child.textContent || ''; break; }
+        }
+        node = parent;
+      }
+      const qid = matchPmtLabel(labelTxt);
+      if (!qid) return;
+      const ov = pmtOverrides[qid] ?? pmtOverrides[String(qid)];
+      if (ov === undefined || ov === null || ov === false) return;
+      const entry = findPmtEntry(qid);
+      if (onlyEmpty && entry && !isEmptyModelVal(entry.sub_variables)) return;
+      const wantList = Array.isArray(ov) ? ov : [ov];
+      const wantIds = new Set(), wantLabels = [];
+      wantList.forEach(v => {
+        if (typeof v === 'number' || /^\d+$/.test(String(v).trim())) wantIds.add(Number(v));
+        else wantLabels.push(String(v).toLowerCase().trim());
+      });
+      // Compare stripped labels for equality: substring matching is
+      // wrong here ("মাটি" is inside "পোড়ামাটি" in the ঢালাই option).
+      const stripLabel = (s) => String(s || '').replace(/\(.*?\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+      const chosen = [];
+      grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox').forEach(box => {
+        const bvm = box.__vue__;
+        const cid = bvm ? Number(bvm.value ?? (bvm.$attrs && bvm.$attrs.value)) : NaN;
+        const txt = stripLabel(box.textContent);
+        if (!wantIds.has(cid) && !wantLabels.some(w => w && (txt === stripLabel(w) || txt.startsWith(stripLabel(w) + ' ')))) return;
+        if (!Number.isNaN(cid)) chosen.push(cid);
+        const inp = box.querySelector('input[type="checkbox"]');
+        const checked = inp ? inp.checked : !!(bvm && bvm.isActive);
+        if (!checked && inp && !inp.disabled) inp.click();
+      });
+      if (chosen.length && entry) setReactive(pmtOwnerVm, entry, 'sub_variables', chosen);
+    });
+
+    return unfilled;
+  }
+
   function parseMemberRow(m) {
     const relId = Number(m.relationship_id || m.relation_id || 0);
     const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
@@ -1516,6 +1836,17 @@
         const row0 = vmMembers.familyMembers[0];
         const r0Id = row0 ? String(row0.verification_number || row0.nid || row0.brn_id || '').trim() : '';
         const hasLockedFirstRowDom = Boolean(document.querySelector('.bg-gray-cursor-not-allowed'));
+        // Fresh form: row 0 exists but is completely blank (no relation,
+        // no NID/name) — the site expects the head in row 0, so the head
+        // must be inserted there. Without this, the head was skipped as a
+        // member and the first family member landed in row 0 instead,
+        // leaving a blank "সদস্য - 2" behind (seen on the real page).
+        // NOTE: this only affects the member-list construction below.
+        // row0IsHead keeps its original meaning for the DOB-calendar
+        // offset and gender-select indexing, which depend on how the
+        // site renders a locked head row vs a fresh one.
+        const row0IsBlank = !row0 ||
+          (!row0.relationship_id && !row0.relation_id && !isRowPopulated(row0));
         row0IsHead = Boolean(
           row0 && (
             Number(row0.relationship_id) === 260 ||
@@ -1526,8 +1857,9 @@
             hasLockedFirstRowDom
           )
         );
+        const headGoesFirst = row0IsHead || row0IsBlank;
 
-        if (row0IsHead && payload.head) {
+        if (headGoesFirst && payload.head) {
           targetMemberList.push({
             ...payload.head,
             relation: 'Head/Self',
@@ -1640,6 +1972,16 @@
         await new Promise(r => setTimeout(r, 900));
         const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true);
         optionUnfilled = [...new Set([...optionUnfilled, ...lateUnfilled])];
+        // PMT + program additional fields (counts, location, age/education
+        // bands). Runs after the option sync so head/spouse education ids
+        // are already in the models for the PMT band mapping. A third
+        // late pass covers PMT/program data that loads after the form.
+        const dynUnfilled = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false);
+        await new Promise(r => setTimeout(r, 600));
+        const dynLate = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        await new Promise(r => setTimeout(r, 2000));
+        const dynLate2 = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        optionUnfilled = [...new Set([...optionUnfilled, ...dynUnfilled, ...dynLate, ...dynLate2])];
       } catch (e) {
         optionUnfilled.push('option sync error: ' + e.message);
       }
