@@ -49,6 +49,24 @@
     #fc-trigger-btn:hover { transform: scale(1.05); }
     #fc-trigger-btn.active { transform: scale(0.9); }
 
+    #fc-credit {
+      position: fixed; bottom: 20px; left: 20px; pointer-events: auto;
+      display: flex; align-items: center; gap: 7px; padding: 7px 13px;
+      background: rgba(15, 23, 42, 0.88); color: #e2e8f0;
+      border: 1px solid #334155; border-radius: 999px;
+      font-size: 12px; font-weight: 500; text-decoration: none;
+      box-shadow: 0 8px 20px -5px rgba(0,0,0,0.3);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    #fc-credit:hover { transform: scale(1.04); background: #0f172a; }
+    #fc-credit b { color: #ffffff; font-weight: 700; }
+    #fc-credit .fc-fb-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #1877f2; color: #ffffff;
+      font-size: 11px; font-weight: 800; line-height: 1; font-style: normal;
+    }
+
     #fc-drawer-iframe {
       position: fixed; background: #ffffff; border: none;
       pointer-events: auto;
@@ -89,7 +107,17 @@
   iframe.src = panelUrl;
   iframe.setAttribute('allow', 'camera; clipboard-read; clipboard-write');
 
-  root.append(trigger, iframe);
+  // Floating developer credit — clicking the name opens the
+  // developer's Facebook profile in a new tab.
+  const credit = document.createElement('a');
+  credit.id = 'fc-credit';
+  credit.href = 'https://www.facebook.com/ARAtik169';
+  credit.target = '_blank';
+  credit.rel = 'noopener noreferrer';
+  credit.title = 'Developer Atik Hasan on Facebook';
+  credit.innerHTML = '<span class="fc-fb-badge">f</span><span>Developed with ❤️ by&nbsp;<b>Atik Hasan</b></span>';
+
+  root.append(trigger, credit, iframe);
   (document.body || document.documentElement).appendChild(root);
 
   const STORAGE_KEY = 'fc_pro_api_key';
