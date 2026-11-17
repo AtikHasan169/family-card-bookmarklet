@@ -5,59 +5,96 @@
   if (window.__FC_INJECTOR_LOADED__) return;
   window.__FC_INJECTOR_LOADED__ = true;
 
+  // Lookup ids below are the REAL ids from the site's own API
+  // (GET getApplicationPageData, captured 2026-11-12) and confirmed by a
+  // saved draft. Relations = lookup type 41, genders = type 2,
+  // religions = type 9. Do NOT renumber these from guesses: the old
+  // 1/2/3 gender ids and 1..5 religion ids were wrong (the site stores
+  // 23/24/95 and 96..100), and several relation ids (Brother, Sister,
+  // in-laws, Head/Self) pointed at other lookup types entirely.
   const RELATION_ID_MAP = {
     'Father': 157, 'Mother': 158, 'Husband': 159, 'Son': 160, 'Daughter': 161,
-    'Brother': 162, 'Sister': 163, 'Father-in-law': 164, 'Mother-in-law': 165,
-    'Son-in-law': 181, 'Daughter-in-law': 182, 'Grandson': 183, 'Granddaughter': 184,
-    'Head/Self': 185, 'Wife': 186, 'Other Relative': 263
+    'Grandfather': 173, 'Grandmother': 174, 'Brother': 175, 'Sister': 176,
+    'Father-in-law': 177, 'Mother-in-law': 178, 'Brother-in-law': 179, 'Sister-in-law': 180,
+    'Son-in-law': 187, 'Daughter-in-law': 182, 'Grandson': 183, 'Granddaughter': 184,
+    'Head/Self': 260, 'Wife': 186, 'Other Relative': 263,
+    'Paid Domestic Worker': 262, 'Non-Relative': 264, 'Brother/Sister-in-law': 265
   };
 
   const ID_TO_RELATION_MAP = {
     157: 'Father', 158: 'Mother', 159: 'Husband', 160: 'Son', 161: 'Daughter',
-    162: 'Brother', 163: 'Sister', 164: 'Father-in-law', 165: 'Mother-in-law',
-    181: 'Son-in-law', 182: 'Daughter-in-law', 183: 'Grandson', 184: 'Granddaughter',
-    185: 'Head/Self', 186: 'Wife', 263: 'Other Relative'
+    173: 'Grandfather', 174: 'Grandmother', 175: 'Brother', 176: 'Sister',
+    177: 'Father-in-law', 178: 'Mother-in-law', 179: 'Brother-in-law', 180: 'Sister-in-law',
+    187: 'Son-in-law', 182: 'Daughter-in-law', 183: 'Grandson', 184: 'Granddaughter',
+    260: 'Head/Self', 186: 'Wife', 263: 'Other Relative',
+    262: 'Paid Domestic Worker', 264: 'Non-Relative', 265: 'Brother/Sister-in-law'
   };
 
+  // Gender ids are the site's lookup type 2: 23 Male, 24 Female, 95 Transgender.
+  const GENDER_MALE = 23, GENDER_FEMALE = 24, GENDER_OTHER = 95;
   const RELATION_GENDER_MAP = {
-    'Father': 1, 'Mother': 2, 'Husband': 1, 'Son': 1, 'Daughter': 2,
-    'Brother': 1, 'Sister': 2, 'Father-in-law': 1, 'Mother-in-law': 2,
-    'Son-in-law': 1, 'Daughter-in-law': 2, 'Grandson': 1, 'Granddaughter': 2,
-    'Head/Self': 2, 'Wife': 2
+    'Father': 23, 'Mother': 24, 'Husband': 23, 'Son': 23, 'Daughter': 24,
+    'Grandfather': 23, 'Grandmother': 24, 'Brother': 23, 'Sister': 24,
+    'Father-in-law': 23, 'Mother-in-law': 24, 'Brother-in-law': 23, 'Sister-in-law': 24,
+    'Son-in-law': 23, 'Daughter-in-law': 24, 'Grandson': 23, 'Granddaughter': 24,
+    'Head/Self': 24, 'Wife': 24
   };
 
-  const RELIGION_ID_MAP = { Islam: 1, Hinduism: 2, Buddhism: 3, Christianity: 4, Other: 5 };
+  // Religion ids are the site's lookup type 9.
+  const RELIGION_ID_MAP = { Islam: 96, Hinduism: 97, Buddhism: 98, Christianity: 99, Other: 100 };
+
+  // The sidepanel's area-type numbering is its own convention
+  // (1 = পল্লী/ইউনিয়ন, 2 = পৌরসভা, 3 = সিটি কর্পোরেশন) while the site's
+  // lookup type 1 is 1 = District Pouroshava, 2 = Upazila, 3 = City Corp.
+  const AREA_TYPE_TO_SITE_ID = { 1: 2, 2: 1, 3: 3 };
+  const siteLocationTypeId = (areaTypeId) => AREA_TYPE_TO_SITE_ID[Number(areaTypeId)] ?? Number(areaTypeId);
+
+  // Accept legacy 1/2/3 gender and 1..5 religion ids (old drafts / payloads)
+  // and normalise them to the real lookup ids.
+  function normalizeGenderId(v) {
+    const n = Number(v);
+    if (n === 1 || n === 23) return GENDER_MALE;
+    if (n === 2 || n === 24) return GENDER_FEMALE;
+    if (n === 3 || n === 95) return GENDER_OTHER;
+    return n || GENDER_MALE;
+  }
+  function normalizeReligionId(v) {
+    const n = Number(v);
+    if (n >= 1 && n <= 5) return 95 + n; // 1..5 -> 96..100
+    return n || 96;
+  }
+  const isFemaleGenderId = (gid) => Number(gid) === GENDER_FEMALE || Number(gid) === 2;
 
   const toBnDigits = (str) => String(str ?? '').replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[d]);
   const toEnDigits = (str) => String(str ?? '').replace(/[০-৯]/g, d => '০১২৩৪৫৬৭৮৯'.indexOf(d));
 
   function resolveGenderId(memberObj) {
-    if (!memberObj) return 1;
+    if (!memberObj) return GENDER_MALE;
     const combined = `${memberObj.name_en || ''} ${memberObj.name_bn || ''}`;
     if (/\b(?:mst|mosammat|mosa|mosha|begum|khatun|akter|akhter|bibi|parvin|pervin|sultana|rani|bala|devi|kumari)\b|মোছা|মোসা|বেগম|খাতুন|আক্তার|বিবি|পারভীন|সুলতানা|রানী|রাণী|বালা|দেবী|কুমারী/i.test(combined)) {
-      return 2;
+      return GENDER_FEMALE;
     }
-    if (memberObj.gender_id) return Number(memberObj.gender_id);
+    if (memberObj.gender_id) return normalizeGenderId(memberObj.gender_id);
     const g = String(memberObj.gender || '').toLowerCase();
-    if (g === 'female' || g === '2' || g === 'মহিলা') return 2;
-    if (g === 'male' || g === '1' || g === 'পুরুষ') return 1;
-    if (g === 'other' || g === '3') return 3;
+    if (g === 'female' || g === '2' || g === '24' || g === 'মহিলা') return GENDER_FEMALE;
+    if (g === 'male' || g === '1' || g === '23' || g === 'পুরুষ') return GENDER_MALE;
+    if (g === 'other' || g === '3' || g === '95') return GENDER_OTHER;
     if (memberObj.relation && RELATION_GENDER_MAP[memberObj.relation]) {
       return RELATION_GENDER_MAP[memberObj.relation];
     }
-    return 1;
+    return GENDER_MALE;
   }
 
-  function resolveReligionId(memberObj, fallbackReligionId = 1) {
-    if (!memberObj) return fallbackReligionId;
-    if (memberObj.religion_id) return Number(memberObj.religion_id);
+  function resolveReligionId(memberObj, fallbackReligionId = 96) {
+    if (!memberObj) return normalizeReligionId(fallbackReligionId);
+    if (memberObj.religion_id) return normalizeReligionId(memberObj.religion_id);
     const r = String(memberObj.religion || '').trim();
     if (RELIGION_ID_MAP[r]) return RELIGION_ID_MAP[r];
-    if (/ইসলাম|islam|muslim/i.test(r)) return 1;
-    if (/হিন্দু|hindu|সনাতন/i.test(r)) return 2;
-    if (/বৌদ্ধ|buddh/i.test(r)) return 3;
-    if (/খ্রিস্টান|christ/i.test(r)) return 4;
-    return fallbackReligionId;
+    if (/ইসলাম|islam|muslim/i.test(r)) return 96;
+    if (/হিন্দু|hindu|সনাতন/i.test(r)) return 97;
+    if (/বৌদ্ধ|buddh/i.test(r)) return 98;
+    if (/খ্রিস্টান|christ/i.test(r)) return 99;
+    return normalizeReligionId(fallbackReligionId);
   }
 
   function detectFamilyReligionId(payload) {
@@ -66,9 +103,9 @@
     if (Array.isArray(payload?.family_members)) people.push(...payload.family_members);
     const allText = people.map(p => `${p?.name_bn || ''} ${p?.name_en || ''} ${p?.father_name_bn || ''} ${p?.mother_name_bn || ''}`).join(' ');
     if (/\b(?:chandra|kumar|rani|bala|devi|chakraborty|bhattacharya|chatterjee|mukherjee|banerjee|barman|ghosh|bose)\b|চন্দ্র|কুমার|রানী|রাণী|বালা|দেবী|চক্রবর্তী|ভট্টাচার্য|চ্যাটার্জী|মুখার্জী|ব্যানার্জী|বর্মন|ঘোষ|বসু/i.test(allText)) {
-      return 2; // Hinduism
+      return 97; // Hinduism
     }
-    return 1; // Default Islam
+    return 96; // Default Islam
   }
 
   function setReactive(vmTarget, targetObj, key, val) {
@@ -418,16 +455,22 @@
     const wardVal = toEnDigits(String(defs?.ward_no || '').trim());
     const postVal = toEnDigits(String(defs?.post_code || '').replace(/\D+/g, '').trim());
 
-    const religionPattern = religionId === 2 ? /হিন্দু|সনাতন|hindu/i
-      : (religionId === 3 ? /বৌদ্ধ|buddh/i
-      : (religionId === 4 ? /খ্রিস্টান|খ্রীষ্টান|christ/i : /ইসলাম|islam|muslim/i));
+    const religionPattern = (() => {
+      const rid = normalizeReligionId(religionId);
+      if (rid === 97) return /হিন্দু|সনাতন|hindu/i;
+      if (rid === 98) return /বৌদ্ধ|buddh/i;
+      if (rid === 99) return /খ্রিস্টান|খ্রীষ্টান|christ/i;
+      if (rid === 100) return /অন্যান্য|other/i;
+      return /ইসলাম|islam|muslim/i;
+    })();
+    const siteAreaTypeId = siteLocationTypeId(areaTypeId);
 
     if (d) {
-      setReactive(vmHead, d, 'location_type', Number(areaTypeId));
+      setReactive(vmHead, d, 'location_type', siteAreaTypeId);
       setReactive(vmHead, d, 'house_size', Number(totalMembers));
       setReactive(vmHead, d, 'children_count', Number(childrenUnder18));
-      setReactive(vmHead, d, 'religion', Number(religionId));
-      setReactive(vmHead, d, 'religion_id', Number(religionId));
+      setReactive(vmHead, d, 'religion', normalizeReligionId(religionId));
+      setReactive(vmHead, d, 'religion_id', normalizeReligionId(religionId));
       setReactive(vmHead, d, 'other_gender_count', Number(otherGenderCount));
       setReactive(vmHead, d, 'bidesh_count', Number(bideshCount));
 
@@ -437,7 +480,7 @@
 
       ['onChangeLocationType', 'locationTypeChange', 'handleLocationType', 'getUnions', 'getPourashavas'].forEach(fnName => {
         if (vmHead && typeof vmHead[fnName] === 'function') {
-          try { vmHead[fnName](Number(areaTypeId)); } catch (_) {}
+          try { vmHead[fnName](siteAreaTypeId); } catch (_) {}
         }
       });
 
@@ -596,14 +639,15 @@
         triggerVeeValidate(wrap);
       }
 
-      // C. Location Type
+      // C. Location Type — match by the SITE's lookup id (sidepanel 1=rural
+      // maps to site id 2=Upazila), with label text as fallback.
       if (/খানাটি\s*বা\s*বাসস্থানটি|বাসস্থানটি\s*কোথায়|বাসস্থানটি\s*কোথায়|খানাটি\s*কোথায়|খানাটি\s*কোথায়|কোথায়\s*অবস্থিত|কোথায়\s*অবস্থিত/.test(labelTxt) && !/এলাকার\s*ধরন/.test(labelTxt)) {
-        const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
+        const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /উপজেলা|upazila|পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
         selectVuetifyItem(vInst, it => {
           if (typeof it === 'object' && it !== null) {
-            return Number(it.id ?? it.value) === Number(areaTypeId) || areaPattern.test(itemToStr(it));
+            return Number(it.id ?? it.value) === siteAreaTypeId || areaPattern.test(itemToStr(it));
           }
-          return Number(it) === Number(areaTypeId) || areaPattern.test(String(it));
+          return Number(it) === siteAreaTypeId || areaPattern.test(String(it));
         });
         triggerVeeValidate(wrap);
       }
@@ -735,16 +779,20 @@
     const matchGenderItem = (gid) => (it) => {
       const s = itemToStr(it).toLowerCase();
       if (typeof it === 'object' && it !== null && Number(it.id ?? it.value) === Number(gid)) return true;
-      if (Number(gid) === 2) return /মহিলা|নারী|female/i.test(s);
-      if (Number(gid) === 1) return /পুরুষ|male/i.test(s) && !/female/i.test(s);
-      return /অন্যান্য|হিজড়া|other|third/i.test(s);
+      if (isFemaleGenderId(gid)) return /মহিলা|নারী|female/i.test(s);
+      if (Number(gid) === GENDER_MALE || Number(gid) === 1) return /পুরুষ|male/i.test(s) && !/female/i.test(s);
+      return /অন্যান্য|হিজড়া|হিজড়া|other|third|transgender/i.test(s);
     };
 
     const matchReligionItem = (rid) => (it) => {
       const s = itemToStr(it).toLowerCase();
-      if (typeof it === 'object' && it !== null && Number(it.id ?? it.value) === Number(rid)) return true;
-      if (Number(rid) === 1) return /ইসলাম|islam|muslim/i.test(s);
-      if (Number(rid) === 2) return /হিন্দু|hindu|সনাতন/i.test(s);
+      const nrid = normalizeReligionId(rid);
+      if (typeof it === 'object' && it !== null && Number(it.id ?? it.value) === nrid) return true;
+      if (nrid === 96) return /ইসলাম|islam|muslim/i.test(s);
+      if (nrid === 97) return /হিন্দু|hindu|সনাতন/i.test(s);
+      if (nrid === 98) return /বৌদ্ধ|buddh/i.test(s);
+      if (nrid === 99) return /খ্রিস্টান|খ্রীষ্টান|christ/i.test(s);
+      if (nrid === 100) return /অন্যান্য|other/i.test(s);
       return false;
     };
 
@@ -774,9 +822,9 @@
         const gid = resolveGenderId(m);
         let relName = m.relation;
         if (!relName || relName === 'Auto' || !RELATION_ID_MAP[relName]) {
-          relName = gid === 2 ? 'Daughter' : 'Son';
+          relName = isFemaleGenderId(gid) ? 'Daughter' : 'Son';
         }
-        const relId = Number(m.relationship_id || RELATION_ID_MAP[relName] || (gid === 2 ? 161 : 160));
+        const relId = Number(m.relationship_id || RELATION_ID_MAP[relName] || (isFemaleGenderId(gid) ? 161 : 160));
         selectVuetifyItem(targetEntry.vInst, it => {
           if (typeof it === 'object' && it !== null && Number(it.id ?? it.value) === relId) return true;
           return itemToStr(it).toLowerCase().includes(relName.toLowerCase());
@@ -805,41 +853,90 @@
    * marital_status (+ spouse name), plus single-item auto-pick for the
    * address cascade selects (division/district/thana/union/ward/...).
    *
-   * How it works: option lists come from the site's API at runtime, so we
-   * NEVER hard-code option ids here. We read the live `items` array of a
-   * rendered v-select, match its label text (value_bn/value_en) against the
-   * patterns below, resolve the real id, and write it into the Vue row
-   * model. Rendered selects update themselves through reactivity.
+   * How it works: option lists come from the site's API at runtime. The
+   * ids in LOOKUP_IDS below are the REAL ids from that API
+   * (GET getApplicationPageData, captured 2026-11-12, cross-checked
+   * against a saved draft), so matching is id-first: we verify the id
+   * exists in the live `items` array, then write it into the Vue row
+   * model. If the API ever renumbers an option, the label-text patterns
+   * (value_bn/value_en) are the fallback. Rendered selects update
+   * themselves through reactivity.
    *
    * DEFAULTS ARE OVERRIDABLE via payload.form_defaults:
    *   form_defaults.member_options = {
-   *     literacy_id: 3, education_status_id: 5, livelihood_profession_id: 9,
-   *     health_condition_id: 2, maritial_status_id: 1, disability_type_id: 4,
+   *     literacy_id: 241, education_status_id: 190, livelihood_profession_id: 214,
+   *     health_condition_id: 203, maritial_status_id: 101, disability_type_id: 247,
    *     is_currently_student: 0, is_ssnp_covered: 0,
-   *     is_dss_training_or_financial_benefit: 0, facilities_ids: [7]
+   *     is_dss_training_or_financial_benefit: 0, facilities_ids: [162]
    *   }
-   *   form_defaults.head_options = { education_status: 5, profession: 9, marital_status: 1 }
-   * A numeric id wins over the patterns. A string is treated as an extra
-   * text pattern tried FIRST. Set a key to null/false to leave it unfilled.
+   *   form_defaults.head_options = { education_status: 190, profession: 150, marital_status: 101 }
+   * A numeric id wins over the defaults. A string is treated as an extra
+   * text pattern tried FIRST (disability/facility names also match a
+   * keyword table). Set a key to null/false to leave it unfilled.
    * ===================================================================== */
 
-  // Ordered label patterns (Bengali + English). First matching item wins.
+  // Real lookup ids from getApplicationPageData (lookup types in comments).
+  const LOOKUP_IDS = {
+    literacy: { yes: 241, readOnly: 242, no: 243 }, // type 45
+    // type 8 — education status (members + head)
+    education: { none: 88, prePrimary: 188, class1: 189, class1to4: 190, class5: 191, class6to7: 192, jsc: 89, class9: 193, ssc: 90, hsc: 91, graduate: 92, pg: 93 },
+    // type 44 — member livelihood/profession
+    livelihood: { agriculture: 210, business: 211, privateJob: 212, govtJob: 213, dayLabourer: 214, garment: 215, rickshaw: 216, transport: 217, hotel: 218, domestic: 219, student: 220, apprentice: 221, unemployed: 222, retired: 223, elderlySick: 224, homemaker: 225, childNA: 275, others: 226 },
+    // type 34 — head profession (DIFFERENT list from livelihood!)
+    profession: { labourer: 109, housewife: 181, dayLabourer: 150, farmer: 151, business: 149, service: 107, student: 106, unemployed: 108, others: 110 },
+    marital: { married: 101, unmarried: 102, widow: 103, separated: 104, divorced: 244, maritalSeparated: 245, widower: 276 }, // type 32
+    health: { fit: 203, completelyDisabled: 204, partiallyAble: 205, disabled: 206 }, // type 43
+    // type 11 — disability types
+    disabilityType: { physical: 247, visual: 248, hearing: 249, speech: 250, intellectual: 251, mental: 252, autism: 253, deafBlind: 254, cerebral: 255, multi: 256, down: 257, others: 258 },
+    // type 42 — government facilities/cards
+    facility: { welfareCard: 162, vgfVgd: 163, ration: 164, fertilizer: 165, tcb: 166, freedomFighter: 167, scholarship: 168, migrant: 169, pension: 170, agriculture: 171, fishermen: 172, noCard: 185 },
+    accountOwner: { myself: 142, familyMember: 143, closeRelative: 144, others: 148 } // type 37
+  };
+
+  // Keyword -> id for string overrides on disability_type_id / facilities_ids.
+  const DISABILITY_TYPE_KEYWORDS = [
+    [/শারীরিক|physical/i, 247], [/দৃষ্টি|visual|blind|eye/i, 248], [/শ্রবণ|hearing|deaf/i, 249],
+    [/বাক|speech|mute/i, 250], [/বুদ্ধি|intellectual/i, 251], [/মানসিক|mental/i, 252],
+    [/অটিজম|autism/i, 253], [/শ্রবণ-দৃষ্টি|deaf.?blind/i, 254], [/মস্তিষ্ক|cerebral/i, 255],
+    [/বহুমাত্রিক|multiple|multi/i, 256], [/ডাউন|down/i, 257], [/অন্যান্য|other/i, 258]
+  ];
+  const FACILITY_KEYWORDS = [
+    [/সমাজসেবা|ভাতা কার্ড|welfare|allowance/i, 162], [/ভিজিএফ|ভিজিডি|vgf|vgd/i, 163],
+    [/রেশন|ration/i, 164], [/সার|fertilizer/i, 165], [/টিসিবি|tcb/i, 166],
+    [/মুক্তিযোদ্ধা|freedom fighter|muktijoddha/i, 167], [/উপবৃত্তি|scholarship/i, 168],
+    [/প্রবাসী|migrant/i, 169], [/পেনশন|pension/i, 170], [/কৃষি|agriculture/i, 171],
+    [/মৎস্যজীবী|fishermen|fisher/i, 172], [/কোন কার্ড নাই|no card/i, 185]
+  ];
+  function keywordToId(str, table) {
+    const s = String(str || '');
+    for (const [re, id] of table) if (re.test(s)) return id;
+    return null;
+  }
+
+  // Label-text fallback patterns (used only when the id is not found in
+  // the live items). Kept in sync with the real API labels.
   const OPTION_PATTERNS = {
-    literacyYes: [/^হ্যাঁ/, /\byes\b/i, /পড়তে.*লিখতে.*পার/i, /can read/i],
-    literacyNo: [/^না/, /\bno\b/i, /পারে না|পড়তে.*পারে না/i, /cannot|unable to read/i],
-    educationChild: [/শিশু|শিক্ষা নেই|none|no education|প্রাক/i],
-    educationYoung: [/প্রাক|প্রাথমিক|pre.?primary|primary/i],
-    educationSchool: [/অধ্যয়নরত|studying|student/i, /মাধ্যমিক|secondary/i, /প্রাথমিক|primary/i],
-    educationAdult: [/স্বাক্ষর|signature|can sign/i, /প্রাথমিক|primary/i],
-    livelihoodChild: [/শিশু|child|infant|baby/i],
+    literacyYes: [/পড়তে ও লিখতে পারেন|পড়তে.*লিখতে.*পার/i, /able to read and write/i],
+    literacyNo: [/কোনোটিই পারেন না|পারেন? না/i, /cannot read or write/i],
+    educationNone: [/নিরক্ষর|শিক্ষা প্রতিষ্ঠানে যায়নি|illiterate/i],
+    educationPrePrimary: [/প্রাক-প্রাথমিক|প্রাক|pre.?primary|play|nursery|kg/i],
+    educationClass1to4: [/১ম–৪র্থ|১ম-৪র্থ|class 1-4/i, /১ম শ্রেণি|class 1\b/i],
+    educationClass5: [/৫ম|পিইসি|ইবতেদায়ী|class 5|psc|ebtedayi/i],
+    educationClass6to7: [/৬ষ্ঠ|৭ম|class 6-7/i],
+    educationJsc: [/অষ্টম|জেএসসি|জেডিসি|8th|jsc|jdc/i],
+    educationClass9: [/৯ম|class 9/i],
+    educationSsc: [/এসএসসি|দাখিল|ssc|dakhil|o-level/i],
+    livelihoodChild: [/প্রযোজ্য নয়|not applicable/i, /শিশু|child/i],
     livelihoodStudent: [/ছাত্র|ছাত্রী|শিক্ষার্থী|student/i],
-    livelihoodHousewife: [/গৃহিণী|গৃহকর্মী|housewife|homemaker/i, /গৃহস্থালি|household/i],
-    livelihoodMale: [/দিন.?মজুর|day.?labou?r/i, /কৃষক|কৃষি|farmer|agricultur/i, /শ্রমিক|labou?r|worker/i],
+    livelihoodHousewife: [/গৃহিণী|গৃহীনি|homemaker|house.?wife/i],
+    livelihoodMale: [/দিনমজুর|day labo/i, /কৃষিকাজ|agricultur|farm/i, /শ্রমিক|labou?r|worker/i],
+    professionHousewife: [/গৃহীনি|গৃহিণী|house.?wife/i],
+    professionMale: [/দিনমজুর|day labo/i, /কৃষিকাজ|farm/i, /শ্রমজীবী|labou?r/i],
     maritalUnmarried: [/অবিবাহিত|unmarried|single/i],
     maritalMarried: [/বিবাহিত|married/i],
     maritalWidow: [/বিধবা|বিপত্নীক|widow/i],
-    healthFit: [/সুস্থ|কর্মক্ষম|সক্ষম|স্বাভাবিক|healthy|able|fit/i],
-    healthUnfit: [/অক্ষম|কর্মে অক্ষম|unable|incapac/i, /প্রতিবন্ধী|disabled/i]
+    healthFit: [/কর্মক্ষম|সুস্থ|able-bodied|healthy|fit/i],
+    healthUnfit: [/প্রতিবন্ধী|person with disability/i, /সম্পূর্ণ অক্ষম|completely disabled/i]
   };
 
   const MARRIED_RELATIONS = ['Husband', 'Wife', 'Father', 'Mother', 'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law'];
@@ -865,10 +962,11 @@
     return valKey ? item[valKey] : (item.value ?? item.id ?? item.code ?? item);
   }
 
-  // Resolve a choice for one select field: numeric override id wins, then a
-  // string override pattern, then the default pattern list. Returns
-  // { id, item } or null when nothing matched.
-  function resolveOptionChoice(vInst, overrideVal, patterns, excludes = []) {
+  // Resolve a choice for one select field: numeric override id wins, then
+  // a string override (keyword/pattern), then the preferred real ids
+  // (verified to exist in the live items), then label-text patterns.
+  // Returns { id, item } or null when nothing matched.
+  function resolveOptionChoice(vInst, overrideVal, patterns, excludes = [], preferredIds = []) {
     if (overrideVal === null || overrideVal === false) return null;
     if (typeof overrideVal === 'number' || (typeof overrideVal === 'string' && /^\d+$/.test(overrideVal.trim()))) {
       return { id: Number(overrideVal), item: null };
@@ -877,6 +975,16 @@
       const esc = overrideVal.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const byOverride = matchOptionItem(vInst, [new RegExp(esc, 'i')], excludes);
       if (byOverride) return { id: optionItemId(vInst, byOverride), item: byOverride };
+    }
+    // Id-first: only accept an id that is actually present in the live list.
+    if (Array.isArray(preferredIds) && preferredIds.length && vInst && Array.isArray(vInst.items)) {
+      for (const wantId of preferredIds) {
+        const found = vInst.items.find(it => Number(optionItemId(vInst, it)) === Number(wantId));
+        if (found !== undefined) {
+          const s = toEnDigits(itemToStr(found));
+          if (!excludes.some(ex => ex.test(s))) return { id: optionItemId(vInst, found), item: found };
+        }
+      }
     }
     const item = matchOptionItem(vInst, patterns, excludes);
     if (!item) return null;
@@ -971,44 +1079,72 @@
     const relName = m.relation || '';
     const isChild = age !== null && age < 18;
     const isLittleChild = age !== null && age < 5;
+    const female = isFemaleGenderId(genderId);
+    const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
-    let literacy = null;
-    if (age !== null) literacy = age < 5 ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
-
-    let education = null;
+    let literacy = null, literacyIds = [];
     if (age !== null) {
-      if (age < 3) education = OPTION_PATTERNS.educationChild;
-      else if (age <= 5) education = OPTION_PATTERNS.educationYoung;
-      else if (age < 18) education = OPTION_PATTERNS.educationSchool;
-      else education = OPTION_PATTERNS.educationAdult;
+      literacy = age < 5 ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
+      literacyIds = age < 5 ? [LOOKUP_IDS.literacy.no] : [LOOKUP_IDS.literacy.yes];
     }
 
-    let livelihood = null;
-    if (isLittleChild) livelihood = OPTION_PATTERNS.livelihoodChild;
-    else if (isChild) livelihood = OPTION_PATTERNS.livelihoodStudent;
-    else if (Number(genderId) === 2) livelihood = OPTION_PATTERNS.livelihoodHousewife;
-    else livelihood = OPTION_PATTERNS.livelihoodMale;
+    // Education by age band, using the real type-8 ids. Adults default to
+    // Class 1-4 (190) — override via form_defaults if the real level is known.
+    let education = null, educationIds = [];
+    if (age !== null) {
+      if (age < 3) { education = OPTION_PATTERNS.educationNone; educationIds = [E.none]; }
+      else if (age <= 5) { education = OPTION_PATTERNS.educationPrePrimary; educationIds = [E.prePrimary, E.none]; }
+      else if (age === 6) { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1, E.class1to4]; }
+      else if (age <= 10) { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4]; }
+      else if (age === 11) { education = OPTION_PATTERNS.educationClass5; educationIds = [E.class5, E.class1to4]; }
+      else if (age <= 13) { education = OPTION_PATTERNS.educationClass6to7; educationIds = [E.class6to7, E.class5]; }
+      else if (age === 14) { education = OPTION_PATTERNS.educationJsc; educationIds = [E.jsc, E.class6to7]; }
+      else if (age === 15) { education = OPTION_PATTERNS.educationClass9; educationIds = [E.class9, E.jsc]; }
+      else if (age < 18) { education = OPTION_PATTERNS.educationSsc; educationIds = [E.ssc, E.class9]; }
+      else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
+    }
 
-    let marital = null;
+    let livelihood = null, livelihoodIds = [];
+    if (isLittleChild) { livelihood = OPTION_PATTERNS.livelihoodChild; livelihoodIds = [L.childNA, L.others]; }
+    else if (isChild) { livelihood = OPTION_PATTERNS.livelihoodStudent; livelihoodIds = [L.student]; }
+    else if (female) { livelihood = OPTION_PATTERNS.livelihoodHousewife; livelihoodIds = [L.homemaker]; }
+    else { livelihood = OPTION_PATTERNS.livelihoodMale; livelihoodIds = [L.dayLabourer, L.agriculture, L.others]; }
+
+    // Head profession uses the DIFFERENT type-34 list.
+    let profession = null, professionIds = [];
+    if (isLittleChild) { profession = OPTION_PATTERNS.livelihoodChild; professionIds = [P.others]; }
+    else if (isChild) { profession = OPTION_PATTERNS.livelihoodStudent; professionIds = [P.student]; }
+    else if (female) { profession = OPTION_PATTERNS.professionHousewife; professionIds = [P.housewife]; }
+    else { profession = OPTION_PATTERNS.professionMale; professionIds = [P.dayLabourer, P.farmer, P.labourer, P.others]; }
+
+    let marital = null, maritalIds = [];
     let maritalExcludes = [];
     if (isChild) {
       marital = OPTION_PATTERNS.maritalUnmarried;
+      maritalIds = [LOOKUP_IDS.marital.unmarried];
     } else if (relName === 'Head/Self' && !hasSpouseInHousehold) {
+      // Widow is gendered on the site: বিধবা (103) for women, বিপত্নীক (276) for men.
       marital = OPTION_PATTERNS.maritalWidow;
+      maritalIds = female ? [LOOKUP_IDS.marital.widow] : [LOOKUP_IDS.marital.widower];
     } else if (MARRIED_RELATIONS.includes(relName) || relName === 'Head/Self') {
       marital = OPTION_PATTERNS.maritalMarried;
+      maritalIds = [LOOKUP_IDS.marital.married];
       // "বিবাহিত" is a substring of "অবিবাহিত" — exclude the unmarried
       // option when we actually want Married.
       maritalExcludes = [/অবিবাহিত|unmarried/i];
     } else {
       marital = OPTION_PATTERNS.maritalUnmarried;
+      maritalIds = [LOOKUP_IDS.marital.unmarried];
     }
 
     const isDisabled = Number(m.is_disabled) === 1 || Number(m.is_member_disabled) === 1;
     const health = isDisabled ? OPTION_PATTERNS.healthUnfit : OPTION_PATTERNS.healthFit;
-    const healthExcludes = isDisabled ? [] : [/অক্ষম|অসুস্থ|unable|disabled/i];
+    const healthIds = isDisabled
+      ? [LOOKUP_IDS.health.disabled, LOOKUP_IDS.health.completelyDisabled]
+      : [LOOKUP_IDS.health.fit];
+    const healthExcludes = isDisabled ? [] : [/অক্ষম|আংশিক|অসুস্থ|unable|disabled/i];
 
-    return { literacy, education, livelihood, marital, maritalExcludes, health, healthExcludes, isDisabled };
+    return { literacy, literacyIds, education, educationIds, livelihood, livelihoodIds, profession, professionIds, marital, maritalIds, maritalExcludes, health, healthIds, healthExcludes, isDisabled };
   }
 
   // Fill every option control the old injector skipped. `memberRows` are the
@@ -1042,12 +1178,12 @@
 
     // ---- Member selects: resolve the id once per field, write into each row.
     const memberSelectFields = [
-      { key: 'literacy_id', patternsOf: (p) => p.literacy, excludesOf: () => [] },
-      { key: 'education_status_id', patternsOf: (p) => p.education, excludesOf: () => [] },
-      { key: 'livelihood_profession_id', patternsOf: (p) => p.livelihood, excludesOf: () => [] },
-      { key: 'health_condition_id', patternsOf: (p) => p.health, excludesOf: (p) => p.healthExcludes },
-      { key: 'maritial_status_id', patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes },
-      { key: 'disability_type_id', patternsOf: () => [], excludesOf: () => [] }
+      { key: 'literacy_id', patternsOf: (p) => p.literacy, excludesOf: () => [], idsOf: (p) => p.literacyIds },
+      { key: 'education_status_id', patternsOf: (p) => p.education, excludesOf: () => [], idsOf: (p) => p.educationIds },
+      { key: 'livelihood_profession_id', patternsOf: (p) => p.livelihood, excludesOf: () => [], idsOf: (p) => p.livelihoodIds },
+      { key: 'health_condition_id', patternsOf: (p) => p.health, excludesOf: (p) => p.healthExcludes, idsOf: (p) => p.healthIds },
+      { key: 'maritial_status_id', patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes, idsOf: (p) => p.maritalIds },
+      { key: 'disability_type_id', patternsOf: () => [], excludesOf: () => [], idsOf: () => [] }
     ];
 
     for (const field of memberSelectFields) {
@@ -1063,8 +1199,13 @@
         const genderId = resolveGenderId(m);
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
         const patterns = field.patternsOf(pats) || [];
-        const overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
-        const choice = resolveOptionChoice(sample.vInst, overrideVal, patterns, field.excludesOf(pats));
+        let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
+        // String disability type ("physical", "শারীরিক") -> real id.
+        if (field.key === 'disability_type_id' && typeof overrideVal === 'string' && overrideVal.trim() && !/^\d+$/.test(overrideVal.trim())) {
+          const kid = keywordToId(overrideVal, DISABILITY_TYPE_KEYWORDS);
+          if (kid) overrideVal = kid;
+        }
+        const choice = resolveOptionChoice(sample.vInst, overrideVal, patterns, field.excludesOf(pats), field.idsOf(pats));
         if (choice && choice.id !== undefined) {
           setReactive(vmMembers, row, field.key, choice.id);
         } else if (field.key !== 'disability_type_id') {
@@ -1117,6 +1258,7 @@
     }
 
     // ---- Member facilities (multi-select): only from explicit payload data.
+    // String names ("TCB", "রেশন কার্ড") map through the keyword table.
     const facControl = firstSelectFor('member', 'facilities_ids');
     if (facControl) {
       targetMemberList.forEach((m, idx) => {
@@ -1124,7 +1266,11 @@
         const ids = m.facilities_ids || memberOverrides.facilities_ids;
         if (!row || !Array.isArray(ids) || !ids.length) return;
         if (onlyEmpty && !isEmptyModelVal(row.facilities_ids)) return;
-        setReactive(vmMembers, row, 'facilities_ids', ids.map(Number));
+        const resolved = ids.map(v => {
+          if (typeof v === 'string' && !/^\d+$/.test(v.trim())) return keywordToId(v, FACILITY_KEYWORDS);
+          return Number(v);
+        }).filter(v => v !== null && !Number.isNaN(v));
+        if (resolved.length) setReactive(vmMembers, row, 'facilities_ids', resolved);
       });
     }
 
@@ -1136,9 +1282,9 @@
         { ...headMember, relation: 'Head/Self' }, headAge, headGenderId, hasSpouseInHousehold
       );
       const headFields = [
-        { keys: ['education_status'], patternsOf: (p) => p.education, excludesOf: () => [] },
-        { keys: ['profession'], patternsOf: (p) => p.livelihood, excludesOf: () => [] },
-        { keys: ['marital_status'], patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes }
+        { keys: ['education_status'], patternsOf: (p) => p.education, excludesOf: () => [], idsOf: (p) => p.educationIds },
+        { keys: ['profession'], patternsOf: (p) => p.profession, excludesOf: () => [], idsOf: (p) => p.professionIds },
+        { keys: ['marital_status'], patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes, idsOf: (p) => p.maritalIds }
       ];
       for (const field of headFields) {
         for (const scope of ['data', 'form']) {
@@ -1149,7 +1295,7 @@
               const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
               if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
               const overrideVal = headOverrides[key];
-              const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats));
+              const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats), field.idsOf(headPats));
               if (choice && choice.id !== undefined) {
                 const want = String(choice.id);
                 selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === want);
@@ -1200,17 +1346,18 @@
 
     const gVal = Number(m.gender_id || m.gender || 0);
     let genderStr = 'Male';
-    if (gVal === 2) genderStr = 'Female';
-    else if (gVal === 3) genderStr = 'Other';
-    else if (!gVal && RELATION_GENDER_MAP[relName] === 2) genderStr = 'Female';
+    const normG = gVal ? normalizeGenderId(gVal) : 0;
+    if (normG === GENDER_FEMALE) genderStr = 'Female';
+    else if (normG === GENDER_OTHER) genderStr = 'Other';
+    else if (!gVal && RELATION_GENDER_MAP[relName] === GENDER_FEMALE) genderStr = 'Female';
 
     return {
       relation: relName === 'Head/Self' ? 'Wife' : relName,
       relationship_id: finalRelId,
       gender: genderStr,
-      gender_id: gVal || (genderStr === 'Female' ? 2 : 1),
+      gender_id: normG || (genderStr === 'Female' ? GENDER_FEMALE : GENDER_MALE),
       religion: 'Islam',
-      religion_id: 1,
+      religion_id: 96,
       doc_type: isBRN ? 'BRN' : 'NID',
       nid_or_brn: idVal,
       dob: m.date_of_birth || m.dob || '',
@@ -1287,7 +1434,7 @@
       );
 
       let cleanHeadId = '';
-      let headGenderId = 2;
+      let headGenderId = GENDER_FEMALE;
       if (payload.head) {
         const h = payload.head;
         cleanHeadId = String(h.nid || '').replace(/\s+/g, '');
@@ -1339,8 +1486,8 @@
         });
       }
 
-      const calcMaleCount = allPeopleForCount.filter(p => Number(p.gender_id) === 1).length;
-      const calcFemaleCount = allPeopleForCount.filter(p => Number(p.gender_id) === 2).length;
+      const calcMaleCount = allPeopleForCount.filter(p => Number(p.gender_id) === GENDER_MALE || Number(p.gender_id) === 1).length;
+      const calcFemaleCount = allPeopleForCount.filter(p => isFemaleGenderId(p.gender_id)).length;
       const calcOtherGenderCount = 0;
       const calcBideshCount = 0;
       const calcChildrenCount = allPeopleForCount.filter(m => {
@@ -1357,7 +1504,7 @@
         otherGenderCount: 0,
         bideshCount: 0,
         childrenUnder18: defs.children_under_18 !== undefined ? Number(defs.children_under_18) : calcChildrenCount,
-        religionId: defs.religion_id !== undefined ? Number(defs.religion_id) : familyReligionId,
+        religionId: defs.religion_id !== undefined ? normalizeReligionId(defs.religion_id) : familyReligionId,
         isEthnic: defs.is_ethnic !== undefined ? Number(defs.is_ethnic) : 0,
         areaTypeId: defs.area_type_id !== undefined ? Number(defs.area_type_id) : 1
       };
@@ -1371,7 +1518,9 @@
         const hasLockedFirstRowDom = Boolean(document.querySelector('.bg-gray-cursor-not-allowed'));
         row0IsHead = Boolean(
           row0 && (
-            Number(row0.relationship_id) === 185 ||
+            Number(row0.relationship_id) === 260 ||
+            Number(row0.relation_id) === 260 ||
+            Number(row0.relationship_id) === 185 || // legacy: old injector wrote 185
             Number(row0.relation_id) === 185 ||
             (cleanHeadId && r0Id && r0Id === cleanHeadId) ||
             hasLockedFirstRowDom
@@ -1387,7 +1536,7 @@
             religion_id: familyReligionId,
             doc_type: payload.head.doc_type || 'NID',
             nid_or_brn: payload.head.nid,
-            relationship_id: 185
+            relationship_id: 260
           });
         }
         if (Array.isArray(payload.family_members)) {
@@ -1412,9 +1561,9 @@
           const memReligionId = resolveReligionId(m, familyReligionId);
           let relName = m.relation;
           if (!relName || relName === 'Auto' || !RELATION_ID_MAP[relName]) {
-            relName = genderId === 2 ? 'Daughter' : 'Son';
+            relName = isFemaleGenderId(genderId) ? 'Daughter' : 'Son';
           }
-          const relId = Number(m.relationship_id || RELATION_ID_MAP[relName] || (genderId === 2 ? 161 : 160));
+          const relId = Number(m.relationship_id || RELATION_ID_MAP[relName] || (isFemaleGenderId(genderId) ? 161 : 160));
           const memAge = calculateAgeYears(m.dob);
 
           setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
@@ -1552,18 +1701,18 @@
       const row0 = rawMembers[0] || {};
       const dId = String(d.verification_number || d.nid || '').trim();
       const r0Id = String(row0.verification_number || row0.nid || row0.brn_id || '').trim();
-      const row0IsHead = Number(row0.relationship_id) === 185 || (dId && r0Id && dId === r0Id) || (!dId && rawMembers.length > 0 && !row0.relationship_id);
+      const row0IsHead = Number(row0.relationship_id) === 260 || Number(row0.relationship_id) === 185 || (dId && r0Id && dId === r0Id) || (!dId && rawMembers.length > 0 && !row0.relationship_id);
 
       const hSource = row0IsHead ? { ...row0, ...d } : d;
       const headVerType = Number(hSource.verification_type || row0.verification_type || 1);
-      const headGenVal = Number(hSource.gender_id || hSource.gender || row0.gender_id || row0.gender || 2);
+      const headGenVal = normalizeGenderId(hSource.gender_id || hSource.gender || row0.gender_id || row0.gender || GENDER_FEMALE);
 
       const head = {
         doc_type: headVerType === 2 ? 'BRN' : 'NID',
-        gender: headGenVal === 1 ? 'Male' : 'Female',
-        gender_id: headGenVal === 1 ? 1 : 2,
+        gender: headGenVal === GENDER_MALE ? 'Male' : (headGenVal === GENDER_OTHER ? 'Other' : 'Female'),
+        gender_id: headGenVal,
         religion: 'Islam',
-        religion_id: Number(hSource.religion_id || hSource.religion || 1),
+        religion_id: normalizeReligionId(hSource.religion_id || hSource.religion || 96),
         nid: String(d.verification_number || d.nid || (row0IsHead ? r0Id : '') || '').trim(),
         dob: d.date_of_birth || d.dob || (row0IsHead ? (row0.date_of_birth || row0.dob) : '') || '',
         name_bn: d.name_bn || (row0IsHead ? row0.name_bn : '') || '',
