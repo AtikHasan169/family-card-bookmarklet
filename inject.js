@@ -1683,6 +1683,9 @@
       if (spouseBand !== undefined) derivedPmt.set(18, PMT_EDU_BAND[18][spouseBand]);
     }
     derivedPmt.set(29, 276); // nobody abroad (abroad counts default 0)
+    derivedPmt.set(571, 572); // land/dwelling ownership: নিজস্ব (Owner) — user default; override via form_defaults.pmt
+    derivedPmt.set(47, [559, 563, 435, 591]); // durable assets everyone has: fan, bed, mobile, tubewell — user default; override via form_defaults.pmt
+    derivedPmt.set(548, 550); // cooking fuel: কাঠ/খড়ি/লাকড়ি (wood) — user default; override via form_defaults.pmt
 
     const derivedProg = new Map();
     derivedProg.set(75, { number: counts.maleCount });
@@ -1735,6 +1738,16 @@
         return ids.length ? { ids } : null;
       }
       if (derived === undefined) return null;
+      if (Array.isArray(derived)) {
+        // Multi-answer derivation (e.g. Q47 assets): resolve each id.
+        const ids = [];
+        for (const v of derived) {
+          const item = matchIdItem(vInst, Number(v));
+          if (item) ids.push(optionItemId(vInst, item));
+          else if (!Number.isNaN(Number(v))) ids.push(Number(v));
+        }
+        return ids.length ? { ids } : null;
+      }
       if (derived && typeof derived === 'object' && derived.number !== undefined) {
         const item = matchNumberItem(vInst, derived.number);
         return item ? { ids: [optionItemId(vInst, item)] } : null;
@@ -1817,8 +1830,8 @@
       }
     }
 
-    // Multi-answer PMT questions render as a checkbox grid. Only
-    // overrides can answer them (no derivation exists for floor/assets).
+    // Multi-answer PMT questions render as a checkbox grid. Answers
+    // come from overrides, falling back to derivations (Q47 assets).
     document.querySelectorAll('.fc-pmt-multi-grid').forEach(grid => {
       // The question label is a sibling <label> of some ancestor wrapper.
       let node = grid, labelTxt = '';
@@ -1833,10 +1846,13 @@
       const qid = matchPmtLabel(labelTxt);
       if (!qid) return;
       const ov = pmtOverrides[qid] ?? pmtOverrides[String(qid)];
-      if (ov === undefined || ov === null || ov === false) return;
+      if (ov === null || ov === false) return;
+      // Override wins; otherwise fall back to a derivation (Q47 assets).
+      const src = ov !== undefined ? ov : derivedPmt.get(qid);
+      if (src === undefined) return;
       const entry = findPmtEntry(qid);
       if (onlyEmpty && entry && !isEmptyModelVal(entry.sub_variables)) return;
-      const wantList = Array.isArray(ov) ? ov : [ov];
+      const wantList = Array.isArray(src) ? src : [src];
       const wantIds = new Set(), wantLabels = [];
       wantList.forEach(v => {
         if (typeof v === 'number' || /^\d+$/.test(String(v).trim())) wantIds.add(Number(v));
@@ -1872,7 +1888,7 @@
   // (onlyEmpty: never overwrites a filled/user value) until every
   // derivable id has been seen and filled, or 12s pass.
   function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs) {
-    const wantPmt = [576, 530, 1, 7, 12, 14, 18, 29];
+    const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548];
     const wantProg = [75, 142, 96, 139, 140, 141];
     if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
     let seenAny = false;
