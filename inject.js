@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v11';
+  const FC_INJECT_VERSION = 'v13';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
