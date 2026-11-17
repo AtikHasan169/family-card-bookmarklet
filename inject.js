@@ -825,7 +825,7 @@
   // Background watcher: the site can null branch_name seconds after
   // autofill (payment-processors reload / enumerator-bank apply).
   // Re-apply the single-branch pick whenever it is empty again, until
-  // the value sticks for 3 checks in a row or 12s pass. Never touches
+  // the value sticks for 3 checks in a row or 30s pass. Never touches
   // anything when the branch list has more than one option, and never
   // overwrites a value the user picked.
   function watchSingleBranch() {
@@ -834,14 +834,16 @@
     const t0 = Date.now();
     const timer = setInterval(() => {
       try {
-        if (Date.now() - t0 > 12000) { clearInterval(timer); return; }
+        // Keep watching until the value sticks, up to ~30s: on a slow
+        // connection the site's data/rebuilds can land late.
+        if (Date.now() - t0 > 30000) { clearInterval(timer); return; }
         const { vmHead, } = getVueNodes();
         const headTarget = getHeadTargetObj(vmHead);
         const c = findBranchControl();
         if (!c) {
           // No branch field at all (e.g. MFS account, or the section
-          // never rendered): stop watching after a short grace period.
-          if (!seenControl && Date.now() - t0 > 4000) clearInterval(timer);
+          // never rendered): stop watching after a grace period.
+          if (!seenControl && Date.now() - t0 > 10000) clearInterval(timer);
           return;
         }
         seenControl = true;
@@ -1686,6 +1688,7 @@
     derivedPmt.set(571, 572); // land/dwelling ownership: নিজস্ব (Owner) — user default; override via form_defaults.pmt
     derivedPmt.set(47, [559, 563, 435, 591]); // durable assets everyone has: fan, bed, mobile, tubewell — user default; override via form_defaults.pmt
     derivedPmt.set(548, 550); // cooking fuel: কাঠ/খড়ি/লাকড়ি (wood) — user default; override via form_defaults.pmt
+    derivedPmt.set(40, 399); // drinking water source: টিউবওয়েল (tubewell) — user default; override via form_defaults.pmt
 
     const derivedProg = new Map();
     derivedProg.set(75, { number: counts.maleCount });
@@ -1886,9 +1889,9 @@
   // wiping any picks made before the rebuild. That is why the program
   // section used to need a second click. Re-run the dynamic sync
   // (onlyEmpty: never overwrites a filled/user value) until every
-  // derivable id has been seen and filled, or 12s pass.
+  // derivable id has been seen and filled, or 30s pass.
   function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs) {
-    const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548];
+    const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548, 40];
     const wantProg = [75, 142, 96, 139, 140, 141];
     if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
     let seenAny = false;
@@ -1898,7 +1901,9 @@
     const timer = setInterval(async () => {
       if (inFlight) return;
       try {
-        if (Date.now() - t0 > 12000) { clearInterval(timer); return; }
+        // Keep watching until everything is verified filled, up to
+        // ~30s: on a slow connection the site's data can land late.
+        if (Date.now() - t0 > 30000) { clearInterval(timer); return; }
         inFlight = true;
         const fresh = getVueNodes();
         const vh = fresh.vmHead || vmHead;
@@ -1934,7 +1939,7 @@
         } else {
           verifiedTicks = 0;
         }
-        if (!seenAny && !pmtArray && !(Array.isArray(progVals) && progVals.length) && Date.now() - t0 > 4000) clearInterval(timer);
+        if (!seenAny && !pmtArray && !(Array.isArray(progVals) && progVals.length) && Date.now() - t0 > 10000) clearInterval(timer);
       } catch (_) {
         // Keep watching; a later pass may succeed.
       } finally {
