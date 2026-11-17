@@ -108,6 +108,10 @@
       gap: 8px;
     }
 
+    .credit-line { grid-column: 1 / -1; text-align: center; font-size: 11px; color: var(--text-muted); padding-top: 2px; }
+    .credit-line a { color: var(--accent); font-weight: 650; text-decoration: none; }
+    .credit-line a:hover { text-decoration: underline; }
+
     .settings-drawer { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-sm); }
     .settings-drawer.open { display: block; }
     .form-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
@@ -388,6 +392,7 @@
     <button type="button" class="btn btn-accent" id="extractBtn">1. Extract with AI</button>
     <button type="button" class="btn btn-danger" id="stopExtractBtn" style="display:none;">Stop Extraction</button>
     <button type="button" class="btn btn-emerald" id="autofillBtn" disabled>2. Auto-Fill Form</button>
+    <div class="credit-line">Developed with ❤️ by <a href="https://www.facebook.com/ARAtik169" target="_blank" rel="noopener noreferrer">Atik Hasan</a></div>
   </footer>
 
   <div class="modal" id="cropModal">
