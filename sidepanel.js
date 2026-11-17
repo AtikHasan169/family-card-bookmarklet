@@ -817,7 +817,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
   let inputEl;
   if (f.type === 'rel_select') {
     inputEl = document.createElement('select');
-    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #e2e8f0; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
     RELATION_OPTIONS.filter((opt) => opt.id !== null).forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt.value;
@@ -844,7 +844,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
   } else if (f.type === 'gender_select') {
     inputEl = document.createElement('select');
     inputEl.setAttribute('data-field', 'gender');
-    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #e2e8f0; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
     GENDER_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt.value;
@@ -862,7 +862,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
   } else if (f.type === 'religion_select') {
     inputEl = document.createElement('select');
     inputEl.setAttribute('data-field', 'religion');
-    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #bbf7d0; background:#f0fdf4; color:#166534; border-radius:5px; cursor:pointer; width:100%;';
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #bbf7d0; background:var(--emerald-soft); color:var(--emerald); border-radius:5px; cursor:pointer; width:100%;';
     RELIGION_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt.value;
@@ -879,7 +879,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
     });
   } else if (f.type === 'doc_select') {
     inputEl = document.createElement('select');
-    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:#eff6ff; color:#1e40af; border-radius:5px; cursor:pointer; width:100%;';
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:var(--accent-soft); color:var(--accent); border-radius:5px; cursor:pointer; width:100%;';
     DOC_TYPE_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt.value;
@@ -1668,8 +1668,8 @@ function renderHouseholdSummaryCard(data) {
 
   const headEl = document.createElement('div');
   headEl.className = 'record-head';
-  headEl.style.background = '#eff6ff';
-  headEl.innerHTML = `<span style="color:#1e40af;">Household Counts, Gender &amp; Religion</span><span class="record-tag child-badge">${defs.religion_label}</span>`;
+  headEl.style.background = 'var(--accent-soft)';
+  headEl.innerHTML = `<span style="color:var(--accent);">Household Counts, Gender &amp; Religion</span><span class="record-tag child-badge">${defs.religion_label}</span>`;
   card.appendChild(headEl);
 
   const pills = document.createElement('div');
@@ -1702,7 +1702,7 @@ function renderHouseholdSummaryCard(data) {
     inp.id = id;
     inp.type = 'number';
     inp.value = String(defs[key] ?? 0);
-    inp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid #cbd5e1; background:#fff; border-radius:5px; width:100%;';
+    inp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid var(--border-hover); background:var(--surface); color:var(--text-main); border-radius:5px; width:100%;';
     inp.addEventListener('input', () => {
       defs[key] = parseInt(inp.value, 10) || 0;
       if ($(pillId)) $(pillId).textContent = `${defs[key]} জন`;
@@ -1720,7 +1720,7 @@ function renderHouseholdSummaryCard(data) {
   // Religion Selector for Entire Family
   const relSel = document.createElement('select');
   relSel.id = 'fcSummaryReligion';
-  relSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #bbf7d0; background:#f0fdf4; color:#166534; border-radius:5px; width:100%; cursor:pointer;';
+  relSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #bbf7d0; background:var(--emerald-soft); color:var(--emerald); border-radius:5px; width:100%; cursor:pointer;';
   RELIGION_OPTIONS.forEach(opt => {
     const o = document.createElement('option');
     o.value = opt.value;
@@ -1753,7 +1753,7 @@ function renderHouseholdSummaryCard(data) {
   postInp.type = 'text';
   postInp.placeholder = 'e.g. 7030';
   postInp.value = defs.post_code || areaPresets.post_code || '';
-  postInp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid #cbd5e1; background:#fff; border-radius:5px; width:100%;';
+  postInp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid var(--border-hover); background:var(--surface); color:var(--text-main); border-radius:5px; width:100%;';
   postInp.addEventListener('input', () => {
     const cleanPost = toEnglishDigits(postInp.value).replace(/\D+/g, '');
     postInp.value = cleanPost;
@@ -1934,7 +1934,7 @@ function createDumpFieldControl(targetObj, key, vueOptions) {
 
   if (opts && opts.length) {
     const sel = document.createElement('select');
-    sel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid #cbd5e1; background:#f8fafc; border-radius:5px; cursor:pointer; width:100%;';
+    sel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border-hover); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
 
     const currentStr = String(val ?? '');
     let matched = false;
@@ -2241,7 +2241,7 @@ function triggerFormAutofill() {
 
 function exportExtractedJson() {
   if (!state.lastExtracted) {
-    setStatus('Nothing to export yet — Extract or Pull All first.', 'err');
+    setStatus('Nothing to export yet — Extract or Pull Draft first.', 'err');
     return;
   }
   handleAreaPresetChange();
