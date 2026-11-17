@@ -1073,6 +1073,9 @@
     educationJsc: [/অষ্টম|জেএসসি|জেডিসি|8th|jsc|jdc/i],
     educationClass9: [/৯ম|class 9/i],
     educationSsc: [/এসএসসি|দাখিল|ssc|dakhil|o-level/i],
+    educationHsc: [/এইচএসসি|আলিম|hsc|alim|a-level/i],
+    educationGraduate: [/স্নাতক(?!োত্তর)/i, /(?<!post )graduate/i],
+    educationPg: [/স্নাতকোত্তর|কামিল|post.?graduate/i],
     livelihoodChild: [/প্রযোজ্য নয়|not applicable/i, /শিশু|child/i],
     livelihoodStudent: [/ছাত্র|ছাত্রী|শিক্ষার্থী|student/i],
     livelihoodHousewife: [/গৃহিণী|গৃহীনি|homemaker|house.?wife/i],
@@ -1282,8 +1285,10 @@
       literacyIds = age < 5 ? [LOOKUP_IDS.literacy.no] : [LOOKUP_IDS.literacy.yes];
     }
 
-    // Education by age band, using the real type-8 ids. Adults default to
-    // Class 1-4 (190) — override via form_defaults if the real level is known.
+    // Education by age band, using the real type-8 ids. Student ages
+    // 18-24 follow the study ladder (HSC -> Graduate -> Post Graduate);
+    // age 25+ defaults to Class 1-4 (190) — override via form_defaults
+    // if the real level is known.
     let education = null, educationIds = [];
     if (age !== null) {
       if (age < 3) { education = OPTION_PATTERNS.educationNone; educationIds = [E.none]; }
@@ -1295,6 +1300,9 @@
       else if (age === 14) { education = OPTION_PATTERNS.educationJsc; educationIds = [E.jsc, E.class6to7]; }
       else if (age === 15) { education = OPTION_PATTERNS.educationClass9; educationIds = [E.class9, E.jsc]; }
       else if (age < 18) { education = OPTION_PATTERNS.educationSsc; educationIds = [E.ssc, E.class9]; }
+      else if (age <= 19) { education = OPTION_PATTERNS.educationHsc; educationIds = [E.hsc, E.ssc]; }
+      else if (age <= 22) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
+      else if (age <= 24) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
       else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
     }
 
