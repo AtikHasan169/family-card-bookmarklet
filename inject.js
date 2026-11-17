@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v14';
+  const FC_INJECT_VERSION = 'v15';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -871,11 +871,21 @@
     return false;
   }
 
+  // Watcher timers from the current run. A second click must cancel
+  // the previous run's watchers first — otherwise each click adds
+  // another watcher set and an already-filled form keeps refilling.
+  const activeWatchTimers = new Set();
+  function registerWatchTimer(t) { activeWatchTimers.add(t); return t; }
+  function clearActiveWatchTimers() {
+    for (const t of activeWatchTimers) { try { clearInterval(t); } catch (_) {} }
+    activeWatchTimers.clear();
+  }
+
   function watchSingleBranch() {
     let stuckPolls = 0;
     let seenControl = false;
     const t0 = Date.now();
-    const timer = setInterval(() => {
+    const timer = registerWatchTimer(setInterval(() => {
       try {
         // Keep watching until the value sticks, up to ~30s: on a slow
         // connection the site's data/rebuilds can land late.
@@ -898,7 +908,7 @@
         stuckPolls = 0;
         syncSingleBranch(vmHead, headTarget);
       } catch (_) {}
-    }, 500);
+    }, 500));
   }
 
   function syncAllGenderAndReligionSelects(headGenderId, memberList, row0IsHead, familyReligionId, isVerificationPage) {
@@ -1409,7 +1419,9 @@
         }
         const choice = resolveOptionChoice(sample.vInst, overrideVal, patterns, field.excludesOf(pats), field.idsOf(pats));
         if (choice && choice.id !== undefined) {
-          setReactive(vmMembers, row, field.key, choice.id);
+          // Already correct: don't re-write (avoids re-driving a
+          // filled form on every click).
+          if (String(row[field.key] ?? '') !== String(choice.id)) setReactive(vmMembers, row, field.key, choice.id);
         } else if (field.key !== 'disability_type_id') {
           unfilled.push(`Member ${idx + 1}: ${field.key}`);
         } else {
@@ -1447,7 +1459,7 @@
         const overrideVal = memberOverrides[field.key];
         const val = (overrideVal === undefined || overrideVal === null) ? field.valueOf(m) : Number(overrideVal);
         if (onlyEmpty && !isEmptyModelVal(row[field.key])) continue;
-        setReactive(vmMembers, row, field.key, val);
+        if (String(row[field.key] ?? '') !== String(val)) setReactive(vmMembers, row, field.key, val);
       }
       if (rendered.length === targetMemberList.length) {
         rendered.forEach((c, idx) => {
@@ -1472,7 +1484,7 @@
           if (typeof v === 'string' && !/^\d+$/.test(v.trim())) return keywordToId(v, FACILITY_KEYWORDS);
           return Number(v);
         }).filter(v => v !== null && !Number.isNaN(v));
-        if (resolved.length) setReactive(vmMembers, row, 'facilities_ids', resolved);
+        if (resolved.length && JSON.stringify(row.facilities_ids || []) !== JSON.stringify(resolved)) setReactive(vmMembers, row, 'facilities_ids', resolved);
       });
     }
 
@@ -1500,6 +1512,7 @@
               const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats), field.idsOf(headPats));
               if (choice && choice.id !== undefined) {
                 const want = String(choice.id);
+                if (String(currentVal ?? '') === want) continue;
                 selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === want);
                 setReactive(vmHead, headTarget, key, choice.id);
                 triggerVeeValidate(c.wrap);
@@ -2101,7 +2114,7 @@
     let inFlight = false;
     let verifiedTicks = 0;
     const t0 = Date.now();
-    const timer = setInterval(async () => {
+    const timer = registerWatchTimer(setInterval(async () => {
       if (inFlight) return;
       try {
         // Keep watching until everything is verified filled, up to
@@ -2149,7 +2162,61 @@
       } finally {
         inFlight = false;
       }
-    }, 1000);
+    }, 1000));
+  }
+
+  // Signature of everything the option sync writes, plus how many
+  // items each rendered select currently offers. The option watcher
+  // stops once this stops changing: values settled AND no new
+  // option lists arriving.
+  function optionWatcherSignature(memberRows, headTarget, controls) {
+    const mKeys = ['literacy_id', 'education_status_id', 'livelihood_profession_id', 'health_condition_id', 'maritial_status_id', 'disability_type_id', 'is_currently_student', 'is_ssnp_covered', 'is_dss_training_or_financial_benefit'];
+    const hKeys = ['education_status', 'profession', 'marital_status'];
+    const vals = [];
+    for (const r of (memberRows || [])) for (const k of mKeys) vals.push(r ? (r[k] ?? null) : null);
+    for (const k of hKeys) vals.push(headTarget ? (headTarget[k] ?? null) : null);
+    const items = (controls || []).map(c => (c.vInst && Array.isArray(c.vInst.items)) ? c.vInst.items.length : -1);
+    return JSON.stringify([vals, items]);
+  }
+
+  // Option watcher: on a slow connection the lookup lists behind the
+  // member/head dropdowns can arrive AFTER the option passes ran,
+  // which used to force a second click (and the second click
+  // re-drove the whole form). Re-run the empty-only option sync
+  // until nothing changes any more, up to ~30s. Empty-only, so
+  // hand corrections are never touched.
+  function watchOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs) {
+    let inFlight = false;
+    let stableTicks = 0;
+    let seenData = false;
+    const t0 = Date.now();
+    const timer = registerWatchTimer(setInterval(async () => {
+      if (inFlight) return;
+      try {
+        if (Date.now() - t0 > 30000) { clearInterval(timer); return; }
+        inFlight = true;
+        const fresh = getVueNodes();
+        const vh = fresh.vmHead || vmHead;
+        const vm = fresh.vmMembers || vmMembers;
+        const ht = getHeadTargetObj(vh) || headTarget;
+        const rows = (vm && Array.isArray(vm.familyMembers)) ? vm.familyMembers : memberRows;
+        const controls = collectOptionControls();
+        if (controls.some(c => c.vInst && Array.isArray(c.vInst.items) && c.vInst.items.length)) seenData = true;
+        const sigBefore = optionWatcherSignature(rows, ht, controls);
+        await syncOptionSelects(vh, vm, rows, targetMemberList, ht, headMember, defs, true);
+        const sigAfter = optionWatcherSignature(rows, ht, collectOptionControls());
+        if (sigAfter === sigBefore) {
+          if (seenData && ++stableTicks >= 2) { clearInterval(timer); return; }
+        } else {
+          stableTicks = 0;
+        }
+        if (!seenData && Date.now() - t0 > 10000) clearInterval(timer);
+      } catch (_) {
+        // Keep watching; a later pass may succeed.
+      } finally {
+        inFlight = false;
+      }
+    }, 1000));
   }
 
   function parseMemberRow(m) {
@@ -2199,6 +2266,29 @@
     );
   }
 
+  // True when a member row already holds exactly this payload
+  // member's identity data (id, DOB, names, relation, gender,
+  // religion, disability flag). The refill guard uses it so a
+  // second click leaves filled rows alone instead of re-driving
+  // them. Deliberately strict: any difference means "fill it",
+  // so panel edits keep flowing through.
+  function rowHoldsMember(row, m, ctx) {
+    if (!row) return false;
+    const s = (v) => String(v ?? '').trim();
+    const n = (v) => { const x = Number(v); return Number.isNaN(x) ? null : x; };
+    const rowId = s(row.verification_number || row.nid || row.brn_id).replace(/\s+/g, '');
+    if (!rowId || rowId !== ctx.cleanId) return false;
+    if (n(row.verification_type) !== (ctx.isNID ? 1 : 2)) return false;
+    if (s(row.dob || row.date_of_birth) !== ctx.memModelDob) return false;
+    if (s(row.name_bn) !== s(m.name_bn) || s(row.name_en) !== s(m.name_en)) return false;
+    if (s(row.father_name_bn) !== s(m.father_name_bn) || s(row.mother_name_bn) !== s(m.mother_name_bn)) return false;
+    if (n(row.relationship_id) !== ctx.relId || s(row.relation) !== ctx.relName) return false;
+    if (n(row.gender_id ?? row.gender ?? row.sex) !== ctx.genderId) return false;
+    if (n(row.religion_id ?? row.religion) !== ctx.memReligionId) return false;
+    if (n(row.is_member_disabled ?? 0) !== (Number(m.is_disabled) === 1 ? 1 : 0)) return false;
+    return true;
+  }
+
   let autofillInFlight = false;
 
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
@@ -2222,6 +2312,10 @@
 
     autofillInFlight = true;
     sameAsPermanentClickedThisRun = false;
+    // A new click cancels the previous run's watchers: without
+    // this, each click adds another watcher set and the form
+    // keeps refilling.
+    clearActiveWatchTimers();
     window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
       detail: { version: FC_INJECT_VERSION, success: true, message: 'Filling the form — please wait, one click is enough…' }
     }));
@@ -2355,6 +2449,7 @@
 
       let row0IsHead = false;
       let targetMemberList = [];
+      let isRefill = false;
 
       if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
         const row0 = vmMembers.familyMembers[0];
@@ -2406,6 +2501,20 @@
 
         await new Promise((r) => setTimeout(r, 200));
 
+        // Refill detection: if the form already holds this payload's
+        // people (second click on a slow network), later passes must
+        // only fill gaps — never re-drive fields the user may have
+        // fixed by hand. Snapshot BEFORE the row loop writes.
+        const payloadIds = new Set();
+        for (const mm of targetMemberList) {
+          const pid = String(mm.nid_or_brn || mm.nid || mm.brn_id || mm.verification_number || '').replace(/\s+/g, '');
+          if (pid) payloadIds.add(pid);
+        }
+        isRefill = vmMembers.familyMembers.some((r) => {
+          const rid = String((r && (r.verification_number || r.nid || r.brn_id)) || '').replace(/\s+/g, '');
+          return rid && payloadIds.has(rid);
+        });
+
         for (let idx = 0; idx < targetMemberList.length; idx++) {
           const m = targetMemberList[idx];
           const row = vmMembers.familyMembers[idx];
@@ -2421,6 +2530,12 @@
           }
           const relId = Number(m.relationship_id || RELATION_ID_MAP[relName] || (isFemaleGenderId(genderId) ? 161 : 160));
           const memAge = calculateAgeYears(m.dob);
+          const memDobParts = parseDobParts(m.dob);
+          const memModelDob = memDobParts ? memDobParts.iso : String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
+
+          // Refill guard: this row already holds this member — leave
+          // it (and any hand tweaks) alone instead of re-driving it.
+          if (rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId })) continue;
 
           setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
           if (isNID) {
@@ -2433,8 +2548,6 @@
             setReactive(vmMembers, row, 'verification_number', cleanId);
           }
 
-          const memDobParts = parseDobParts(m.dob);
-          const memModelDob = memDobParts ? memDobParts.iso : String(m.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
           setReactive(vmMembers, row, 'dob', memModelDob);
           setReactive(vmMembers, row, 'date_of_birth', memModelDob);
           if (memAge !== null && 'age' in row) {
@@ -2486,14 +2599,16 @@
       // NEW: fill the dropdowns/radios the old injector skipped (livelihood,
       // literacy, education, marital, health, disability type, SSNP/DSS
       // radios, head education/profession/marital, address cascade).
-      // First pass now; a second empty-only pass after a short delay catches
-      // selects that render late (disability type, cascaded union/ward lists).
+      // First pass now (empty-only on a refill, so hand corrections
+      // survive a second click); a second empty-only pass after a
+      // short delay catches selects that render late (disability
+      // type, cascaded union/ward lists).
       let optionUnfilled = [];
       const gridCheckNotes = [];
       try {
         await new Promise(r => setTimeout(r, 250));
         const memberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
-        optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, false);
+        optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, isRefill);
         await new Promise(r => setTimeout(r, 900));
         const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true);
         optionUnfilled = [...new Set([...optionUnfilled, ...lateUnfilled])];
@@ -2526,6 +2641,9 @@
       // arrives or rebuilds after autofill. Fire-and-forget.
       const finalMemberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
       try { watchDynamicSections(vmHead, allVms, headTarget, finalMemberRows, targetMemberList, payload.head || null, counts, defs); } catch (_) {}
+      // Keep the member/head dropdowns filled even if their lookup
+      // lists arrive after the option passes. Fire-and-forget.
+      try { watchOptionSelects(vmHead, vmMembers, finalMemberRows, targetMemberList, headTarget, payload.head || null, defs); } catch (_) {}
 
       // Spouse name (shows only when head marital status = Married): fill
       // from the Husband/Wife member when one is in the household.
