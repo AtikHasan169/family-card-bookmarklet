@@ -5,6 +5,11 @@
   if (window.__FC_INJECTOR_LOADED__) return;
   window.__FC_INJECTOR_LOADED__ = true;
 
+  // Version shown in the sidepanel so the user can tell whether the
+  // newly uploaded inject.js actually loaded. Bump on every release.
+  const FC_INJECT_VERSION = 'v11';
+  window.FC_INJECT_VERSION = FC_INJECT_VERSION;
+
   // Lookup ids below are the REAL ids from the site's own API
   // (GET getApplicationPageData, captured 2026-11-12) and confirmed by a
   // saved draft. Relations = lookup type 41, genders = type 2,
@@ -1263,7 +1268,11 @@
   function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold) {
     const relName = m.relation || '';
     const isChild = age !== null && age < 18;
-    const isLittleChild = age !== null && age < 5;
+    const isLittleChild = age !== null && age < 4;
+    // Student age for profession/livelihood: 4-24 covers pre-primary
+    // through school, HSC, honours and masters. Kept separate from
+    // isChild so marital status still treats only under-18s as unmarried.
+    const isStudentAge = age !== null && age >= 4 && age <= 24;
     const female = isFemaleGenderId(genderId);
     const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
@@ -1291,14 +1300,14 @@
 
     let livelihood = null, livelihoodIds = [];
     if (isLittleChild) { livelihood = OPTION_PATTERNS.livelihoodChild; livelihoodIds = [L.childNA, L.others]; }
-    else if (isChild) { livelihood = OPTION_PATTERNS.livelihoodStudent; livelihoodIds = [L.student]; }
+    else if (isStudentAge) { livelihood = OPTION_PATTERNS.livelihoodStudent; livelihoodIds = [L.student]; }
     else if (female) { livelihood = OPTION_PATTERNS.livelihoodHousewife; livelihoodIds = [L.homemaker]; }
     else { livelihood = OPTION_PATTERNS.livelihoodMale; livelihoodIds = [L.dayLabourer, L.agriculture, L.others]; }
 
     // Head profession uses the DIFFERENT type-34 list.
     let profession = null, professionIds = [];
     if (isLittleChild) { profession = OPTION_PATTERNS.livelihoodChild; professionIds = [P.others]; }
-    else if (isChild) { profession = OPTION_PATTERNS.livelihoodStudent; professionIds = [P.student]; }
+    else if (isStudentAge) { profession = OPTION_PATTERNS.livelihoodStudent; professionIds = [P.student]; }
     else if (female) { profession = OPTION_PATTERNS.professionHousewife; professionIds = [P.housewife]; }
     else { profession = OPTION_PATTERNS.professionMale; professionIds = [P.dayLabourer, P.farmer, P.labourer, P.others]; }
 
@@ -1417,7 +1426,7 @@
 
     // ---- Member radios: model first (0/1 are known), click where mapping is safe.
     const memberRadioFields = [
-      { key: 'is_currently_student', valueOf: (m) => { const a = calculateAgeYears(m.dob); return (a !== null && a >= 3 && a < 18) ? 1 : 0; } },
+      { key: 'is_currently_student', valueOf: (m) => { const a = calculateAgeYears(m.dob); return (a !== null && a >= 4 && a <= 24) ? 1 : 0; } },
       { key: 'is_ssnp_covered', valueOf: () => 0 },
       { key: 'is_dss_training_or_financial_benefit', valueOf: () => 0 }
     ];
@@ -2190,7 +2199,7 @@
 
     if (autofillInFlight) {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-        detail: { success: true, message: 'Autofill is already running — please wait, one click is enough.' }
+        detail: { version: FC_INJECT_VERSION, success: true, message: 'Autofill is already running — please wait, one click is enough.' }
       }));
       return;
     }
@@ -2198,7 +2207,7 @@
     let { vmHead, vmMembers, allVms } = getVueNodes();
     if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-        detail: { success: false, message: 'Vue application form not detected on this page.' }
+        detail: { version: FC_INJECT_VERSION, success: false, message: 'Vue application form not detected on this page.' }
       }));
       return;
     }
@@ -2206,7 +2215,7 @@
     autofillInFlight = true;
     sameAsPermanentClickedThisRun = false;
     window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-      detail: { success: true, message: 'Filling the form — please wait, one click is enough…' }
+      detail: { version: FC_INJECT_VERSION, success: true, message: 'Filling the form — please wait, one click is enough…' }
     }));
 
     try {
@@ -2447,7 +2456,7 @@
           // below also clicks the matching radio so change handlers fire.
           const memAgeForStudent = calculateAgeYears(m.dob);
           setReactive(vmMembers, row, 'is_currently_student',
-            (memAgeForStudent !== null && memAgeForStudent >= 3 && memAgeForStudent < 18) ? 1 : 0);
+            (memAgeForStudent !== null && memAgeForStudent >= 4 && memAgeForStudent <= 24) ? 1 : 0);
           setReactive(vmMembers, row, 'is_ssnp_covered', 0);
           setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', 0);
           if (m.disability_type_id !== undefined && m.disability_type_id !== null && m.disability_type_id !== '') {
@@ -2543,13 +2552,14 @@
         : '';
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: {
+          version: FC_INJECT_VERSION,
           success: true,
           message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!${unfilledNote}${gridNote}`
         }
       }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
-        detail: { success: false, message: `Autofill error: ${err.message}` }
+        detail: { version: FC_INJECT_VERSION, success: false, message: `Autofill error: ${err.message}` }
       }));
     } finally {
       autofillInFlight = false;
@@ -2560,7 +2570,7 @@
     const { vmHead, vmMembers, allVms } = getVueNodes();
     if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-        detail: { success: false, message: 'No active Vue form instance found on this page.' }
+        detail: { version: FC_INJECT_VERSION, success: false, message: 'No active Vue form instance found on this page.' }
       }));
       return;
     }
@@ -2621,11 +2631,11 @@
       };
 
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-        detail: { success: true, payload: { head, family_members, full_form_dump } }
+        detail: { version: FC_INJECT_VERSION, success: true, payload: { head, family_members, full_form_dump } }
       }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-        detail: { success: false, message: err.message }
+        detail: { version: FC_INJECT_VERSION, success: false, message: err.message }
       }));
     }
   });
