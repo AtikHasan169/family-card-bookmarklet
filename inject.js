@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v15';
+  const FC_INJECT_VERSION = 'v17';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2266,6 +2266,85 @@
     );
   }
 
+  // True when every field the passes would fill is already filled:
+  // member/head dropdowns + radios, PMT + program derivable entries,
+  // and the single-option branch pick. Used by the fast path so a
+  // re-click on a filled form returns in under a second instead of
+  // re-driving everything. Conservative: anything unknown or empty
+  // means "not fully filled" (the normal passes run).
+  function isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) {
+    const rows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
+    if (!targetMemberList.length || rows.length < targetMemberList.length) return false;
+    const mKeys = ['literacy_id', 'education_status_id', 'livelihood_profession_id', 'health_condition_id', 'maritial_status_id', 'is_currently_student', 'is_ssnp_covered', 'is_dss_training_or_financial_benefit'];
+    for (let idx = 0; idx < targetMemberList.length; idx++) {
+      const row = rows[idx];
+      if (!row) return false;
+      for (const k of mKeys) if (isEmptyModelVal(row[k])) return false;
+      if (Number(row.is_member_disabled) === 1 && isEmptyModelVal(row.disability_type_id)) return false;
+    }
+    if (!headTarget) return false;
+    for (const k of ['education_status', 'profession', 'marital_status']) {
+      if (isEmptyModelVal(headTarget[k])) return false;
+    }
+    // PMT: every derivable question answered. Questions with an
+    // explicit null/false override are skipped (nothing to verify).
+    const { pmtArray } = resolvePmtState(vmHead, allVms, headTarget);
+    if (pmtArray) {
+      const pmtOverrides = (defs && defs.pmt) || {};
+      const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548, 40, 567, 41];
+      for (const qid of wantPmt) {
+        const ov = pmtOverrides[qid];
+        if (ov === null || ov === false) continue;
+        const e = findPmtEntryIn(pmtArray, qid);
+        if (!e || isEmptyModelVal(e.sub_variables)) return false;
+      }
+      // Q47 completeness: it is multi-answer, so non-empty is not
+      // enough — the full wanted set must be present (default set,
+      // or the numeric override set; a label override forces the
+      // normal passes to resolve it).
+      const ov47 = pmtOverrides[47];
+      if (ov47 !== null && ov47 !== false) {
+        let want47 = [559, 563, 435, 591];
+        if (ov47 !== undefined) {
+          const list = Array.isArray(ov47) ? ov47 : [ov47];
+          if (list.some(v => typeof v === 'string' && !/^\d+$/.test(String(v).trim()))) return false;
+          want47 = list.map(v => Number(v)).filter(v => !Number.isNaN(v));
+          if (!want47.length) return false;
+        }
+        const e47 = findPmtEntryIn(pmtArray, 47);
+        if (!e47) return false;
+        const got47 = (Array.isArray(e47.sub_variables) ? e47.sub_variables : [e47.sub_variables]).map(Number);
+        if (!want47.every(id => got47.includes(id))) return false;
+      }
+    }
+    // Program: every derivable field answered (field 77 has no 0
+    // option, so it is only required when females exist). When the
+    // program section never rendered, there is nothing to verify.
+    const { values: progVals } = resolveProgramState(vmHead, allVms, headTarget);
+    if (Array.isArray(progVals) && progVals.length) {
+      const wantProg = [75, 142, 96, 139, 140, 141];
+      if (Number(counts.femaleCount) > 0) wantProg.push(77);
+      for (const fid of wantProg) {
+        const e = progVals.find(x => x && Number(x.allowance_program_additional_field_id) === Number(fid));
+        if (!e || isEmptyModelVal(e.allowance_program_additional_field_values_id)) return false;
+      }
+    }
+    // Single-option branch pick (only when such a control exists
+    // with exactly one valid option, mirroring syncSingleBranch).
+    const bc = findBranchControl();
+    if (bc && Array.isArray(bc.vInst.items) && isEmptyModelVal(headTarget.branch_name)) {
+      const validItems = bc.vInst.items.filter(it => {
+        if (typeof it === 'object' && it !== null) {
+          const v = it.value ?? it.id ?? it.code;
+          return v !== undefined && v !== null && String(v).trim() !== '';
+        }
+        return String(it ?? '').trim() !== '';
+      });
+      if (validItems.length === 1) return false;
+    }
+    return true;
+  }
+
   // True when a member row already holds exactly this payload
   // member's identity data (id, DOB, names, relation, gender,
   // religion, disability flag). The refill guard uses it so a
@@ -2450,6 +2529,7 @@
       let row0IsHead = false;
       let targetMemberList = [];
       let isRefill = false;
+      let allRowsMatched = false;
 
       if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
         const row0 = vmMembers.familyMembers[0];
@@ -2514,11 +2594,12 @@
           const rid = String((r && (r.verification_number || r.nid || r.brn_id)) || '').replace(/\s+/g, '');
           return rid && payloadIds.has(rid);
         });
+        allRowsMatched = targetMemberList.length > 0;
 
         for (let idx = 0; idx < targetMemberList.length; idx++) {
           const m = targetMemberList[idx];
           const row = vmMembers.familyMembers[idx];
-          if (!row) continue;
+          if (!row) { allRowsMatched = false; continue; }
 
           const cleanId = String(m.nid_or_brn || '').replace(/\s+/g, '');
           const isNID = determineIsNID(m.doc_type, cleanId);
@@ -2536,6 +2617,7 @@
           // Refill guard: this row already holds this member — leave
           // it (and any hand tweaks) alone instead of re-driving it.
           if (rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId })) continue;
+          allRowsMatched = false;
 
           setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
           if (isNID) {
@@ -2584,7 +2666,14 @@
             setReactive(vmMembers, row, 'disability_type_id', Number(m.disability_type_id));
           }
 
-          if (relName === 'Husband' && !row.estimate_annual_income) {
+          // Income: the head and students earn nothing — keep it 0.
+          // The 60000 default is only for an earning (non-student,
+          // non-head) husband.
+          const isHeadRow = relId === 260 || relName === 'Head/Self';
+          const isStudentRow = memAge !== null && memAge >= 4 && memAge <= 24;
+          if (isHeadRow || isStudentRow) {
+            setReactive(vmMembers, row, 'estimate_annual_income', 0);
+          } else if (relName === 'Husband' && !row.estimate_annual_income) {
             setReactive(vmMembers, row, 'estimate_annual_income', 60000);
           }
 
@@ -2603,13 +2692,19 @@
       // survive a second click); a second empty-only pass after a
       // short delay catches selects that render late (disability
       // type, cascaded union/ward lists).
+      // Fast path: if the form already holds this payload
+      // completely, skip the passes and their waits — a re-click
+      // returns in under a second instead of re-driving every
+      // filled field. Watchers still start below, so a late site
+      // rebuild that wipes a value is still covered.
+      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs);
       let optionUnfilled = [];
       const gridCheckNotes = [];
-      try {
-        await new Promise(r => setTimeout(r, 250));
+      if (!alreadyFilled) try {
+        await new Promise(r => setTimeout(r, isRefill ? 50 : 250));
         const memberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
         optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, isRefill);
-        await new Promise(r => setTimeout(r, 900));
+        await new Promise(r => setTimeout(r, isRefill ? 150 : 900));
         const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true);
         optionUnfilled = [...new Set([...optionUnfilled, ...lateUnfilled])];
         // PMT + program additional fields (counts, location, age/education
@@ -2617,9 +2712,9 @@
         // are already in the models for the PMT band mapping. A third
         // late pass covers PMT/program data that loads after the form.
         const dynUnfilled = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false)).unfilled;
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, isRefill ? 150 : 600));
         const dynLate = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, isRefill ? 400 : 2000));
         const dynLast = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
         const dynLate2 = dynLast.unfilled;
         gridCheckNotes.push(...(dynLast.gridNotes || []));
@@ -2680,7 +2775,9 @@
         detail: {
           version: FC_INJECT_VERSION,
           success: true,
-          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}`
+          message: alreadyFilled
+            ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].`
+            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}`
         }
       }));
     } catch (err) {
