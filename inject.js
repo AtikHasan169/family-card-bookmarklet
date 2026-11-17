@@ -337,8 +337,15 @@
     }
   }
 
+  // NOTE (bug fix, 2026-11-17): the site's lookup lists (religion, gender,
+  // livelihood, literacy, health, education, marital, disability, facilities,
+  // profession, location type, ...) render their labels via getItemValue(),
+  // which reads `value_bn` / `value_en` — NOT name_bn/name_en. The old
+  // itemToStr() never read those keys, so every text-pattern match against
+  // those dropdowns silently failed and the options were never auto-filled.
+  // Geo lists (division/district/thana/union/ward) use name_bn/name_en.
   const itemToStr = (it) => (typeof it === 'object' && it !== null)
-    ? `${it.text ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.title_bn ?? ''} ${it.title ?? ''} ${it.name ?? ''} ${it.value ?? ''} ${it.id ?? ''} ${it.code ?? ''}`
+    ? `${it.text ?? ''} ${it.value_bn ?? ''} ${it.value_en ?? ''} ${it.name_bn ?? ''} ${it.name_en ?? ''} ${it.label ?? ''} ${it.label_bn ?? ''} ${it.label_en ?? ''} ${it.title_bn ?? ''} ${it.title_en ?? ''} ${it.title ?? ''} ${it.display_name ?? ''} ${it.display_name_bn ?? ''} ${it.display_name_en ?? ''} ${it.name ?? ''} ${it.value ?? ''} ${it.id ?? ''} ${it.code ?? ''}`
     : String(it ?? '');
 
   function selectVuetifyItem(vInst, matchFn) {
@@ -786,6 +793,402 @@
     }
   }
 
+  /* =====================================================================
+   * OPTION AUTOFILL — the dropdowns / radios this injector used to skip.
+   * Added 2026-11-17 after reading the site's own app.js bundle.
+   *
+   * Member rows (familyMembers): literacy_id, education_status_id,
+   * is_currently_student, livelihood_profession_id, health_condition_id,
+   * disability_type_id, is_ssnp_covered,
+   * is_dss_training_or_financial_benefit, facilities_ids.
+   * Head form (data.* / form.*): education_status, profession,
+   * marital_status (+ spouse name), plus single-item auto-pick for the
+   * address cascade selects (division/district/thana/union/ward/...).
+   *
+   * How it works: option lists come from the site's API at runtime, so we
+   * NEVER hard-code option ids here. We read the live `items` array of a
+   * rendered v-select, match its label text (value_bn/value_en) against the
+   * patterns below, resolve the real id, and write it into the Vue row
+   * model. Rendered selects update themselves through reactivity.
+   *
+   * DEFAULTS ARE OVERRIDABLE via payload.form_defaults:
+   *   form_defaults.member_options = {
+   *     literacy_id: 3, education_status_id: 5, livelihood_profession_id: 9,
+   *     health_condition_id: 2, maritial_status_id: 1, disability_type_id: 4,
+   *     is_currently_student: 0, is_ssnp_covered: 0,
+   *     is_dss_training_or_financial_benefit: 0, facilities_ids: [7]
+   *   }
+   *   form_defaults.head_options = { education_status: 5, profession: 9, marital_status: 1 }
+   * A numeric id wins over the patterns. A string is treated as an extra
+   * text pattern tried FIRST. Set a key to null/false to leave it unfilled.
+   * ===================================================================== */
+
+  // Ordered label patterns (Bengali + English). First matching item wins.
+  const OPTION_PATTERNS = {
+    literacyYes: [/^হ্যাঁ/, /\byes\b/i, /পড়তে.*লিখতে.*পার/i, /can read/i],
+    literacyNo: [/^না/, /\bno\b/i, /পারে না|পড়তে.*পারে না/i, /cannot|unable to read/i],
+    educationChild: [/শিশু|শিক্ষা নেই|none|no education|প্রাক/i],
+    educationYoung: [/প্রাক|প্রাথমিক|pre.?primary|primary/i],
+    educationSchool: [/অধ্যয়নরত|studying|student/i, /মাধ্যমিক|secondary/i, /প্রাথমিক|primary/i],
+    educationAdult: [/স্বাক্ষর|signature|can sign/i, /প্রাথমিক|primary/i],
+    livelihoodChild: [/শিশু|child|infant|baby/i],
+    livelihoodStudent: [/ছাত্র|ছাত্রী|শিক্ষার্থী|student/i],
+    livelihoodHousewife: [/গৃহিণী|গৃহকর্মী|housewife|homemaker/i, /গৃহস্থালি|household/i],
+    livelihoodMale: [/দিন.?মজুর|day.?labou?r/i, /কৃষক|কৃষি|farmer|agricultur/i, /শ্রমিক|labou?r|worker/i],
+    maritalUnmarried: [/অবিবাহিত|unmarried|single/i],
+    maritalMarried: [/বিবাহিত|married/i],
+    maritalWidow: [/বিধবা|বিপত্নীক|widow/i],
+    healthFit: [/সুস্থ|কর্মক্ষম|সক্ষম|স্বাভাবিক|healthy|able|fit/i],
+    healthUnfit: [/অক্ষম|কর্মে অক্ষম|unable|incapac/i, /প্রতিবন্ধী|disabled/i]
+  };
+
+  const MARRIED_RELATIONS = ['Husband', 'Wife', 'Father', 'Mother', 'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law'];
+
+  function matchOptionItem(vInst, patterns, excludes = []) {
+    if (!vInst || !Array.isArray(vInst.items) || !vInst.items.length) return null;
+    for (const pat of patterns) {
+      const found = vInst.items.find(it => {
+        const s = toEnDigits(itemToStr(it));
+        if (excludes.some(ex => ex.test(s))) return false;
+        return pat.test(s);
+      });
+      if (found !== undefined) return found;
+    }
+    return null;
+  }
+
+  function optionItemId(vInst, item) {
+    if (item === null || item === undefined) return undefined;
+    if (typeof item !== 'object') return item;
+    if (!vInst || vInst.returnObject) return item;
+    const valKey = (typeof vInst.itemValue === 'string' && vInst.itemValue in item) ? vInst.itemValue : null;
+    return valKey ? item[valKey] : (item.value ?? item.id ?? item.code ?? item);
+  }
+
+  // Resolve a choice for one select field: numeric override id wins, then a
+  // string override pattern, then the default pattern list. Returns
+  // { id, item } or null when nothing matched.
+  function resolveOptionChoice(vInst, overrideVal, patterns, excludes = []) {
+    if (overrideVal === null || overrideVal === false) return null;
+    if (typeof overrideVal === 'number' || (typeof overrideVal === 'string' && /^\d+$/.test(overrideVal.trim()))) {
+      return { id: Number(overrideVal), item: null };
+    }
+    if (typeof overrideVal === 'string' && overrideVal.trim()) {
+      const esc = overrideVal.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const byOverride = matchOptionItem(vInst, [new RegExp(esc, 'i')], excludes);
+      if (byOverride) return { id: optionItemId(vInst, byOverride), item: byOverride };
+    }
+    const item = matchOptionItem(vInst, patterns, excludes);
+    if (!item) return null;
+    return { id: optionItemId(vInst, item), item };
+  }
+
+  function getModelExpression(vInst) {
+    try {
+      const m = vInst && vInst.$vnode && vInst.$vnode.data && vInst.$vnode.data.model;
+      if (m && m.expression) return String(m.expression).replace(/\s+/g, ' ').trim();
+    } catch (_) {}
+    return '';
+  }
+
+  function isEmptyModelVal(v) {
+    return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+  }
+
+  // Wait (bounded) until every collected select has its API items loaded.
+  async function waitForOptionItems(controls, timeoutMs = 3000) {
+    const t0 = Date.now();
+    for (;;) {
+      const pending = controls.filter(c => c.isSelect && (!Array.isArray(c.vInst.items) || !c.vInst.items.length));
+      if (!pending.length || Date.now() - t0 > timeoutMs) return;
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  // Collect every rendered v-select / v-radio-group on the form, with the
+  // Vue model expression each one is bound to (e.g. "member.livelihood_profession_id",
+  // "data.education_status", "addressForm.union_id").
+  function collectOptionControls() {
+    const controls = [];
+    const seen = new Set();
+    document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
+      if (wrap.closest('#fc-floating-root')) return;
+      if (!wrap.classList.contains('v-input') && wrap.querySelector('.v-input')) return;
+      const vInst = getActiveVm(wrap);
+      if (!vInst || seen.has(vInst)) return;
+      seen.add(vInst);
+      const tag = String(vInst.$options?._componentTag || vInst.$options?.name || '').toLowerCase();
+      const isSelect = Array.isArray(vInst.items);
+      const isRadio = tag.includes('radio-group');
+      if (!isSelect && !isRadio) return;
+      controls.push({ wrap, vInst, expr: getModelExpression(vInst), label: getControlLabel(wrap), isSelect, isRadio });
+    });
+    return controls;
+  }
+
+  function classifyControl(c) {
+    const expr = c.expr || '';
+    const m = expr.match(/^(member|data|form|addressForm)\.(.+)$/);
+    if (m) return { scope: m[1], key: m[2] };
+    // Fallback: label-based classification when the expression is unavailable.
+    const lbl = c.label || '';
+    if (/পড়তে\s*লিখতে|able to read/i.test(lbl)) return { scope: 'member', key: 'literacy_id' };
+    if (/শিক্ষার্থী|currently student/i.test(lbl)) return { scope: 'member', key: 'is_currently_student' };
+    if (/জীবিকা|livelihood/i.test(lbl)) return { scope: 'member', key: 'livelihood_profession_id' };
+    if (/স্বাস্থ্য\s*অবস্থা|health condition/i.test(lbl)) return { scope: 'member', key: 'health_condition_id' };
+    if (/প্রতিবন্ধিতার\s*ধরণ|disability type/i.test(lbl)) return { scope: 'member', key: 'disability_type_id' };
+    if (/সামাজিক\s*নিরাপত্তা|social safety/i.test(lbl)) return { scope: 'member', key: 'is_ssnp_covered' };
+    if (/সমাজসেবা\s*অধিদপ্তর|department of social services/i.test(lbl)) return { scope: 'member', key: 'is_dss_training_or_financial_benefit' };
+    if (/সরকারি\s*কার্ড|member_facility|facilities/i.test(lbl)) return { scope: 'member', key: 'facilities_ids' };
+    if (/শিক্ষা|education/i.test(lbl)) return { scope: 'member', key: 'education_status_id' };
+    if (/বৈবাহিক|marital/i.test(lbl)) return { scope: 'member', key: 'maritial_status_id' };
+    if (/পেশা|profession/i.test(lbl)) return { scope: 'head', key: 'profession' };
+    return { scope: '', key: '' };
+  }
+
+  function clickRadioValue(wrap, vInst, wantVal) {
+    let clicked = false;
+    wrap.querySelectorAll('.v-radio').forEach(rEl => {
+      const radVm = rEl.__vue__;
+      const radVal = radVm ? radVm.value : rEl.querySelector('input')?.value;
+      if (radVal !== undefined && Number(radVal) === Number(wantVal)) {
+        const inp = rEl.querySelector('input[type="radio"]');
+        if (inp && !inp.disabled && !inp.checked) { inp.click(); clicked = true; }
+      }
+    });
+    if (!clicked && vInst) {
+      try {
+        if ('internalValue' in vInst) vInst.internalValue = wantVal;
+        if ('lazyValue' in vInst) vInst.lazyValue = wantVal;
+        vInst.$emit('input', wantVal);
+        vInst.$emit('change', wantVal);
+      } catch (_) {}
+    }
+    return clicked;
+  }
+
+  function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold) {
+    const relName = m.relation || '';
+    const isChild = age !== null && age < 18;
+    const isLittleChild = age !== null && age < 5;
+
+    let literacy = null;
+    if (age !== null) literacy = age < 5 ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
+
+    let education = null;
+    if (age !== null) {
+      if (age < 3) education = OPTION_PATTERNS.educationChild;
+      else if (age <= 5) education = OPTION_PATTERNS.educationYoung;
+      else if (age < 18) education = OPTION_PATTERNS.educationSchool;
+      else education = OPTION_PATTERNS.educationAdult;
+    }
+
+    let livelihood = null;
+    if (isLittleChild) livelihood = OPTION_PATTERNS.livelihoodChild;
+    else if (isChild) livelihood = OPTION_PATTERNS.livelihoodStudent;
+    else if (Number(genderId) === 2) livelihood = OPTION_PATTERNS.livelihoodHousewife;
+    else livelihood = OPTION_PATTERNS.livelihoodMale;
+
+    let marital = null;
+    let maritalExcludes = [];
+    if (isChild) {
+      marital = OPTION_PATTERNS.maritalUnmarried;
+    } else if (relName === 'Head/Self' && !hasSpouseInHousehold) {
+      marital = OPTION_PATTERNS.maritalWidow;
+    } else if (MARRIED_RELATIONS.includes(relName) || relName === 'Head/Self') {
+      marital = OPTION_PATTERNS.maritalMarried;
+      // "বিবাহিত" is a substring of "অবিবাহিত" — exclude the unmarried
+      // option when we actually want Married.
+      maritalExcludes = [/অবিবাহিত|unmarried/i];
+    } else {
+      marital = OPTION_PATTERNS.maritalUnmarried;
+    }
+
+    const isDisabled = Number(m.is_disabled) === 1 || Number(m.is_member_disabled) === 1;
+    const health = isDisabled ? OPTION_PATTERNS.healthUnfit : OPTION_PATTERNS.healthFit;
+    const healthExcludes = isDisabled ? [] : [/অক্ষম|অসুস্থ|unable|disabled/i];
+
+    return { literacy, education, livelihood, marital, maritalExcludes, health, healthExcludes, isDisabled };
+  }
+
+  // Fill every option control the old injector skipped. `memberRows` are the
+  // live Vue row objects (same order as targetMemberList). `headMember` is
+  // the payload head (for age/gender/relation-aware head defaults).
+  // Returns an array of human-readable "not filled" notes for the result message.
+  async function syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs, onlyEmpty) {
+    const unfilled = [];
+    const memberOverrides = (defs && defs.member_options) || {};
+    const headOverrides = (defs && defs.head_options) || {};
+
+    const controls = collectOptionControls();
+    await waitForOptionItems(controls);
+
+    // Index rendered controls by (scope, key) in DOM order.
+    const byField = new Map();
+    controls.forEach(c => {
+      const { scope, key } = classifyControl(c);
+      if (!scope || !key) return;
+      const mapKey = scope + '.' + key;
+      if (!byField.has(mapKey)) byField.set(mapKey, []);
+      byField.get(mapKey).push(c);
+    });
+
+    const firstSelectFor = (scope, key) => {
+      const list = byField.get(scope + '.' + key) || [];
+      return list.find(c => c.isSelect) || null;
+    };
+
+    const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
+
+    // ---- Member selects: resolve the id once per field, write into each row.
+    const memberSelectFields = [
+      { key: 'literacy_id', patternsOf: (p) => p.literacy, excludesOf: () => [] },
+      { key: 'education_status_id', patternsOf: (p) => p.education, excludesOf: () => [] },
+      { key: 'livelihood_profession_id', patternsOf: (p) => p.livelihood, excludesOf: () => [] },
+      { key: 'health_condition_id', patternsOf: (p) => p.health, excludesOf: (p) => p.healthExcludes },
+      { key: 'maritial_status_id', patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes },
+      { key: 'disability_type_id', patternsOf: () => [], excludesOf: () => [] }
+    ];
+
+    for (const field of memberSelectFields) {
+      const sample = firstSelectFor('member', field.key);
+      if (!sample) continue; // field not rendered anywhere (e.g. no disabled member)
+      for (let idx = 0; idx < targetMemberList.length; idx++) {
+        const m = targetMemberList[idx];
+        const row = memberRows[idx];
+        if (!row) continue;
+        if (field.key === 'disability_type_id' && Number(row.is_member_disabled) !== 1) continue;
+        if (onlyEmpty && !isEmptyModelVal(row[field.key])) continue;
+        const age = calculateAgeYears(m.dob);
+        const genderId = resolveGenderId(m);
+        const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
+        const patterns = field.patternsOf(pats) || [];
+        const overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
+        const choice = resolveOptionChoice(sample.vInst, overrideVal, patterns, field.excludesOf(pats));
+        if (choice && choice.id !== undefined) {
+          setReactive(vmMembers, row, field.key, choice.id);
+        } else if (field.key !== 'disability_type_id') {
+          unfilled.push(`Member ${idx + 1}: ${field.key}`);
+        } else {
+          unfilled.push(`Member ${idx + 1}: disability_type_id (disabled — type unknown)`);
+        }
+      }
+      // Fire input/change on the rendered selects so validation picks the
+      // new model values up. Only safe 1:1 when counts match.
+      const rendered = byField.get('member.' + field.key) || [];
+      if (rendered.length === targetMemberList.length) {
+        rendered.forEach((c, idx) => {
+          const row = memberRows[idx];
+          if (!row || isEmptyModelVal(row[field.key])) return;
+          const want = String(row[field.key]);
+          selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === want);
+          triggerVeeValidate(c.wrap);
+        });
+      } else {
+        rendered.forEach(c => triggerVeeValidate(c.wrap));
+      }
+    }
+
+    // ---- Member radios: model first (0/1 are known), click where mapping is safe.
+    const memberRadioFields = [
+      { key: 'is_currently_student', valueOf: (m) => { const a = calculateAgeYears(m.dob); return (a !== null && a >= 3 && a < 18) ? 1 : 0; } },
+      { key: 'is_ssnp_covered', valueOf: () => 0 },
+      { key: 'is_dss_training_or_financial_benefit', valueOf: () => 0 }
+    ];
+    for (const field of memberRadioFields) {
+      const rendered = byField.get('member.' + field.key) || [];
+      for (let idx = 0; idx < targetMemberList.length; idx++) {
+        const m = targetMemberList[idx];
+        const row = memberRows[idx];
+        if (!row) continue;
+        const overrideVal = memberOverrides[field.key];
+        const val = (overrideVal === undefined || overrideVal === null) ? field.valueOf(m) : Number(overrideVal);
+        if (onlyEmpty && !isEmptyModelVal(row[field.key])) continue;
+        setReactive(vmMembers, row, field.key, val);
+      }
+      if (rendered.length === targetMemberList.length) {
+        rendered.forEach((c, idx) => {
+          const row = memberRows[idx];
+          if (!row || isEmptyModelVal(row[field.key])) return;
+          clickRadioValue(c.wrap, c.vInst, Number(row[field.key]));
+          triggerVeeValidate(c.wrap);
+        });
+      }
+    }
+
+    // ---- Member facilities (multi-select): only from explicit payload data.
+    const facControl = firstSelectFor('member', 'facilities_ids');
+    if (facControl) {
+      targetMemberList.forEach((m, idx) => {
+        const row = memberRows[idx];
+        const ids = m.facilities_ids || memberOverrides.facilities_ids;
+        if (!row || !Array.isArray(ids) || !ids.length) return;
+        if (onlyEmpty && !isEmptyModelVal(row.facilities_ids)) return;
+        setReactive(vmMembers, row, 'facilities_ids', ids.map(Number));
+      });
+    }
+
+    // ---- Head selects (data.* / form.*): drive the single rendered control.
+    if (headTarget && headMember) {
+      const headAge = calculateAgeYears(headMember.dob);
+      const headGenderId = resolveGenderId({ ...headMember, relation: 'Head/Self' });
+      const headPats = memberOptionPatterns(
+        { ...headMember, relation: 'Head/Self' }, headAge, headGenderId, hasSpouseInHousehold
+      );
+      const headFields = [
+        { keys: ['education_status'], patternsOf: (p) => p.education, excludesOf: () => [] },
+        { keys: ['profession'], patternsOf: (p) => p.livelihood, excludesOf: () => [] },
+        { keys: ['marital_status'], patternsOf: (p) => p.marital, excludesOf: (p) => p.maritalExcludes }
+      ];
+      for (const field of headFields) {
+        for (const scope of ['data', 'form']) {
+          for (const key of field.keys) {
+            const list = byField.get(scope + '.' + key) || [];
+            for (const c of list) {
+              if (c.vInst.disabled || c.vInst.readonly) continue;
+              const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
+              if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
+              const overrideVal = headOverrides[key];
+              const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats));
+              if (choice && choice.id !== undefined) {
+                const want = String(choice.id);
+                selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === want);
+                setReactive(vmHead, headTarget, key, choice.id);
+                triggerVeeValidate(c.wrap);
+              } else {
+                unfilled.push(`Head: ${key}`);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ---- Address cascade: auto-pick when exactly one usable option exists.
+    const geoKeyRe = /^(division|district|thana|union|ward|pouro|city|district_pouro|city_thana)(_id)?(_city|_dist|_pouro|_union)?$/;
+    const geoKeyRe2 = /^(permanent_)?(division|district|thana|union|ward|pouro|city)/;
+    for (const c of controls) {
+      if (!c.isSelect) continue;
+      const { scope, key } = classifyControl(c);
+      if (!/^(data|form|addressForm)$/.test(scope)) continue;
+      if (!geoKeyRe.test(key) && !geoKeyRe2.test(key)) continue;
+      if (c.vInst.disabled || c.vInst.readonly) continue;
+      if (!Array.isArray(c.vInst.items) || !c.vInst.items.length) continue;
+      const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
+      if (!isEmptyModelVal(currentVal)) continue;
+      const usable = c.vInst.items.filter(it => {
+        const v = optionItemId(c.vInst, it);
+        return v !== undefined && v !== null && String(v).trim() !== '';
+      });
+      if (usable.length === 1) {
+        selectVuetifyItem(c.vInst, it => it === usable[0]);
+        triggerVeeValidate(c.wrap);
+      }
+    }
+
+    return unfilled;
+  }
+
   function parseMemberRow(m) {
     const relId = Number(m.relationship_id || m.relation_id || 0);
     const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
@@ -1052,6 +1455,17 @@
           setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
           setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
+          // Yes/No radios whose values are known (0/1). The option sync pass
+          // below also clicks the matching radio so change handlers fire.
+          const memAgeForStudent = calculateAgeYears(m.dob);
+          setReactive(vmMembers, row, 'is_currently_student',
+            (memAgeForStudent !== null && memAgeForStudent >= 3 && memAgeForStudent < 18) ? 1 : 0);
+          setReactive(vmMembers, row, 'is_ssnp_covered', 0);
+          setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', 0);
+          if (m.disability_type_id !== undefined && m.disability_type_id !== null && m.disability_type_id !== '') {
+            setReactive(vmMembers, row, 'disability_type_id', Number(m.disability_type_id));
+          }
+
           if (relName === 'Husband' && !row.estimate_annual_income) {
             setReactive(vmMembers, row, 'estimate_annual_income', 60000);
           }
@@ -1064,13 +1478,55 @@
       applySmartFormDefaults(vmHead, vmMembers, counts, defs);
       syncAllGenderAndReligionSelects(headGenderId, targetMemberList, row0IsHead, familyReligionId, isVerificationPage);
 
+      // NEW: fill the dropdowns/radios the old injector skipped (livelihood,
+      // literacy, education, marital, health, disability type, SSNP/DSS
+      // radios, head education/profession/marital, address cascade).
+      // First pass now; a second empty-only pass after a short delay catches
+      // selects that render late (disability type, cascaded union/ward lists).
+      let optionUnfilled = [];
+      try {
+        await new Promise(r => setTimeout(r, 250));
+        const memberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
+        optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, false);
+        await new Promise(r => setTimeout(r, 900));
+        const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true);
+        optionUnfilled = [...new Set([...optionUnfilled, ...lateUnfilled])];
+      } catch (e) {
+        optionUnfilled.push('option sync error: ' + e.message);
+      }
+
+      // Spouse name (shows only when head marital status = Married): fill
+      // from the Husband/Wife member when one is in the household.
+      try {
+        const spouse = (payload.family_members || []).find(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
+        const maritalVal = headTarget ? (headTarget.marital_status ?? headTarget.maritalStatus) : undefined;
+        if (spouse && headTarget && maritalVal !== undefined && maritalVal !== null && maritalVal !== '') {
+          if ('spouse_name_bn' in headTarget || 'spouse_name_en' in headTarget) {
+            setReactive(vmHead, headTarget, 'spouse_name_bn', spouse.name_bn);
+            setReactive(vmHead, headTarget, 'spouse_name_en', spouse.name_en);
+          }
+          document.querySelectorAll('.v-input, .form-group').forEach(wrap => {
+            if (wrap.closest('#fc-floating-root')) return;
+            const lbl = getControlLabel(wrap);
+            if (!/স্বামী|স্ত্রীর নাম|spouse/i.test(lbl)) return;
+            const inp = wrap.querySelector('input[type="text"], input:not([type])');
+            if (!inp || inp.disabled || inp.readOnly) return;
+            const isBn = /বাংলা|bangla|_bn|\(bn\)/i.test(lbl);
+            setNativeInputValue(inp, isBn ? (spouse.name_bn || '') : (spouse.name_en || ''), wrap.__vue__);
+          });
+        }
+      } catch (_) {}
+
       if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
       if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
+      const unfilledNote = optionUnfilled.length
+        ? ` Not auto-filled (please select manually): ${optionUnfilled.join('; ')}.`
+        : '';
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: {
           success: true,
-          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!`
+          message: `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code!${unfilledNote}`
         }
       }));
     } catch (err) {
