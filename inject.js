@@ -828,6 +828,36 @@
   // the value sticks for 3 checks in a row or 30s pass. Never touches
   // anything when the branch list has more than one option, and never
   // overwrites a value the user picked.
+  // "তথ্য সংগ্রহের ঠিকানা একই হলে ক্লিক করুন" — checking it runs the
+  // site's copySameAsPermanent(), copying addressForm.permanent_* into
+  // the collection address fields. Auto-check only when the box is
+  // unchecked, the collection address is empty, and the permanent
+  // address has something to copy — never overwrites an entered
+  // (different) collection address. Clicking the real input fires the
+  // site's own change handler, including its cascade reloads.
+  function syncSameAsPermanent(allVms) {
+    let boxWrap = null;
+    document.querySelectorAll('.v-input').forEach(wrap => {
+      if (boxWrap || wrap.closest('#fc-floating-root')) return;
+      if (/তথ্য সংগ্রহের ঠিকানা একই|information collection address is the same/i.test(wrap.textContent || '')) boxWrap = wrap;
+    });
+    if (!boxWrap) return false;
+    const vInst = getActiveVm(boxWrap);
+    if (!vInst || vInst.disabled || vInst.readonly) return false;
+    const inp = boxWrap.querySelector('input[type="checkbox"]');
+    if ((vInst.internalValue ?? vInst.lazyValue) || (inp && inp.checked)) return false;
+    const owner = (allVms || []).find(v => v && v.addressForm) || null;
+    const af = owner ? owner.addressForm : null;
+    if (!af) return false;
+    const collEmpty = ['division_id', 'district_id', 'thana_id', 'union_id', 'pouro_id', 'city_id', 'post_code', 'address']
+      .every(k => isEmptyModelVal(af[k]));
+    const permFilled = ['permanent_division_id', 'permanent_district_id', 'permanent_thana_id', 'permanent_union_id', 'permanent_pouro_id', 'permanent_city_id', 'permanent_post_code', 'permanent_address']
+      .some(k => !isEmptyModelVal(af[k]));
+    if (!collEmpty || !permFilled) return false;
+    if (inp && !inp.disabled) { inp.click(); return true; }
+    return false;
+  }
+
   function watchSingleBranch() {
     let stuckPolls = 0;
     let seenControl = false;
@@ -1854,7 +1884,8 @@
       const src = ov !== undefined ? ov : derivedPmt.get(qid);
       if (src === undefined) return;
       const entry = findPmtEntry(qid);
-      if (onlyEmpty && entry && !isEmptyModelVal(entry.sub_variables)) return;
+      const alreadyFilled = entry && !isEmptyModelVal(entry.sub_variables);
+      if (!(onlyEmpty && alreadyFilled)) {
       const wantList = Array.isArray(src) ? src : [src];
       const wantIds = new Set(), wantLabels = [];
       wantList.forEach(v => {
@@ -1876,6 +1907,24 @@
         if (!checked && inp && !inp.disabled) inp.click();
       });
       if (chosen.length && entry) setReactive(pmtOwnerVm, entry, 'sub_variables', chosen);
+      }
+      // The grid's "required" error only clears when a checkbox change
+      // fires the provider's validate(). Direct model writes emit no
+      // change, so a stale error would stay red despite checked boxes.
+      // Re-fire a change on one checked box whenever the entry holds
+      // values — the site's own change handler re-validates.
+      if (entry && !isEmptyModelVal(entry.sub_variables)) {
+        try {
+          const boxes = grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox');
+          for (const box of boxes) {
+            const inp = box.querySelector ? box.querySelector('input[type="checkbox"]') : null;
+            if (inp && inp.checked && !inp.disabled && typeof inp.dispatchEvent === 'function') {
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+              break;
+            }
+          }
+        } catch (_) {}
+      }
     });
 
     return { unfilled, seenPmt, seenProgram };
@@ -1910,6 +1959,7 @@
         const ht = getHeadTargetObj(vh) || headTarget;
         const res = await syncDynamicSections(vh, fresh.allVms || allVms, ht, memberRows, targetMemberList, headMember, counts, defs, true);
         if (res.seenPmt.size || res.seenProgram.size) seenAny = true;
+        try { syncSameAsPermanent(fresh.allVms || allVms); } catch (_) {}
         // Verify against the live MODELS, not just "no unfilled
         // notes": a drive can appear to succeed and then be wiped by
         // a late rebuild. Require the values to stay filled for two
@@ -2304,6 +2354,9 @@
         // Bank branch: re-apply the single-option pick late, after the
         // site's payment-processors reload has had a chance to null it.
         try { syncSingleBranch(vmHead, headTarget); } catch (_) {}
+        // Same-address checkbox: copy the permanent address into the
+        // collection address once the permanent fields are filled.
+        try { syncSameAsPermanent(allVms); } catch (_) {}
       } catch (e) {
         optionUnfilled.push('option sync error: ' + e.message);
       }
