@@ -830,31 +830,39 @@
   // overwrites a value the user picked.
   // "তথ্য সংগ্রহের ঠিকানা একই হলে ক্লিক করুন" — checking it runs the
   // site's copySameAsPermanent(), copying addressForm.permanent_* into
-  // the collection address fields. Auto-check only when the box is
+  // the collection address fields. It is a checkbox, not an option
+  // field: click it AT MOST ONCE per autofill run, and only when it is
   // unchecked, the collection address is empty, and the permanent
   // address has something to copy — never overwrites an entered
   // (different) collection address. Clicking the real input fires the
   // site's own change handler, including its cascade reloads.
+  let sameAsPermanentClickedThisRun = false;
   function syncSameAsPermanent(allVms) {
+    if (sameAsPermanentClickedThisRun) return false;
     let boxWrap = null;
     document.querySelectorAll('.v-input').forEach(wrap => {
       if (boxWrap || wrap.closest('#fc-floating-root')) return;
       if (/তথ্য সংগ্রহের ঠিকানা একই|information collection address is the same/i.test(wrap.textContent || '')) boxWrap = wrap;
     });
     if (!boxWrap) return false;
-    const vInst = getActiveVm(boxWrap);
-    if (!vInst || vInst.disabled || vInst.readonly) return false;
-    const inp = boxWrap.querySelector('input[type="checkbox"]');
-    if ((vInst.internalValue ?? vInst.lazyValue) || (inp && inp.checked)) return false;
     const owner = (allVms || []).find(v => v && v.addressForm) || null;
     const af = owner ? owner.addressForm : null;
     if (!af) return false;
+    const vInst = getActiveVm(boxWrap);
+    if (!vInst || vInst.disabled || vInst.readonly) return false;
+    const inp = boxWrap.querySelector('input[type="checkbox"]');
+    // Already checked? Check every signal: the checkbox VM, the DOM
+    // input, and the owner's sameAsPermanent model flag.
+    const alreadyChecked = (vInst.internalValue ?? vInst.lazyValue ?? vInst.inputValue)
+      || (inp && inp.checked)
+      || owner.sameAsPermanent === true;
+    if (alreadyChecked) return false;
     const collEmpty = ['division_id', 'district_id', 'thana_id', 'union_id', 'pouro_id', 'city_id', 'post_code', 'address']
       .every(k => isEmptyModelVal(af[k]));
     const permFilled = ['permanent_division_id', 'permanent_district_id', 'permanent_thana_id', 'permanent_union_id', 'permanent_pouro_id', 'permanent_city_id', 'permanent_post_code', 'permanent_address']
       .some(k => !isEmptyModelVal(af[k]));
     if (!collEmpty || !permFilled) return false;
-    if (inp && !inp.disabled) { inp.click(); return true; }
+    if (inp && !inp.disabled) { sameAsPermanentClickedThisRun = true; inp.click(); return true; }
     return false;
   }
 
@@ -1719,6 +1727,8 @@
     derivedPmt.set(47, [559, 563, 435, 591]); // durable assets everyone has: fan, bed, mobile, tubewell — user default; override via form_defaults.pmt
     derivedPmt.set(548, 550); // cooking fuel: কাঠ/খড়ি/লাকড়ি (wood) — user default; override via form_defaults.pmt
     derivedPmt.set(40, 399); // drinking water source: টিউবওয়েল (tubewell) — user default; override via form_defaults.pmt
+    derivedPmt.set(567, 568); // electricity source: জাতীয় গ্রিড (national grid) — user default; override via form_defaults.pmt
+    derivedPmt.set(41, 386); // latrine type: স্যানিটারি/উন্নত ল্যাট্রিন (sanitary) — user default; override via form_defaults.pmt
 
     const derivedProg = new Map();
     derivedProg.set(75, { number: counts.maleCount });
@@ -1908,22 +1918,23 @@
       });
       if (chosen.length && entry) setReactive(pmtOwnerVm, entry, 'sub_variables', chosen);
       }
-      // The grid's "required" error only clears when a checkbox change
-      // fires the provider's validate(). Direct model writes emit no
-      // change, so a stale error would stay red despite checked boxes.
-      // Re-fire a change on one checked box whenever the entry holds
-      // values — the site's own change handler re-validates.
+      // Re-fire a change on one checked box ONLY while the grid shows
+      // its error state — the site's own change handler re-validates
+      // and clears it. Never fire when no error is showing.
       if (entry && !isEmptyModelVal(entry.sub_variables)) {
-        try {
-          const boxes = grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox');
-          for (const box of boxes) {
-            const inp = box.querySelector ? box.querySelector('input[type="checkbox"]') : null;
-            if (inp && inp.checked && !inp.disabled && typeof inp.dispatchEvent === 'function') {
-              inp.dispatchEvent(new Event('change', { bubbles: true }));
-              break;
+        const showsError = grid.classList && typeof grid.classList.contains === 'function' && grid.classList.contains('fc-pmt-multi-grid--error');
+        if (showsError) {
+          try {
+            const boxes = grid.querySelectorAll('.fc-pmt-multi-checkbox, .v-checkbox');
+            for (const box of boxes) {
+              const inp = box.querySelector ? box.querySelector('input[type="checkbox"]') : null;
+              if (inp && inp.checked && !inp.disabled && typeof inp.dispatchEvent === 'function') {
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                break;
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
     });
 
@@ -1940,7 +1951,7 @@
   // (onlyEmpty: never overwrites a filled/user value) until every
   // derivable id has been seen and filled, or 30s pass.
   function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs) {
-    const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548, 40];
+    const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548, 40, 567, 41];
     const wantProg = [75, 142, 96, 139, 140, 141];
     if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
     let seenAny = false;
@@ -2067,6 +2078,7 @@
     }
 
     autofillInFlight = true;
+    sameAsPermanentClickedThisRun = false;
     window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
       detail: { success: true, message: 'Filling the form — please wait, one click is enough…' }
     }));
