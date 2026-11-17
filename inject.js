@@ -1026,6 +1026,49 @@
     }
   }
 
+  // Why autofill used to need TWO clicks: the site loads its dropdown
+  // data (lookups, PMT) over the network in created()/bootPage(),
+  // renders expansion-panel content lazily, and may overwrite the
+  // form models when its draft load() finishes. A first click that
+  // runs before all that settles fills only the models; the DOM
+  // passes find unmounted panels / empty option lists, so the user
+  // had to click again once everything had loaded. Wait here until
+  // the rendered controls stop growing AND some lookup data exists
+  // AND no loading flag is set — bounded, so a slow page only costs
+  // a few seconds, never a hang.
+  async function waitForFormReady(vmHead, vmMembers, timeoutMs = 5000) {
+    const t0 = Date.now();
+    let lastCount = -1, stablePolls = 0;
+    for (;;) {
+      const count = document.querySelectorAll('.v-input').length;
+      if (count === lastCount) stablePolls++;
+      else { stablePolls = 0; lastCount = count; }
+
+      let dataReady = false;
+      for (const vm of [vmHead, vmMembers]) {
+        if (!vm) continue;
+        for (const k of ['family_relationships', 'family_gov_facilities', 'educationalStatus', 'lookups', 'programs', 'PMTVariables', 'injuryType', 'classes']) {
+          if (Array.isArray(vm[k]) && vm[k].length) { dataReady = true; break; }
+        }
+        if (dataReady) break;
+      }
+      if (!dataReady) {
+        const wraps = document.querySelectorAll('.v-input');
+        for (const w of wraps) {
+          const v = w.__vue__;
+          if (v && Array.isArray(v.items) && v.items.length) { dataReady = true; break; }
+        }
+      }
+      let stillLoading = false;
+      for (const vm of [vmHead, vmMembers]) {
+        if (vm && vm.loading === true) { stillLoading = true; break; }
+      }
+      if (!stillLoading && dataReady && stablePolls >= 2) return true;
+      if (Date.now() - t0 > timeoutMs) return false;
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
   // Collect every rendered v-select / v-radio-group on the form, with the
   // Vue model expression each one is bound to (e.g. "member.livelihood_profession_id",
   // "data.education_status", "addressForm.union_id").
@@ -1702,11 +1745,20 @@
     );
   }
 
+  let autofillInFlight = false;
+
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
     const payload = event.detail;
     if (!payload) return;
 
-    const { vmHead, vmMembers, allVms } = getVueNodes();
+    if (autofillInFlight) {
+      window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+        detail: { success: true, message: 'Autofill is already running — please wait, one click is enough.' }
+      }));
+      return;
+    }
+
+    let { vmHead, vmMembers, allVms } = getVueNodes();
     if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: { success: false, message: 'Vue application form not detected on this page.' }
@@ -1714,7 +1766,24 @@
       return;
     }
 
+    autofillInFlight = true;
+    window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
+      detail: { success: true, message: 'Filling the form — please wait, one click is enough…' }
+    }));
+
     try {
+      if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+
+      // Wait for the site's panels to mount and its lookup/PMT data to
+      // arrive (see waitForFormReady) — this is what used to force a
+      // second click. Then re-read the Vue nodes: components may have
+      // re-mounted while loading.
+      await waitForFormReady(vmHead, vmMembers);
+      const fresh = getVueNodes();
+      if (fresh.vmHead) vmHead = fresh.vmHead;
+      if (fresh.vmMembers) vmMembers = fresh.vmMembers;
+      if (fresh.allVms && fresh.allVms.length) allVms = fresh.allVms;
       if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
       if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
@@ -2024,6 +2093,8 @@
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: { success: false, message: `Autofill error: ${err.message}` }
       }));
+    } finally {
+      autofillInFlight = false;
     }
   });
 
