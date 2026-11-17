@@ -748,7 +748,14 @@
         triggerVeeValidate(wrap);
       }
 
-      // L. Bank Branch Name
+      // L. Bank Branch Name — single-option auto-pick. The site's
+      // enumerator-bank logic (applyEnumeratorBankSelection) NULLS
+      // data.branch_name whenever the payment-processors list reloads
+      // without preserveBranch, which happens AFTER autofill when the
+      // contact/district data settles — so the pick used to show and
+      // then get rejected. Write the model directly as well as driving
+      // the select, and see syncSingleBranch/watchSingleBranch below,
+      // which re-apply the pick until it sticks.
       if (/ব্যাংক\s*শাখা|শাখার\s*নাম|branch\s*name/i.test(labelTxt)) {
         if (vInst && Array.isArray(vInst.items) && !vInst.disabled && !vInst.readonly) {
           const validItems = vInst.items.filter(it => {
@@ -759,12 +766,94 @@
             return String(it ?? '').trim() !== '';
           });
           if (validItems.length === 1) {
+            const branchId = optionItemId(vInst, validItems[0]);
+            if (d && branchId !== undefined && branchId !== null && String(branchId).trim() !== '') {
+              setReactive(vmHead, d, 'branch_name', branchId);
+            }
             selectVuetifyItem(vInst, it => it === validItems[0]);
             triggerVeeValidate(wrap);
           }
         }
       }
     });
+  }
+
+  // Find the bank-branch select fresh from the DOM (label + model
+  // expression), excluding the bank-district select ("জেলা শাখা").
+  function findBranchControl() {
+    let found = null;
+    document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
+      if (found || wrap.closest('#fc-floating-root')) return;
+      if (!wrap.classList.contains('v-input') && wrap.querySelector('.v-input')) return;
+      const vInst = getActiveVm(wrap);
+      if (!vInst || !Array.isArray(vInst.items)) return;
+      const expr = getModelExpression(vInst);
+      if (/district/i.test(expr)) return;
+      const labelTxt = getControlLabel(wrap);
+      if (/application_pmt|allowance_program/.test(expr)) return;
+      if (!/branch_name/.test(expr) && !/ব্যাংক\s*শাখা|শাখার\s*নাম|branch\s*name/i.test(labelTxt)) return;
+      found = { wrap, vInst, labelTxt };
+    });
+    return found;
+  }
+
+  // If the branch list holds exactly one option and branch_name is
+  // empty, select it (model write + select drive). Returns true when
+  // it applied the pick.
+  function syncSingleBranch(vmHead, headTarget) {
+    const c = findBranchControl();
+    if (!c || c.vInst.disabled || c.vInst.readonly) return false;
+    const validItems = c.vInst.items.filter(it => {
+      if (typeof it === 'object' && it !== null) {
+        const v = it.value ?? it.id ?? it.code;
+        return v !== undefined && v !== null && String(v).trim() !== '';
+      }
+      return String(it ?? '').trim() !== '';
+    });
+    if (validItems.length !== 1) return false;
+    const current = headTarget ? headTarget.branch_name : undefined;
+    const shown = c.vInst.internalValue ?? c.vInst.lazyValue;
+    if (!isEmptyModelVal(current) && !isEmptyModelVal(shown)) return false;
+    const branchId = optionItemId(c.vInst, validItems[0]);
+    if (branchId === undefined || branchId === null || String(branchId).trim() === '') return false;
+    if (headTarget) setReactive(vmHead, headTarget, 'branch_name', branchId);
+    selectVuetifyItem(c.vInst, it => it === validItems[0]);
+    triggerVeeValidate(c.wrap);
+    return true;
+  }
+
+  // Background watcher: the site can null branch_name seconds after
+  // autofill (payment-processors reload / enumerator-bank apply).
+  // Re-apply the single-branch pick whenever it is empty again, until
+  // the value sticks for 3 checks in a row or 12s pass. Never touches
+  // anything when the branch list has more than one option, and never
+  // overwrites a value the user picked.
+  function watchSingleBranch() {
+    let stuckPolls = 0;
+    let seenControl = false;
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      try {
+        if (Date.now() - t0 > 12000) { clearInterval(timer); return; }
+        const { vmHead, } = getVueNodes();
+        const headTarget = getHeadTargetObj(vmHead);
+        const c = findBranchControl();
+        if (!c) {
+          // No branch field at all (e.g. MFS account, or the section
+          // never rendered): stop watching after a short grace period.
+          if (!seenControl && Date.now() - t0 > 4000) clearInterval(timer);
+          return;
+        }
+        seenControl = true;
+        const current = headTarget ? headTarget.branch_name : undefined;
+        if (!isEmptyModelVal(current)) {
+          if (++stuckPolls >= 3) clearInterval(timer);
+          return;
+        }
+        stuckPolls = 0;
+        syncSingleBranch(vmHead, headTarget);
+      } catch (_) {}
+    }, 500);
   }
 
   function syncAllGenderAndReligionSelects(headGenderId, memberList, row0IsHead, familyReligionId, isVerificationPage) {
@@ -1520,6 +1609,8 @@
 
   async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty) {
     const unfilled = [];
+    const seenPmt = new Set();
+    const seenProgram = new Set();
     const pmtOverrides = (defs && defs.pmt) || {};
     const progOverrides = (defs && defs.program_fields) || {};
     const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
@@ -1621,6 +1712,8 @@
       if (!c.isSelect) continue;
       const ident = identifyDynamicControl(c);
       if (!ident) continue;
+      if (ident.kind === 'pmt') seenPmt.add(ident.id);
+      else seenProgram.add(ident.id);
       if (c.vInst.disabled || c.vInst.readonly) continue;
       const isMulti = !!c.vInst.multiple;
       const shortLabel = (c.label || '').trim().replace(/\s+/g, ' ').slice(0, 40);
@@ -1695,7 +1788,50 @@
       if (chosen.length && entry) setReactive(pmtOwnerVm, entry, 'sub_variables', chosen);
     });
 
-    return unfilled;
+    return { unfilled, seenPmt, seenProgram };
+  }
+
+  // Background watcher for the PMT + program sections. The program
+  // section only renders once the async program/draft data arrives
+  // (DynamicAdditionalFields is v-if'd on displayAdditionalFields AND
+  // applicationAllowanceValues), and the parent REBUILDS
+  // applicationAllowanceValues from the draft when that data lands —
+  // wiping any picks made before the rebuild. That is why the program
+  // section used to need a second click. Re-run the dynamic sync
+  // (onlyEmpty: never overwrites a filled/user value) until every
+  // derivable id has been seen and filled, or 12s pass.
+  function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs) {
+    const wantPmt = [576, 530, 1, 7, 12, 14, 18, 29];
+    const wantProg = [75, 142, 96, 139, 140, 141];
+    if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
+    let seenAny = false;
+    let inFlight = false;
+    const t0 = Date.now();
+    const timer = setInterval(async () => {
+      if (inFlight) return;
+      try {
+        if (Date.now() - t0 > 12000) { clearInterval(timer); return; }
+        inFlight = true;
+        const fresh = getVueNodes();
+        const vh = fresh.vmHead || vmHead;
+        const ht = getHeadTargetObj(vh) || headTarget;
+        const res = await syncDynamicSections(vh, fresh.allVms || allVms, ht, memberRows, targetMemberList, headMember, counts, defs, true);
+        if (res.seenPmt.size || res.seenProgram.size) seenAny = true;
+        if (!seenAny && Date.now() - t0 > 4000) { clearInterval(timer); return; }
+        const unfilledIds = new Set();
+        for (const n of res.unfilled) {
+          const m = n.match(/(?:PMT Q|Program field )(\d+)/);
+          if (m) unfilledIds.add(Number(m[1]));
+        }
+        const pmtDone = wantPmt.every(id => res.seenPmt.has(id) && !unfilledIds.has(id));
+        const progDone = wantProg.every(id => res.seenProgram.has(id) && !unfilledIds.has(id));
+        if (pmtDone && progDone) clearInterval(timer);
+      } catch (_) {
+        // Keep watching; a later pass may succeed.
+      } finally {
+        inFlight = false;
+      }
+    }, 1000);
   }
 
   function parseMemberRow(m) {
@@ -2045,15 +2181,26 @@
         // bands). Runs after the option sync so head/spouse education ids
         // are already in the models for the PMT band mapping. A third
         // late pass covers PMT/program data that loads after the form.
-        const dynUnfilled = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false);
+        const dynUnfilled = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false)).unfilled;
         await new Promise(r => setTimeout(r, 600));
-        const dynLate = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        const dynLate = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
         await new Promise(r => setTimeout(r, 2000));
-        const dynLate2 = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        const dynLate2 = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
         optionUnfilled = [...new Set([...optionUnfilled, ...dynUnfilled, ...dynLate, ...dynLate2])];
+        // Bank branch: re-apply the single-option pick late, after the
+        // site's payment-processors reload has had a chance to null it.
+        try { syncSingleBranch(vmHead, headTarget); } catch (_) {}
       } catch (e) {
         optionUnfilled.push('option sync error: ' + e.message);
       }
+
+      // Keep the single branch selected even if the site nulls it a
+      // few seconds later (enumerator-bank re-apply). Fire-and-forget.
+      try { watchSingleBranch(); } catch (_) {}
+      // Keep the PMT/program sections filled even if their data
+      // arrives or rebuilds after autofill. Fire-and-forget.
+      const finalMemberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
+      try { watchDynamicSections(vmHead, allVms, headTarget, finalMemberRows, targetMemberList, payload.head || null, counts, defs); } catch (_) {}
 
       // Spouse name (shows only when head marital status = Married): fill
       // from the Husband/Wife member when one is in the household.
