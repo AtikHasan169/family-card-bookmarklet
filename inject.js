@@ -65,14 +65,10 @@
     if (payload?.head) people.push(payload.head);
     if (Array.isArray(payload?.family_members)) people.push(...payload.family_members);
     const allText = people.map(p => `${p?.name_bn || ''} ${p?.name_en || ''} ${p?.father_name_bn || ''} ${p?.mother_name_bn || ''}`).join(' ');
-    if (/\b(?:md|mohd|mohammad|muhammad|mst|mosammat|mosa|mosha|khatun|begum|hossain|husain|hossen|islam|rahman|rahim|karim|uddin|ahmed|ahammad|ali|mia|miah|akter|akhter|sheikh|kazi|khandaker|sultana|parvin|bibi|hasan|hassan|abdul|abul|molla|mollah|fatema|ayesha|khadija|jahan|nahar)\b|মোঃ|মো:|মোছাঃ|মোসাঃ|মোছা|মোসা|খাতুন|হোসেন|হুসাইন|ইসলাম|বেগম|আক্তার|রহমান|রহিম|করিম|উদ্দিন|আহমেদ|আহম্মদ|আলী|মিয়া|মিয়া|শেখ|কাজী|খন্দকার|সুলতানা|পারভীন|বিবি|হাসান|আব্দুল|আবুল|মোল্লা|মুহাম্মদ|মোহাম্মদ|ফাতেমা|আয়েশা|খাদিজা|জাহান|নাহার/i.test(allText)) {
-      return 1; // Islam
-    }
     if (/\b(?:chandra|kumar|rani|bala|devi|chakraborty|bhattacharya|chatterjee|mukherjee|banerjee|barman|ghosh|bose)\b|চন্দ্র|কুমার|রানী|রাণী|বালা|দেবী|চক্রবর্তী|ভট্টাচার্য|চ্যাটার্জী|মুখার্জী|ব্যানার্জী|বর্মন|ঘোষ|বসু/i.test(allText)) {
       return 2; // Hinduism
     }
-    if (payload?.form_defaults?.religion_id) return Number(payload.form_defaults.religion_id);
-    return 1;
+    return 1; // Default Islam
   }
 
   function setReactive(vmTarget, targetObj, key, val) {
@@ -158,9 +154,7 @@
       }
     }
     return {
-      dd,
-      mm,
-      yyyy,
+      dd, mm, yyyy,
       iso: `${yyyy}-${mm}-${dd}`,
       slash: `${dd}/${mm}/${yyyy}`,
       dash: `${dd}-${mm}-${yyyy}`
@@ -210,12 +204,8 @@
     const strVal = String(valStr ?? '');
 
     if (vInst) {
-      if ('lazyValue' in vInst) {
-        try { vInst.lazyValue = strVal; } catch (_) {}
-      }
-      if ('internalValue' in vInst) {
-        try { vInst.internalValue = strVal; } catch (_) {}
-      }
+      if ('lazyValue' in vInst) { try { vInst.lazyValue = strVal; } catch (_) {} }
+      if ('internalValue' in vInst) { try { vInst.internalValue = strVal; } catch (_) {} }
       vInst.$emit('input', strVal);
       vInst.$emit('change', strVal);
     }
@@ -229,9 +219,7 @@
     inp.dispatchEvent(new Event('change', { bubbles: true }));
     inp.dispatchEvent(new Event('blur', { bubbles: true }));
 
-    if (vInst && typeof vInst.$forceUpdate === 'function') {
-      vInst.$forceUpdate();
-    }
+    if (vInst && typeof vInst.$forceUpdate === 'function') vInst.$forceUpdate();
   }
 
   async function selectDateViaVuetifyCalendar(rawDob, targetIndex = 0) {
@@ -254,9 +242,7 @@
 
     const targetWrap = dobContainers[targetIndex];
     if (!targetWrap) return;
-    if (targetWrap.classList.contains('bg-gray-cursor-not-allowed') || targetWrap.closest('.bg-gray-cursor-not-allowed')) {
-      return;
-    }
+    if (targetWrap.classList.contains('bg-gray-cursor-not-allowed') || targetWrap.closest('.bg-gray-cursor-not-allowed')) return;
 
     let menuVm = null;
     let wrapperVm = null;
@@ -369,12 +355,8 @@
     if (typeof vInst.selectItem === 'function') {
       try { vInst.selectItem(targetItem); } catch (_) {}
     }
-    if ('internalValue' in vInst) {
-      try { vInst.internalValue = val; } catch (_) {}
-    }
-    if ('lazyValue' in vInst) {
-      try { vInst.lazyValue = val; } catch (_) {}
-    }
+    if ('internalValue' in vInst) { try { vInst.internalValue = val; } catch (_) {} }
+    if ('lazyValue' in vInst) { try { vInst.lazyValue = val; } catch (_) {} }
     vInst.$emit('input', val);
     vInst.$emit('change', val);
     if (typeof vInst.$forceUpdate === 'function') vInst.$forceUpdate();
@@ -439,6 +421,8 @@
       setReactive(vmHead, d, 'children_count', Number(childrenUnder18));
       setReactive(vmHead, d, 'religion', Number(religionId));
       setReactive(vmHead, d, 'religion_id', Number(religionId));
+      setReactive(vmHead, d, 'other_gender_count', Number(otherGenderCount));
+      setReactive(vmHead, d, 'bidesh_count', Number(bideshCount));
 
       if ('is_ethnic' in d) {
         setReactive(vmHead, d, 'is_ethnic', typeof d.is_ethnic === 'boolean' ? Boolean(isEthnic) : Number(isEthnic));
@@ -475,7 +459,7 @@
         'other_gender_count', 'third_gender_count', 'hijra_count', 'other_member',
         'transgender_count', 'hijra_member', 'hijra', 'third_gender', 'khana_hijra'
       ].forEach(k => {
-        if (k in d) setReactive(vmHead, d, k, Number(otherGenderCount ?? 0));
+        if (k in d) setReactive(vmHead, d, k, Number(otherGenderCount));
       });
 
       [
@@ -484,7 +468,7 @@
         'overseas_member', 'probashi', 'bidesh', 'is_probashi', 'is_migrant', 'has_migrant'
       ].forEach(k => {
         if (k in d) {
-          setReactive(vmHead, d, k, typeof d[k] === 'boolean' ? Boolean(bideshCount) : Number(bideshCount ?? 0));
+          setReactive(vmHead, d, k, typeof d[k] === 'boolean' ? Boolean(bideshCount) : Number(bideshCount));
         }
       });
 
@@ -513,25 +497,7 @@
           if (k in d && typeof d[k] !== 'object') setReactive(vmHead, d, k, wardVal);
         });
       }
-
-      Object.keys(d).forEach(k => {
-        const low = k.toLowerCase();
-        if (typeof d[k] === 'object' && d[k] !== null) return;
-        if (/male_member|male_count|total_male|no_of_male|khana_male/.test(low) && !/female/.test(low)) {
-          setReactive(vmHead, d, k, Number(maleCount));
-        } else if (/female_member|female_count|total_female|no_of_female|khana_female/.test(low)) {
-          setReactive(vmHead, d, k, Number(femaleCount));
-        } else if (/hijra|third_gender|other_gender|transgender/.test(low)) {
-          setReactive(vmHead, d, k, Number(otherGenderCount ?? 0));
-        } else if (/probashi|bidesh|migrant|expatriate|abroad|remittance|foreign_member|overseas/.test(low)) {
-          setReactive(vmHead, d, k, typeof d[k] === 'boolean' ? Boolean(bideshCount) : Number(bideshCount ?? 0));
-        } else if (/religion/.test(low)) {
-          setReactive(vmHead, d, k, Number(religionId));
-        } else if (postVal && /post_code|postal_code|postcode|post_office|zip/.test(low)) {
-          setReactive(vmHead, d, k, postVal);
-        }
-      });
-
+    }
 
     document.querySelectorAll('.v-input, .form-group, fieldset').forEach(wrap => {
       if (wrap.closest('#fc-floating-root')) return;
@@ -545,7 +511,6 @@
       const fillNumericOrTextInput = (valToSet) => {
         const enStr = toEnDigits(valToSet);
 
-        // If this control is a Vuetify dropdown with items, select the item and stop so we don't clobber internalValue
         if (vInst && Array.isArray(vInst.items) && vInst.items.length > 0) {
           const matched = selectVuetifyItem(vInst, it => {
             const s = toEnDigits(itemToStr(it)).trim();
@@ -580,7 +545,7 @@
         triggerVeeValidate(wrap);
       };
 
-      // A. Religion (ধর্ম *) -> Islam (ইসলাম) for Head & all Family Members
+      // A. Religion (ধর্ম *)
       if (/ধর্ম|religion/i.test(labelTxt)) {
         selectVuetifyItem(vInst, it => {
           if (typeof it === 'object' && it !== null) {
@@ -598,34 +563,19 @@
         triggerVeeValidate(wrap);
       }
 
-      // B. Khudro Nrigosthi (খানাটি ক্ষুদ্র নৃগোষ্ঠী কি না *)
+      // B. Khudro Nrigosthi
       if (/ক্ষুদ্র\s*নৃ\s*[-]?\s*গোষ্ঠী|নৃগোষ্ঠী|ethnic|tribal/.test(labelTxt)) {
         const wantYes = Number(isEthnic) === 1;
         const isMatchText = (t) => {
           const cleanT = String(t || '').replace(/\*/g, '').trim().toLowerCase();
-          return wantYes
-            ? (cleanT === 'হ্যাঁ' || cleanT === 'yes' || cleanT.includes('হ্যাঁ'))
-            : (cleanT === 'না' || cleanT === 'no' || cleanT.includes('না'));
+          return wantYes ? (cleanT === 'হ্যাঁ' || cleanT === 'yes') : (cleanT === 'না' || cleanT === 'no');
         };
-        const isMatchVal = (v) => {
-          const cleanV = String(v ?? '').trim().toLowerCase();
-          return wantYes
-            ? (cleanV === '1' || cleanV === 'true' || cleanV === 'yes' || cleanV === 'হ্যাঁ')
-            : (cleanV === '0' || cleanV === '2' || cleanV === 'false' || cleanV === 'no' || cleanV === 'না');
-        };
-
-        selectVuetifyItem(vInst, it => {
-          if (typeof it === 'object' && it !== null) {
-            return isMatchText(itemToStr(it)) || isMatchVal(it.value ?? it.id);
-          }
-          return isMatchText(it) || isMatchVal(it);
-        });
-
+        selectVuetifyItem(vInst, it => isMatchText(itemToStr(it)));
         wrap.querySelectorAll('.v-radio').forEach(vRadEl => {
           const rLbl = (vRadEl.textContent || '').trim();
           const radVm = vRadEl.__vue__;
           const radVal = radVm ? radVm.value : vRadEl.querySelector('input')?.value;
-          if (isMatchText(rLbl) || isMatchVal(radVal)) {
+          if (isMatchText(rLbl) || isMatchText(radVal)) {
             const inp = vRadEl.querySelector('input[type="radio"]');
             if (inp && !inp.disabled && !inp.checked) inp.click();
             const groupVm = (radVm && radVm.radioGroup) ? radVm.radioGroup : vInst;
@@ -639,38 +589,20 @@
         triggerVeeValidate(wrap);
       }
 
-      // C. Location Type (খানাটি বা বাসস্থানটি কোথায় অবস্থিত *)
+      // C. Location Type
       if (/খানাটি\s*বা\s*বাসস্থানটি|বাসস্থানটি\s*কোথায়|বাসস্থানটি\s*কোথায়|খানাটি\s*কোথায়|খানাটি\s*কোথায়|কোথায়\s*অবস্থিত|কোথায়\s*অবস্থিত/.test(labelTxt) && !/এলাকার\s*ধরন/.test(labelTxt)) {
         const areaPattern = areaTypeId === 2 ? /পৌরসভা|pourashava|municipality/i : (areaTypeId === 3 ? /সিটি|city/i : /পল্লী|ইউনিয়ন|ইউনিয়ন|rural|union/i);
-
         selectVuetifyItem(vInst, it => {
           if (typeof it === 'object' && it !== null) {
-            const idMatch = Number(it.id ?? it.value) === Number(areaTypeId);
-            return idMatch || areaPattern.test(itemToStr(it));
+            return Number(it.id ?? it.value) === Number(areaTypeId) || areaPattern.test(itemToStr(it));
           }
           return Number(it) === Number(areaTypeId) || areaPattern.test(String(it));
-        });
-
-        wrap.querySelectorAll('.v-radio, input[type="radio"]:not(:disabled)').forEach(el => {
-          const rLbl = (el.closest('.v-radio, label')?.textContent || el.textContent || '').trim().toLowerCase();
-          const radVm = el.__vue__;
-          const radVal = radVm ? radVm.value : el.value;
-          if (Number(radVal) === Number(areaTypeId) || areaPattern.test(rLbl)) {
-            const inp = el.tagName === 'INPUT' ? el : el.querySelector('input[type="radio"]');
-            if (inp && !inp.disabled && !inp.checked) inp.click();
-            const groupVm = (radVm && radVm.radioGroup) ? radVm.radioGroup : vInst;
-            if (groupVm && radVal !== undefined) {
-              if ('internalValue' in groupVm) groupVm.internalValue = radVal;
-              groupVm.$emit('input', radVal);
-              groupVm.$emit('change', radVal);
-            }
-          }
         });
         triggerVeeValidate(wrap);
       }
 
-      // D. Village / Road No
-      if (villageVal && /গ্রাম|রাস্তা|পাড়া|মহল্লা|বাসা|হোল্ডিং|village|road|street|house no/.test(labelTxt) && !/সদস্য|member|size|কোথায়|কোথায়|অবস্থিত|এলাকার/.test(labelTxt)) {
+      // D. Village / Road
+      if (villageVal && /গ্রাম|রাস্তা|পাড়া|মহল্লা|বাসা|হোল্ডিং|village|road|street|house no/.test(labelTxt) && !/সদস্য|member|size|কোথায়|কোথায়|অবস্থিত/.test(labelTxt)) {
         fillNumericOrTextInput(villageVal);
       }
 
@@ -679,39 +611,37 @@
         const cleanEn = String(parseInt(wardVal, 10) || wardVal);
         const padEn = cleanEn.padStart(2, '0');
         const numRegex = new RegExp(`(^|\\D)(${cleanEn}|${padEn})(\\D|$)`);
-
         const matchedDropdown = selectVuetifyItem(vInst, it => {
           const normStr = toEnDigits(itemToStr(it));
           return normStr.trim() === cleanEn || normStr.trim() === padEn || numRegex.test(normStr);
         });
-
         if (!matchedDropdown) fillNumericOrTextInput(cleanEn);
         triggerVeeValidate(wrap);
       }
 
-      // F. Post Code (পোস্ট কোড / ডাকঘর কোড) from Settings Default
+      // F. Post Code
       if (postVal && /পোস্ট\s*কোড|পোষ্ট\s*কোড|পোস্ট\s*অফিস|ডাকঘর|post\s*code|postal\s*code|postcode|post_code|zip/i.test(labelTxt)) {
         fillNumericOrTextInput(postVal);
       }
 
-      // G. Male Count (পুরুষ সদস্য সংখ্যা / পুরুষ সংখ্যা / পুরুষ)
+      // G. Male Count
       if (/পুরুষ\s*সদস্য|পুরুষের\s*সংখ্যা|পুরুষ\s*সংখ্যা|কতজন\s*পুরুষ|^পুরুষ(\s*\*)?$|male\s*member|male\s*count|number\s*of\s*male|total\s*male/i.test(labelTxt) && !/মহিলা|নারী|female|লিঙ্গ/i.test(labelTxt)) {
         fillNumericOrTextInput(maleCount);
       }
 
-      // H. Female Count (মহিলা সদস্য সংখ্যা / নারী সদস্য সংখ্যা / মহিলা সংখ্যা / মহিলা)
-      if (/মহিলা\s*সদস্য|নারী\s*সদস্য|মহিলার\s*সংখ্যা|মহিলা\s*সংখ্যা|নারীর\s*সংখ্যা|নারী\s*সংখ্যা|কতজন\s*মহিলা|^(মহিলা|নারী)(\s*\*)?$|female\s*member|female\s*count|number\s*of\s*female|total\s*female/i.test(labelTxt) && !/লিঙ্গ/i.test(labelTxt)) {
+      // H. Female Count
+      if (/মহিলা\s*sদস্য|নারী\s*সদস্য|মহিলার\s*সংখ্যা|মহিলা\s*সংখ্যা|নারীর\s*সংখ্যা|নারী\s*সংখ্যা|কতজন\s*মহিলা|^(মহিলা|নারী)(\s*\*)?$|female\s*member|female\s*count|number\s*of\s*female|total\s*female/i.test(labelTxt) && !/লিঙ্গ/i.test(labelTxt)) {
         fillNumericOrTextInput(femaleCount);
       }
 
-      // H2. Hijra / Third Gender Count (হিজড়া / তৃতীয় লিঙ্গ -> Default 0)
+      // H2. Hijra / Third Gender Count (Default 0)
       if (/হিজড়া|হিজড়া|তৃতীয়\s*লিঙ্গ|তৃতীয়\s*লিঙ্গ|অন্যান্য\s*লিঙ্গ|hijra|third\s*gender|transgender|other\s*gender/i.test(labelTxt)) {
-        fillNumericOrTextInput(otherGenderCount ?? 0);
+        fillNumericOrTextInput(otherGenderCount);
       }
 
-      // H3. Bidesh / Probashi Member Count or Status (প্রবাসী / বিদেশ / অভিবাসী -> Default 0 or না)
+      // H3. Bidesh / Probashi Member Count (Default 0 or না)
       if (/প্রবাসী|বিদেশ|বিদেশে|অভিবাসী|রেমিট্যান্স|রেমিটেন্স|bidesh|probashi|abroad|migrant|expatriate|remittance|foreign|overseas/i.test(labelTxt)) {
-        const bVal = Number(bideshCount ?? 0);
+        const bVal = Number(bideshCount);
         const hasNoOption = vInst && Array.isArray(vInst.items) && vInst.items.some(it => /^(না|no)$/i.test(itemToStr(it).trim()));
         if (bVal === 0 && (hasNoOption || wrap.querySelector('.v-radio, input[type="radio"]'))) {
           selectVuetifyItem(vInst, it => /\b(না|no)\b|^0$/i.test(itemToStr(it).trim()));
@@ -722,12 +652,6 @@
             if (rLbl === 'না' || rLbl === 'no' || String(radVal) === '0' || radVal === false) {
               const inp = vRadEl.querySelector('input[type="radio"]');
               if (inp && !inp.disabled && !inp.checked) inp.click();
-              const groupVm = (radVm && radVm.radioGroup) ? radVm.radioGroup : vInst;
-              if (groupVm && radVal !== undefined) {
-                if ('internalValue' in groupVm) groupVm.internalValue = radVal;
-                groupVm.$emit('input', radVal);
-                groupVm.$emit('change', radVal);
-              }
             }
           });
           triggerVeeValidate(wrap);
@@ -736,17 +660,17 @@
         }
       }
 
-      // I. Children Under 18 (খানার শিশু সংখ্যা *)
+      // I. Children Under 18
       if (/খানার\s*শিশু\s*সংখ্যা|শিশু\s*সংখ্যা|শিশুর\s*সংখ্যা|১৮\s*বছরের\s*নিচে|কতজন\s*শিশু|number\s*of\s*children|children\s*count/i.test(labelTxt)) {
         fillNumericOrTextInput(childrenUnder18);
       }
 
-      // J. Total Household Members (খানার সদস্য সংখ্যা *)
-      if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total\s*member|family\s*size|house\s*size/i.test(labelTxt) && !/শিশু|child|পুরুষ|মহিলা|নারী|হিজড়া|হিজড়া|প্রবাসী|বিদেশ|male|female|hijra|migrant|abroad/i.test(labelTxt)) {
+      // J. Total Household Members
+      if (/খানার\s*সদস্য\s*সংখ্যা|সদস্য\s*সংখ্যা|খানার\s*সদস্য|পরিবারের\s*সদস্য|total\s*member|family\s*size|house\s*size/i.test(labelTxt) && !/শিশু|child|পুরুষ|মহিলা|নারী|হিজড়া|প্রবাসী|male|female|hijra|migrant|abroad/i.test(labelTxt)) {
         fillNumericOrTextInput(totalMembers);
       }
 
-      // K. Account Ownership (অ্যাকাউন্টের মালিকানা*) -> Self (নিজ)
+      // K. Account Ownership -> Self (নিজ)
       if (/অ্যাকাউন্টের\s*মালিকানা|হিসাবের\s*মালিকানা|একাউন্টের\s*মালিকানা|মালিকানা|account\s*ownership|ownership/i.test(labelTxt)) {
         const wantNij = /নিজ|স্বীয়|স্বীয়|নিজের|self|own/i;
         selectVuetifyItem(vInst, it => {
@@ -760,7 +684,7 @@
         triggerVeeValidate(wrap);
       }
 
-      // L. Bank Branch Name -> Auto-select if 1 option exists
+      // L. Bank Branch Name
       if (/ব্যাংক\s*শাখা|শাখার\s*নাম|branch\s*name/i.test(labelTxt)) {
         if (vInst && Array.isArray(vInst.items) && !vInst.disabled && !vInst.readonly) {
           const validItems = vInst.items.filter(it => {
@@ -779,10 +703,11 @@
     });
   }
 
-  function syncAllGenderSelects(headGenderId, memberList, row0IsHead, isVerificationPage) {
+  function syncAllGenderAndReligionSelects(headGenderId, memberList, row0IsHead, familyReligionId, isVerificationPage) {
     if (isVerificationPage) return;
     const genderSelectVms = [];
     const relationSelectVms = [];
+    const religionSelectVms = [];
 
     document.querySelectorAll('.v-input, .form-group').forEach(wrap => {
       if (wrap.closest('#fc-floating-root')) return;
@@ -795,6 +720,8 @@
         if (!genderSelectVms.some(g => g.vInst === vInst)) genderSelectVms.push({ wrap, vInst });
       } else if (/সম্পর্ক|relation/i.test(lbl)) {
         if (!relationSelectVms.some(r => r.vInst === vInst)) relationSelectVms.push({ wrap, vInst });
+      } else if (/ধর্ম|religion/i.test(lbl)) {
+        if (!religionSelectVms.some(r => r.vInst === vInst)) religionSelectVms.push({ wrap, vInst });
       }
     });
 
@@ -804,6 +731,14 @@
       if (Number(gid) === 2) return /মহিলা|নারী|female/i.test(s);
       if (Number(gid) === 1) return /পুরুষ|male/i.test(s) && !/female/i.test(s);
       return /অন্যান্য|হিজড়া|other|third/i.test(s);
+    };
+
+    const matchReligionItem = (rid) => (it) => {
+      const s = itemToStr(it).toLowerCase();
+      if (typeof it === 'object' && it !== null && Number(it.id ?? it.value) === Number(rid)) return true;
+      if (Number(rid) === 1) return /ইসলাম|islam|muslim/i.test(s);
+      if (Number(rid) === 2) return /হিন্দু|hindu|সনাতন/i.test(s);
+      return false;
     };
 
     if (genderSelectVms.length > 0) {
@@ -842,6 +777,13 @@
         triggerVeeValidate(targetEntry.wrap);
       });
     }
+
+    if (religionSelectVms.length > 0) {
+      religionSelectVms.forEach(entry => {
+        selectVuetifyItem(entry.vInst, matchReligionItem(familyReligionId));
+        triggerVeeValidate(entry.wrap);
+      });
+    }
   }
 
   function parseMemberRow(m) {
@@ -865,7 +807,7 @@
       gender: genderStr,
       gender_id: gVal || (genderStr === 'Female' ? 2 : 1),
       religion: 'Islam',
-      religion_id: Number(m.religion_id || m.religion || 1),
+      religion_id: 1,
       doc_type: isBRN ? 'BRN' : 'NID',
       nid_or_brn: idVal,
       dob: m.date_of_birth || m.dob || '',
@@ -996,7 +938,8 @@
 
       const calcMaleCount = allPeopleForCount.filter(p => Number(p.gender_id) === 1).length;
       const calcFemaleCount = allPeopleForCount.filter(p => Number(p.gender_id) === 2).length;
-      const calcOtherGenderCount = allPeopleForCount.filter(p => Number(p.gender_id) === 3).length;
+      const calcOtherGenderCount = 0;
+      const calcBideshCount = 0;
       const calcChildrenCount = allPeopleForCount.filter(m => {
         const age = calculateAgeYears(m.dob);
         return age !== null && age >= 0 && age < 18;
@@ -1008,8 +951,8 @@
         totalMembers: defs.total_members !== undefined ? Number(defs.total_members) : allPeopleForCount.length,
         maleCount: defs.male_count !== undefined ? Number(defs.male_count) : calcMaleCount,
         femaleCount: defs.female_count !== undefined ? Number(defs.female_count) : calcFemaleCount,
-        otherGenderCount: defs.other_gender_count !== undefined ? Number(defs.other_gender_count) : 0,
-        bideshCount: defs.bidesh_count !== undefined ? Number(defs.bidesh_count) : 0,
+        otherGenderCount: 0,
+        bideshCount: 0,
         childrenUnder18: defs.children_under_18 !== undefined ? Number(defs.children_under_18) : calcChildrenCount,
         religionId: defs.religion_id !== undefined ? Number(defs.religion_id) : familyReligionId,
         isEthnic: defs.is_ethnic !== undefined ? Number(defs.is_ethnic) : 0,
@@ -1119,7 +1062,7 @@
       }
 
       applySmartFormDefaults(vmHead, vmMembers, counts, defs);
-      syncAllGenderSelects(headGenderId, targetMemberList, row0IsHead, isVerificationPage);
+      syncAllGenderAndReligionSelects(headGenderId, targetMemberList, row0IsHead, familyReligionId, isVerificationPage);
 
       if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
       if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();

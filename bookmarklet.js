@@ -1,4 +1,4 @@
-/* Family Card Pro — bookmarklet edition (Loads inject.js & sidepanel.html from same folder) */
+/* Family Card Pro — bookmarklet edition */
 (function () {
   'use strict';
 
@@ -22,7 +22,7 @@
   if (existingRoot) existingRoot.remove();
   document.querySelectorAll('script[src*="sidepanel"], script[data-fc-inject], style[data-fc]').forEach(el => el.remove());
 
-  /* Load shared inject.js from the same folder (once per page load) */
+  // Load inject.js once
   if (!window.__FC_INJECTOR_LOADED__) {
     const injectScript = document.createElement('script');
     injectScript.src = injectUrl;
@@ -99,9 +99,7 @@
   let isOpen = false;
 
   function sendToPanel(message) {
-    if (iframe.contentWindow) {
-      iframe.contentWindow.postMessage(message, '*');
-    }
+    if (iframe.contentWindow) iframe.contentWindow.postMessage(message, '*');
   }
 
   function pushSavedCredentials() {
