@@ -340,6 +340,51 @@
     html[data-theme="dark"] .ic-copy::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E"); }
     /* Crop modal title icon (JS rewrites the title text during the crop queue). */
     #cropModalTitle::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; background-repeat: no-repeat; background-position: center; background-size: contain; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.13 1L6 16a2 2 0 0 0 2 2h15'/%3E%3Cpath d='M1 6.13L16 6a2 2 0 0 1 2 2v15'/%3E%3C/svg%3E"); }
+  
+    /* ---- Day-mode richness (light theme only; dark theme untouched) ---- */
+    html:not([data-theme="dark"]) body {
+      background:
+        radial-gradient(420px 170px at 88% -50px, rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0) 70%),
+        linear-gradient(180deg, #dbeafe 0%, #eef2ff 130px, #f8fafc 330px, #f1f5f9 100%);
+    }
+    html:not([data-theme="dark"]) .card,
+    html:not([data-theme="dark"]) .record-card,
+    html:not([data-theme="dark"]) .settings-drawer {
+      background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+      border-color: #dbe4f0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 28px -14px rgba(37, 99, 235, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+    html:not([data-theme="dark"]) .card:hover,
+    html:not([data-theme="dark"]) .record-card:hover {
+      border-color: #c3d2ee;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 14px 32px -14px rgba(37, 99, 235, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+    html:not([data-theme="dark"]) .navbar {
+      background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%) padding-box,
+        linear-gradient(90deg, #3b82f6 0%, #6366f1 50%, #10b981 100%) border-box;
+      border-bottom: 2px solid transparent;
+      box-shadow: 0 8px 24px -16px rgba(37, 99, 235, 0.4);
+    }
+    html:not([data-theme="dark"]) .bottom-dock {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(239, 246, 255, 0.96) 100%);
+      border-top-color: #dbe4f0;
+      box-shadow: 0 -10px 30px -12px rgba(37, 99, 235, 0.35);
+    }
+    html:not([data-theme="dark"]) .btn-accent {
+      box-shadow: 0 6px 16px -6px rgba(37, 99, 235, 0.55), var(--shadow-xs);
+    }
+    html:not([data-theme="dark"]) .btn-accent:hover:not(:disabled) {
+      box-shadow: 0 8px 20px -6px rgba(37, 99, 235, 0.6), var(--shadow-sm);
+    }
+    html:not([data-theme="dark"]) .btn-emerald {
+      background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+      border-color: #059669;
+      box-shadow: 0 6px 16px -6px rgba(5, 150, 105, 0.55), var(--shadow-xs);
+    }
+    html:not([data-theme="dark"]) .btn-emerald:hover:not(:disabled) {
+      background: linear-gradient(180deg, #34d399 0%, #10b981 100%);
+      box-shadow: 0 8px 20px -6px rgba(5, 150, 105, 0.6), var(--shadow-sm);
+    }
   </style>
   <script>
     // Apply the saved theme (or the OS preference) before first paint.
