@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.23-live';
+const CURRENT_VERSION_TAG = 'v4.9.24-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -445,6 +445,12 @@ function initApp() {
   if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
   const frameBtn = $('frameRotateBtn');
   if (frameBtn) frameBtn.addEventListener('click', toggleFrameOrientation);
+  const zoomRange = $('zoomRange');
+  if (zoomRange) zoomRange.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) applyCameraZoom(v); });
+  const zoomOutBtn = $('zoomOutBtn');
+  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value - 0.5));
+  const zoomInBtn = $('zoomInBtn');
+  if (zoomInBtn) zoomInBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value + 0.5));
   // Device rotation: the frame/guide/outline are drawn from live sizes,
   // but a stored green-lock quad belongs to the old orientation — drop it
   // and re-draw immediately instead of waiting for the next 400ms tick.
@@ -1407,6 +1413,10 @@ let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
 let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraDetectTimer = null;
+// Camera zoom (the camera's own zoom control). {min, max, step, value}
+// come from the video track's capabilities; supported is false when the
+// camera reports no zoom range at all.
+let panelCameraZoom = { min: 1, max: 1, step: 0.1, value: 1, supported: false };
 // Ask the bookmarklet (parent page) to widen the panel while the camera
 // is open, so the popup is bigger on a tablet/desktop. Phones already
 // show the panel full-width, so the wide class does nothing there.
@@ -1428,6 +1438,9 @@ function stopPanelCameraTracks() {
   const video = $('cameraVideo');
   if (video) video.srcObject = null;
   panelCameraQuad = null;
+  panelCameraZoom = { min: 1, max: 1, step: 0.1, value: 1, supported: false };
+  const zoomRow = $('cameraZoomRow');
+  if (zoomRow) zoomRow.style.display = 'none';
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1619,6 +1632,81 @@ function runCameraEdgeDetect() {
   } catch (_) { /* detection never breaks the camera */ }
 }
 
+// Camera zoom: uses the camera's own zoom control (MediaStreamTrack
+// zoom capability). The preview zooms live, so the frame/edge overlay
+// and the capture need no changes — the zoomed picture is what the
+// video element already shows, and Capture saves exactly that.
+function cameraVideoTrack() {
+  return (panelCameraStream && panelCameraStream.getVideoTracks
+    && panelCameraStream.getVideoTracks()[0]) || null;
+}
+function updateCameraZoomUI() {
+  const row = $('cameraZoomRow');
+  const range = $('zoomRange');
+  const label = $('zoomLabel');
+  const outBtn = $('zoomOutBtn');
+  const inBtn = $('zoomInBtn');
+  if (!row || !range || !label) return;
+  const z = panelCameraZoom;
+  if (!z.supported) {
+    // No zoom on this camera — say so instead of showing a dead slider.
+    row.style.display = 'flex';
+    if (outBtn) outBtn.style.display = 'none';
+    range.style.display = 'none';
+    if (inBtn) inBtn.style.display = 'none';
+    label.style.minWidth = '0';
+    label.textContent = 'This camera has no zoom';
+    return;
+  }
+  row.style.display = 'flex';
+  if (outBtn) outBtn.style.display = '';
+  range.style.display = '';
+  if (inBtn) inBtn.style.display = '';
+  label.style.minWidth = '42px';
+  range.min = z.min; range.max = z.max; range.step = z.step; range.value = z.value;
+  label.textContent = `${Number(z.value).toFixed(1)}×`;
+}
+async function applyCameraZoom(value) {
+  const track = cameraVideoTrack();
+  const z = panelCameraZoom;
+  if (!track || !track.applyConstraints || !z.supported) return false;
+  const v = Math.min(z.max, Math.max(z.min, value));
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: v }] });
+    const settings = track.getSettings ? track.getSettings() : null;
+    z.value = (settings && typeof settings.zoom === 'number') ? settings.zoom : v;
+    const range = $('zoomRange');
+    if (range) range.value = z.value;
+    const label = $('zoomLabel');
+    if (label) label.textContent = `${Number(z.value).toFixed(1)}×`;
+    return true;
+  } catch (_) {
+    // The camera refused it — put the slider back where the zoom is.
+    const range = $('zoomRange');
+    if (range) range.value = z.value;
+    return false;
+  }
+}
+function setupCameraZoom() {
+  const track = cameraVideoTrack();
+  panelCameraZoom = { min: 1, max: 1, step: 0.1, value: 1, supported: false };
+  try {
+    const caps = track && track.getCapabilities ? track.getCapabilities() : null;
+    if (caps && caps.zoom) {
+      const min = caps.zoom.min || 1;
+      const max = caps.zoom.max || 1;
+      panelCameraZoom = {
+        min,
+        max,
+        step: caps.zoom.step || 0.1,
+        value: Math.max(1, min),
+        supported: max > min,
+      };
+    }
+  } catch (_) {}
+  updateCameraZoomUI();
+}
+
 async function startPanelCamera() {
   const video = $('cameraVideo');
   const constraints = {
@@ -1630,6 +1718,7 @@ async function startPanelCamera() {
   video.srcObject = panelCameraStream;
   $('cameraModal').classList.add('open');
   await video.play();
+  setupCameraZoom();
   if (!perspectiveEnabled) {
     setCameraHint(frameHintText(), '');
     drawCameraFrame();

@@ -680,6 +680,12 @@
         <canvas id="cameraOverlay"></canvas>
         <div id="cameraHint">Point the camera at the card…</div>
       </div>
+      <div class="camera-zoom-row" id="cameraZoomRow" style="display:none; align-items:center; gap:10px; padding:10px 4px 0;">
+        <button type="button" class="btn" id="zoomOutBtn" style="background:#475569; color:#fff; padding:6px 12px; font-size:14px; font-weight:700;" title="Zoom out">−</button>
+        <input type="range" id="zoomRange" min="1" max="1" step="0.1" value="1" style="flex:1; accent-color:#2563eb;">
+        <button type="button" class="btn" id="zoomInBtn" style="background:#475569; color:#fff; padding:6px 12px; font-size:14px; font-weight:700;" title="Zoom in">+</button>
+        <span id="zoomLabel" style="min-width:42px; text-align:center; font-size:12px; font-weight:600;">1.0×</span>
+      </div>
       <div class="dialog-actions">
       <button type="button" class="btn" id="perspectiveToggleCamBtn" style="background:#2563eb; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Perspective detection: On — tap to turn off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M4 18 L8 6 H16 L20 18 Z"></path><line x1="8" y1="12" x2="16" y2="12"></line></svg><span class="persp-state">On</span></button>
       <button type="button" class="btn" id="frameRotateBtn" style="background:#475569; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Photo frame: landscape 4:3 — tap for portrait 3:4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg><span class="frame-state">4:3</span></button>
