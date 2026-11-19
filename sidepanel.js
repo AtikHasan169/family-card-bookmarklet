@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.6-live';
+const CURRENT_VERSION_TAG = 'v4.7-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -392,7 +392,7 @@ function initApp() {
     closeBtn.title = 'Close panel';
     closeBtn.setAttribute('aria-label', 'Close panel');
     closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-    closeBtn.addEventListener('click', () => window.parent.postMessage({ action: 'FC_CLOSE_SHEET' }, '*'));
+    closeBtn.addEventListener('click', () => { stopPanelCamera(); window.parent.postMessage({ action: 'FC_CLOSE_SHEET' }, '*'); });
     navRight.append(closeBtn);
   }
 
@@ -410,6 +410,10 @@ function initApp() {
 
   $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
+
+  $('capturePhotoBtn').addEventListener('click', capturePanelPhoto);
+  $('cancelCameraBtn').addEventListener('click', stopPanelCamera);
+  $('switchCameraBtn').addEventListener('click', switchPanelCamera);
 
   $('extractBtn').addEventListener('click', runExtraction);
   $('stopExtractBtn').addEventListener('click', () => {
@@ -1276,11 +1280,100 @@ async function handleUpload(e, category, droppedFiles = null) {
   if (e && e.target) e.target.value = '';
 }
 
-function openCamera(category) {
+// In-panel camera: capture directly in the panel — the phone's camera app
+// never opens. The panel iframe already allows the camera (bookmarklet sets
+// allow="camera"), so the browser asks once and then it just works. If the
+// camera is denied, blocked, or missing, it falls back to the old file
+// input, which opens the phone's camera app as before.
+let panelCameraStream = null;
+let panelCameraFacing = 'environment';
+let panelCameraCategory = 'head';
+
+function stopPanelCameraTracks() {
+  if (panelCameraStream) {
+    panelCameraStream.getTracks().forEach((t) => t.stop());
+    panelCameraStream = null;
+  }
+  const video = $('cameraVideo');
+  if (video) video.srcObject = null;
+}
+
+function stopPanelCamera() {
+  stopPanelCameraTracks();
+  const modal = $('cameraModal');
+  if (modal) modal.classList.remove('open');
+}
+
+async function startPanelCamera() {
+  const video = $('cameraVideo');
+  panelCameraStream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: panelCameraFacing },
+    audio: false,
+  });
+  video.srcObject = panelCameraStream;
+  $('cameraModal').classList.add('open');
+  await video.play();
+}
+
+async function openPanelCamera(category) {
+  panelCameraCategory = category;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    openCameraFileInput(category); // very old browser — use the camera app
+    return;
+  }
+  try {
+    await startPanelCamera();
+  } catch (_) {
+    stopPanelCamera();
+    setStatus('Camera is blocked here — opening the phone camera instead.', 'err');
+    openCameraFileInput(category);
+  }
+}
+
+function openCameraFileInput(category) {
   const input = $('cameraInput');
   input.value = '';
   input.onchange = (e) => handleUpload(e, category);
   input.click();
+}
+
+function openCamera(category) {
+  openPanelCamera(category);
+}
+
+function capturePanelPhoto() {
+  const video = $('cameraVideo');
+  if (!video || !video.videoWidth) {
+    setStatus('Camera is not ready yet — wait a second and try again.', 'err');
+    return;
+  }
+  const maxDim = 1500;
+  const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(video.videoWidth * scale));
+  cv.height = Math.max(1, Math.round(video.videoHeight * scale));
+  cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
+  const dataUrl = cv.toDataURL('image/jpeg', 0.82);
+  const b64 = dataUrl.split(',')[1] || '';
+  if (!b64) {
+    setStatus('Could not capture this photo — try again.', 'err');
+    return;
+  }
+  stopPanelCamera();
+  addImage(panelCameraCategory, b64, 'Camera.jpg');
+  const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
+  if (item) openCropForImage(item); // straight into crop/scan, like a single upload
+}
+
+async function switchPanelCamera() {
+  panelCameraFacing = panelCameraFacing === 'environment' ? 'user' : 'environment';
+  stopPanelCameraTracks();
+  try {
+    await startPanelCamera();
+  } catch (_) {
+    stopPanelCamera();
+    setStatus('Could not switch camera.', 'err');
+  }
 }
 
 // Auto-crop queue: after a multi-photo upload, the crop editor opens for
