@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.22-live';
+const CURRENT_VERSION_TAG = 'v4.9.23-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -76,8 +76,8 @@ const HEAD_FIELDS = [
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'mother_name_en', label: 'Mother (EN)' },
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
-  { key: 'nid', label: 'NID / BRN No' },
-  { key: 'dob', label: 'DOB (DD-MM-YYYY)' }
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
+  { key: 'nid', label: 'NID / BRN No' }
 ];
 
 const MEMBER_FIELDS = [
@@ -89,8 +89,8 @@ const MEMBER_FIELDS = [
   { key: 'father_name_bn', label: 'Father (BN)' },
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
-  { key: 'nid_or_brn', label: 'NID / BRN No' },
-  { key: 'dob', label: 'DOB (DD-MM-YYYY)' }
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
+  { key: 'nid_or_brn', label: 'NID / BRN No' }
 ];
 
 const state = { head: [], other: [], pulledImages: [], lastExtracted: null };
