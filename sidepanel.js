@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.7-live';
+const CURRENT_VERSION_TAG = 'v4.9-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -413,6 +413,7 @@ function initApp() {
 
   $('capturePhotoBtn').addEventListener('click', capturePanelPhoto);
   $('cancelCameraBtn').addEventListener('click', stopPanelCamera);
+  $('closeCameraBtn').addEventListener('click', stopPanelCamera);
   $('switchCameraBtn').addEventListener('click', switchPanelCamera);
 
   $('extractBtn').addEventListener('click', runExtraction);
@@ -1287,15 +1288,22 @@ async function handleUpload(e, category, droppedFiles = null) {
 // input, which opens the phone's camera app as before.
 let panelCameraStream = null;
 let panelCameraFacing = 'environment';
+let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
+let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
+let panelCameraDetectTimer = null;
 
 function stopPanelCameraTracks() {
+  if (panelCameraDetectTimer) { clearInterval(panelCameraDetectTimer); panelCameraDetectTimer = null; }
   if (panelCameraStream) {
     panelCameraStream.getTracks().forEach((t) => t.stop());
     panelCameraStream = null;
   }
   const video = $('cameraVideo');
   if (video) video.srcObject = null;
+  panelCameraQuad = null;
+  drawCameraOverlay(null);
+  setCameraHint('Point the camera at the card…', '');
 }
 
 function stopPanelCamera() {
@@ -1304,19 +1312,126 @@ function stopPanelCamera() {
   if (modal) modal.classList.remove('open');
 }
 
+function drawCameraOverlay(quad, color) {
+  const overlay = $('cameraOverlay');
+  const video = $('cameraVideo');
+  if (!overlay || !video) return;
+  const stage = overlay.parentElement;
+  const sw = stage ? stage.clientWidth : 0;
+  const sh = stage ? stage.clientHeight : 0;
+  if (!sw || !sh) return;
+  overlay.width = sw; overlay.height = sh;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, sw, sh);
+  if (!quad || !video.videoWidth) return;
+  const m = scanCoverMap(sw, sh, video.videoWidth, video.videoHeight);
+  const c = color || '#22c55e';
+  ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  quad.forEach((p, i) => {
+    const x = p.x * m.scale + m.offsetX, y = p.y * m.scale + m.offsetY;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.closePath(); ctx.stroke();
+  ctx.fillStyle = c;
+  quad.forEach((p) => {
+    ctx.beginPath();
+    ctx.arc(p.x * m.scale + m.offsetX, p.y * m.scale + m.offsetY, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawCameraGuide() {
+  // Corner brackets that are always visible, so there is something to aim
+  // the card at even before the detector locks on.
+  const overlay = $('cameraOverlay');
+  const video = $('cameraVideo');
+  if (!overlay || !video || !video.videoWidth) return;
+  const stage = overlay.parentElement;
+  const sw = stage ? stage.clientWidth : 0;
+  const sh = stage ? stage.clientHeight : 0;
+  if (!sw || !sh) return;
+  overlay.width = sw; overlay.height = sh;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, sw, sh);
+  const m = 0.14;
+  const x0 = sw * m, x1 = sw * (1 - m), y0 = sh * m, y1 = sh * (1 - m);
+  const L = Math.min(sw, sh) * 0.09;
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0, y0 + L); ctx.lineTo(x0, y0); ctx.lineTo(x0 + L, y0);
+  ctx.moveTo(x1 - L, y0); ctx.lineTo(x1, y0); ctx.lineTo(x1, y0 + L);
+  ctx.moveTo(x1, y1 - L); ctx.lineTo(x1, y1); ctx.lineTo(x1 - L, y1);
+  ctx.moveTo(x0 + L, y1); ctx.lineTo(x0, y1); ctx.lineTo(x0, y1 - L);
+  ctx.stroke();
+}
+
+function setCameraHint(text, kind) {
+  const hint = $('cameraHint');
+  if (!hint) return;
+  hint.textContent = text;
+  hint.classList.remove('found', 'warn');
+  if (kind) hint.classList.add(kind);
+}
+
+function runCameraEdgeDetect() {
+  const video = $('cameraVideo');
+  const modal = $('cameraModal');
+  if (!video || !video.videoWidth || !modal || !modal.classList.contains('open')) return;
+  try {
+    const maxW = 320;
+    const scale = Math.min(1, maxW / video.videoWidth);
+    const w = Math.max(2, Math.round(video.videoWidth * scale));
+    const h = Math.max(2, Math.round(video.videoHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(video, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    }
+    const res = detectLiveQuad(gray, w, h);
+    if (res && res.support >= 0.55) {
+      // Green lock — good enough to straighten the shot on Capture.
+      const back = 1 / scale;
+      panelCameraQuad = { points: res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), at: Date.now() };
+      drawCameraOverlay(panelCameraQuad.points, '#22c55e');
+      setCameraHint('Document found — tap Capture', 'found');
+    } else if (res) {
+      // Yellow — a document is probably there; hold steady for a lock.
+      panelCameraQuad = null;
+      const back = 1 / scale;
+      drawCameraOverlay(res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), '#eab308');
+      setCameraHint('Hold steady — almost there', 'warn');
+    } else {
+      panelCameraQuad = null;
+      drawCameraGuide();
+      setCameraHint('Point the camera at the card…', '');
+    }
+  } catch (_) { /* detection never breaks the camera */ }
+}
+
 async function startPanelCamera() {
   const video = $('cameraVideo');
-  panelCameraStream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: panelCameraFacing },
+  const constraints = {
+    video: { facingMode: panelCameraFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
     audio: false,
-  });
+  };
+  if (panelCameraDeviceId) constraints.video.deviceId = { exact: panelCameraDeviceId };
+  panelCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
   video.srcObject = panelCameraStream;
   $('cameraModal').classList.add('open');
   await video.play();
+  if (panelCameraDetectTimer) clearInterval(panelCameraDetectTimer);
+  panelCameraDetectTimer = setInterval(runCameraEdgeDetect, 400);
 }
 
 async function openPanelCamera(category) {
   panelCameraCategory = category;
+  panelCameraDeviceId = null;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     openCameraFileInput(category); // very old browser — use the camera app
     return;
@@ -1353,8 +1468,18 @@ function capturePanelPhoto() {
   cv.width = Math.max(1, Math.round(video.videoWidth * scale));
   cv.height = Math.max(1, Math.round(video.videoHeight * scale));
   cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
-  const dataUrl = cv.toDataURL('image/jpeg', 0.82);
-  const b64 = dataUrl.split(',')[1] || '';
+  // If the live edge view found the document, straighten the shot now —
+  // the crop editor then opens on an already-straight photo.
+  let b64 = '';
+  const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
+  if (quad) {
+    try {
+      const qscale = cv.width / video.videoWidth;
+      const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
+      b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+    } catch (_) { b64 = ''; }
+  }
+  if (!b64) b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
   if (!b64) {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
@@ -1366,13 +1491,32 @@ function capturePanelPhoto() {
 }
 
 async function switchPanelCamera() {
-  panelCameraFacing = panelCameraFacing === 'environment' ? 'user' : 'environment';
+  const prevFacing = panelCameraFacing;
+  const prevDeviceId = panelCameraStream && panelCameraStream.getVideoTracks
+    && panelCameraStream.getVideoTracks()[0] && panelCameraStream.getVideoTracks()[0].getSettings
+    ? panelCameraStream.getVideoTracks()[0].getSettings().deviceId : null;
+  panelCameraFacing = prevFacing === 'environment' ? 'user' : 'environment';
+  panelCameraDeviceId = null;
+  try {
+    // Prefer the other physical camera (like the website does via deviceId).
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const other = devices.filter((d) => d.kind === 'videoinput')
+      .find((d) => d.deviceId && d.deviceId !== prevDeviceId);
+    if (other) panelCameraDeviceId = other.deviceId;
+  } catch (_) {}
   stopPanelCameraTracks();
   try {
     await startPanelCamera();
   } catch (_) {
-    stopPanelCamera();
-    setStatus('Could not switch camera.', 'err');
+    // Switch failed — go back to the previous camera.
+    panelCameraFacing = prevFacing;
+    panelCameraDeviceId = null;
+    try {
+      await startPanelCamera();
+    } catch (_) {
+      stopPanelCamera();
+      setStatus('Could not switch camera.', 'err');
+    }
   }
 }
 
@@ -1491,7 +1635,10 @@ function scanQuadFromHull(hull) {
   return scanOrderCorners(corners);
 }
 
-function scanValidateQuad(quad, w, h) {
+function scanValidateQuad(quad, w, h, opts) {
+  const o = opts || {};
+  const minArea = o.minArea !== undefined ? o.minArea : 0.12;
+  const maxArea = o.maxArea !== undefined ? o.maxArea : 0.98;
   if (!quad || quad.length !== 4) return false;
   // Distinct corners (at least 8px apart).
   for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
@@ -1500,7 +1647,7 @@ function scanValidateQuad(quad, w, h) {
   }
   const area = scanQuadArea(quad);
   const imgArea = w * h;
-  if (area < imgArea * 0.12 || area > imgArea * 0.98) return false;
+  if (area < imgArea * minArea || area > imgArea * maxArea) return false;
   // Convex: all turns the same way.
   let sign = 0;
   for (let i = 0; i < 4; i++) {
@@ -1739,22 +1886,22 @@ function scanRefineCorners(quad, mag, w, h, thr) {
   });
 }
 
-function detectDocumentQuad(gray, w, h) {
-  // gray: 0..255 values, w*h. Returns ordered quad or null.
-  // Strong pipeline: multi-threshold contour candidates + Hough line
-  // candidates, all scored by real edge support along the perimeter,
-  // then corners snapped to the strongest nearby edge.
+function scanDetectDocument(gray, w, h, opts) {
+  // Full pipeline. Returns {quad, support} or null. opts: minSupport
+  // (default 0.55), minArea / maxArea (defaults 0.12 / 0.98).
+  const o = opts || {};
+  const minSupport = o.minSupport !== undefined ? o.minSupport : 0.55;
   const blur = scanBlur(gray, w, h, 2);
   const { mag, maxMag } = scanSobel(blur, w, h);
   if (maxMag < 40) return null; // no strong edge at all
-  let best = null, bestScore = -1;
+  let best = null, bestScore = -1, bestSupport = 0;
   const consider = (quad, thr) => {
-    if (!quad || !scanValidateQuad(quad, w, h)) return;
+    if (!quad || !scanValidateQuad(quad, w, h, o)) return;
     const support = scanQuadSupport(quad, mag, thr, w, h);
-    if (support < 0.55) return;
+    if (support < minSupport) return;
     const areaFrac = scanQuadArea(quad) / (w * h);
     const score = support + 0.1 * Math.min(1, areaFrac / 0.4);
-    if (score > bestScore) { bestScore = score; best = quad; }
+    if (score > bestScore) { bestScore = score; best = quad; bestSupport = support; }
   };
   // Contour candidates at several thresholds; dilate to close small gaps.
   for (const f of [0.45, 0.3, 0.18]) {
@@ -1776,9 +1923,29 @@ function detectDocumentQuad(gray, w, h) {
   if (!best) return null;
   // Snap corners to the strongest nearby edge.
   const refined = scanRefineCorners(best, mag, w, h, Math.max(25, maxMag * 0.25));
-  if (refined && scanValidateQuad(refined, w, h)) return refined;
-  return best;
+  if (refined && scanValidateQuad(refined, w, h, o)) return { quad: refined, support: bestSupport };
+  return { quad: best, support: bestSupport };
 }
+
+function detectDocumentQuad(gray, w, h) {
+  // gray: 0..255 values, w*h. Returns ordered quad or null (strict: used
+  // for the crop editor's warp, where a bad quad is worse than no quad).
+  const r = scanDetectDocument(gray, w, h, {});
+  return r ? r.quad : null;
+}
+
+function detectLiveQuad(gray, w, h) {
+  // Relaxed for the live viewfinder: a faint or frame-filling card still
+  // gets a guide outline; only a strong lock is used for the capture warp.
+  return scanDetectDocument(gray, w, h, { minSupport: 0.4, minArea: 0.08, maxArea: 0.995 });
+}
+function scanCoverMap(stageW, stageH, videoW, videoH) {
+  // object-fit: cover — how a raw video frame maps onto the displayed stage.
+  // Returns {scale, offsetX, offsetY}: display = raw * scale + offset.
+  const scale = Math.max(stageW / videoW, stageH / videoH);
+  return { scale, offsetX: (stageW - videoW * scale) / 2, offsetY: (stageH - videoH * scale) / 2 };
+}
+
 // --- end document scanner pure functions ---
 
 function drawCropCanvas() {
