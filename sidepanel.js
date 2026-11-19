@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.20-live';
+const CURRENT_VERSION_TAG = 'v4.9.22-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1158,7 +1158,7 @@ function showImageViewer(item) {
         copyBtn.textContent = 'Copy';
         copyBtn.style.cssText = 'background:#27272a; color:#cbd5e1; border:1px solid #3f3f46; border-radius:5px; padding:4px 7px; font-size:10.5px; font-weight:600; cursor:pointer;';
         copyBtn.addEventListener('click', async () => {
-          await copyTextSafe(targetObj[f.key] || '');
+          await copyTextSafe(copyValueForField(f, targetObj));
           copyBtn.textContent = 'Copied!';
           copyBtn.style.background = '#059669';
           copyBtn.style.color = '#fff';
@@ -2999,6 +2999,22 @@ function normalizeOutput(raw, preserveOrder = false) {
   return result;
 }
 
+// What a field's Copy button puts on the clipboard. The DOB is shown
+// with its month name in brackets (15-01[Jan]-1990) so it reads clearly,
+// but the website's date box shows DD/MM/YYYY — so the copy strips the
+// bracketed month and copies the clean 15/01/1990, the format the site
+// reads first. An ISO value (1990-01-15) is reordered, not just slashed.
+function copyValueForField(f, targetObj) {
+  const v = targetObj[f.key] || '';
+  if (f.key !== 'dob') return v;
+  const s = String(v).replace(/\[.*?\]/g, '').trim();
+  const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) return `${dmy[1].padStart(2, '0')}/${dmy[2].padStart(2, '0')}/${dmy[3]}`;
+  const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) return `${ymd[3].padStart(2, '0')}/${ymd[2].padStart(2, '0')}/${ymd[1]}`;
+  return s;
+}
+
 async function copyTextSafe(val) {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -3258,7 +3274,7 @@ function renderExtractedCards(data) {
       copyBtn.style.padding = '2px 7px';
       copyBtn.style.fontSize = '10px';
       copyBtn.addEventListener('click', async () => {
-        await copyTextSafe(targetObj[f.key] || '');
+        await copyTextSafe(copyValueForField(f, targetObj));
         copyBtn.textContent = 'Copied';
         copyBtn.style.color = '#059669';
         setTimeout(() => {
