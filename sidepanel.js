@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.18-live';
+const CURRENT_VERSION_TAG = 'v4.9.19-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1678,7 +1678,7 @@ function capturePanelPhoto() {
   const maxDim = 1500;
   const cv = document.createElement('canvas');
   // If the live edge view found the document, straighten the shot now —
-  // the photo goes straight into the list (no crop screen after Capture).
+  // the crop editor then opens on an already-straight photo.
   let b64 = '';
   const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
   if (quad) {
@@ -1717,9 +1717,7 @@ function capturePanelPhoto() {
     return;
   }
   // Retake: the new shot replaces the old photo in place (same list
-  // position, same person binding). No crop screen after a capture — the
-  // shot is already framed (green-lock warp or white-frame crop); tap the
-  // thumbnail to crop it if it needs fixing.
+  // position, same person binding), then opens in the crop editor.
   const replacing = retakeItem;
   retakeItem = null;
   stopPanelCamera();
@@ -1730,13 +1728,14 @@ function capturePanelPhoto() {
     replacing.source = 'camera';
     renderPreviews(panelCameraCategory);
     saveSessionState();
-    // A retake in the middle of a crop queue: carry on with the next photo.
-    if (cropQueue.length) { openNextQueuedCrop(); return; }
-    setStatus('Photo replaced — tap the thumbnail to crop it if needed.', 'ok');
+    openCropForImage(replacing);
+    const titleEl = $('cropModalTitle');
+    if (titleEl && cropQueue.length) titleEl.textContent = `Crop ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal} — ${replacing.name}`;
     return;
   }
   addImage(panelCameraCategory, b64, 'Camera.jpg', 'camera');
-  setStatus('Photo saved — tap the thumbnail to crop it if needed.', 'ok');
+  const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
+  if (item) openCropForImage(item); // straight into the crop editor (no auto-scan for a camera photo)
 }
 
 async function switchPanelCamera() {
@@ -2591,15 +2590,13 @@ function setupNativeCropper() {
       renderPreviews('other');
       saveSessionState();
 
-      // Cropping queue: advance to the next photo instead of the viewer.
+      // Cropping queue: advance to the next photo. Otherwise Apply just
+      // returns to the list — no preview pops open after a crop.
       if (cropQueue.length) {
         setStatus(`Cropped ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal}.`, 'ok');
         openNextQueuedCrop();
       } else {
         setStatus('Image cropped and updated.', 'ok');
-        // Rebuild the preview so it shows the cropped photo and THIS
-        // photo's person (not a stale image or another person's data).
-        showImageViewer(croppedItem);
       }
     } else if (activeCategory) {
       // Single upload (or retake via the file picker): the photo is only
@@ -2621,7 +2618,6 @@ function setupNativeCropper() {
           openNextQueuedCrop();
         } else {
           setStatus('Photo retaken.', 'ok');
-          showImageViewer(replacing);
         }
       } else {
         // First crop of a fresh upload: the photo isn't in the list yet,
