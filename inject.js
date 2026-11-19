@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v17';
+  const FC_INJECT_VERSION = 'v18';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2789,7 +2789,139 @@
     }
   });
 
-  window.addEventListener('FC_PRO_PULL_REQUEST', () => {
+  // --- Pull Draft photos (applicant photo / signature / house photo) ---
+  // The form keeps its photos in the media component: fresh captures as data
+  // URLs (imageDataUrl / signatureDataUrl / houseDataUrl), previews as URLs
+  // (imageUrl / signUrl / houseImageUrl), and draft files as server paths
+  // (draftStored*Path). Each slot is resolved to a data URL so the panel can
+  // show it — same 1500px / JPEG 0.82 cap as the panel's own uploads.
+  function pickFirst(obj, names) {
+    if (!obj) return null;
+    for (const n of names) {
+      const v = obj[n];
+      if (v !== undefined && v !== null && v !== '') return v;
+    }
+    return null;
+  }
+
+  function findMediaVm(vmHead, allVms) {
+    const hasMediaState = (v) => !!v && (
+      v.imageDataUrl !== undefined || v.signatureDataUrl !== undefined ||
+      v.houseDataUrl !== undefined || v.storedImagePath !== undefined ||
+      v.draftStoredImagePath !== undefined || v.storedSignaturePath !== undefined ||
+      v.draftStoredSignaturePath !== undefined
+    );
+    try {
+      if (hasMediaState(vmHead)) return vmHead;
+      for (const v of (allVms || [])) {
+        if (hasMediaState(v)) return v;
+      }
+    } catch (_) {}
+    return vmHead || null;
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onerror = () => reject(new Error('Could not read image'));
+      r.onload = () => resolve(r.result);
+      r.readAsDataURL(blob);
+    });
+  }
+
+  function downscaleDataUrl(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onerror = () => resolve(dataUrl);
+      img.onload = () => {
+        try {
+          const maxDim = 1500;
+          const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+          if (scale >= 1) { resolve(dataUrl); return; }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        } catch (_) { resolve(dataUrl); }
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  async function urlToDataUrl(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    return downscaleDataUrl(await blobToDataUrl(blob));
+  }
+
+  async function resolvePulledImage(slot, mediaVm, d) {
+    // 1. Fresh File/Blob on the form (uploaded, not saved yet).
+    const file = pickFirst(d, slot.files) || pickFirst(mediaVm, slot.files);
+    if (typeof Blob !== 'undefined' && file instanceof Blob) {
+      return downscaleDataUrl(await blobToDataUrl(file));
+    }
+    // 2. In-memory data URL (fresh capture / processed image).
+    const dataUrl = pickFirst(mediaVm, slot.dataUrls) || pickFirst(d, slot.dataUrls);
+    if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image')) {
+      return downscaleDataUrl(dataUrl);
+    }
+    // 3. Preview URL (draft photo already loaded by the site) — fetch it.
+    const url = pickFirst(mediaVm, slot.urls) || pickFirst(d, slot.urls);
+    if (typeof url === 'string' && url.startsWith('data:image')) {
+      return downscaleDataUrl(url);
+    }
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      return urlToDataUrl(url);
+    }
+    // 4. Server path only — ask the site's own helper for a preview URL.
+    const path = pickFirst(mediaVm, slot.paths) || pickFirst(d, slot.paths);
+    if (typeof path === 'string' && path) {
+      const helper = mediaVm && (mediaVm.getFamilyCardMediaPreviewUrl || mediaVm.resolveStorageMediaUrl);
+      if (typeof helper === 'function') {
+        try {
+          let previewUrl = helper.call(mediaVm, path);
+          if (previewUrl && typeof previewUrl.then === 'function') previewUrl = await previewUrl;
+          if (typeof previewUrl === 'string' && previewUrl) return urlToDataUrl(previewUrl);
+        } catch (_) {}
+      }
+      if (/^https?:\/\//i.test(path)) return urlToDataUrl(path);
+    }
+    return null;
+  }
+
+  const PULLED_IMAGE_SLOTS = [
+    { key: 'image', name: 'Applicant Photo', dataUrls: ['imageDataUrl'], urls: ['imageUrl'], files: ['image'], paths: ['draftStoredImagePath', 'storedImagePath'] },
+    { key: 'signature', name: 'Signature', dataUrls: ['signatureDataUrl'], urls: ['signUrl'], files: ['signature'], paths: ['draftStoredSignaturePath', 'storedSignaturePath'] },
+    { key: 'house_image', name: 'House Photo', dataUrls: ['houseDataUrl'], urls: ['houseImageUrl'], files: ['house_image'], paths: ['draftStoredHouseImagePath'] },
+    { key: 'nominee_image', name: 'Nominee Photo', dataUrls: ['nomineeImageDataUrl'], urls: ['nomineeImageUrl'], files: ['nominee_image'], paths: ['draftStoredNomineeImagePath', 'storedNomineeImagePath'] },
+    { key: 'nominee_signature', name: 'Nominee Signature', dataUrls: ['nomineeSignatureDataUrl'], urls: ['nomineeSignUrl'], files: ['nominee_signature'], paths: ['draftStoredNomineeSignaturePath', 'storedNomineeSignaturePath'] }
+  ];
+
+  async function collectPulledImages(vmHead, allVms, d) {
+    const mediaVm = findMediaVm(vmHead, allVms);
+    const images = [];
+    const missing = [];
+    // Never let a slow photo fetch hang the pull: 8s cap, then return
+    // whatever resolved so far. One bad slot never kills the others.
+    const work = (async () => {
+      for (const slot of PULLED_IMAGE_SLOTS) {
+        try {
+          const dataUrl = await resolvePulledImage(slot, mediaVm, d);
+          if (dataUrl) images.push({ slot: slot.key, name: slot.name, dataUrl });
+          else missing.push(slot.name);
+        } catch (_) {
+          missing.push(slot.name);
+        }
+      }
+    })();
+    const timeout = new Promise((resolve) => setTimeout(resolve, 8000));
+    await Promise.race([work, timeout]);
+    return { images, missing };
+  }
+
+  window.addEventListener('FC_PRO_PULL_REQUEST', async () => {
     const { vmHead, vmMembers, allVms } = getVueNodes();
     if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
@@ -2853,8 +2985,10 @@
         dom_tabs: []
       };
 
+      const pulled = await collectPulledImages(vmHead, allVms, d);
+
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-        detail: { version: FC_INJECT_VERSION, success: true, payload: { head, family_members, full_form_dump } }
+        detail: { version: FC_INJECT_VERSION, success: true, payload: { head, family_members, full_form_dump, images: pulled.images, imagesMissing: pulled.missing } }
       }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {

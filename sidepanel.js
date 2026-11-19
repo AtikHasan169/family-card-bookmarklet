@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.3-live';
+const CURRENT_VERSION_TAG = 'v4.4-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -93,7 +93,7 @@ const MEMBER_FIELDS = [
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' }
 ];
 
-const state = { head: [], other: [], lastExtracted: null };
+const state = { head: [], other: [], pulledImages: [], lastExtracted: null };
 let nextId = 1, activeCategory = null, activeCropName = '';
 
 const areaPresets = {
@@ -106,9 +106,9 @@ const areaPresets = {
 
 let rawImage = null;
 let extractionController = null;
-let baseScale = 1;
 let zoomLevel = 1;
 let rotationAngle = 0;
+let fineAngle = 0;
 let panX = 0;
 let panY = 0;
 let isDragging = false;
@@ -485,9 +485,11 @@ function handleIncomingMessages(e) {
     if (s) {
       if (Array.isArray(s.head) && !state.head.length) state.head = s.head;
       if (Array.isArray(s.other) && !state.other.length) state.other = s.other;
+      if (Array.isArray(s.pulledImages) && !state.pulledImages.length) state.pulledImages = s.pulledImages;
       if (s.nextId) nextId = s.nextId;
       renderPreviews('head');
       renderPreviews('other');
+      renderPulledImages();
       if (s.lastExtracted && !state.lastExtracted) {
         state.lastExtracted = normalizeOutput(s.lastExtracted, true);
         renderExtractedCards(state.lastExtracted);
@@ -534,10 +536,25 @@ function handleIncomingMessages(e) {
   if (e.data.action === 'FC_PULL_RESPONSE') {
     const res = e.data.detail;
     if (res.success && res.payload) {
-      state.lastExtracted = normalizeOutput(res.payload, true);
+      // Photos ride separately from the text data: keep base64 out of
+      // lastExtracted (and the Raw JSON view) — they live in state.
+      const pulled = Array.isArray(res.payload.images)
+        ? res.payload.images.filter((im) => im && typeof im.dataUrl === 'string' && im.dataUrl.startsWith('data:image'))
+        : [];
+      const payloadForNorm = { ...res.payload };
+      delete payloadForNorm.images;
+      delete payloadForNorm.imagesMissing;
+      state.lastExtracted = normalizeOutput(payloadForNorm, true);
       renderExtractedCards(state.lastExtracted);
       $('autofillBtn').disabled = false;
-      setStatus(`Pulled Head + ${state.lastExtracted.family_members.length} member(s) & all website tabs!`, 'ok');
+      state.pulledImages = pulled;
+      renderPulledImages();
+      saveSessionState();
+      const missing = Array.isArray(res.payload.imagesMissing) ? res.payload.imagesMissing : [];
+      const imgNote = pulled.length
+        ? ` + ${pulled.length} draft photo(s)`
+        : (missing.length ? ` (photos not found: ${missing.join(', ')})` : '');
+      setStatus(`Pulled Head + ${state.lastExtracted.family_members.length} member(s) & all website tabs${imgNote}!`, 'ok');
     } else {
       setStatus(res.message || 'Could not pull draft data.', 'err');
     }
@@ -671,6 +688,7 @@ function saveSessionState() {
     const payload = {
       head: state.head,
       other: state.other,
+      pulledImages: state.pulledImages,
       lastExtracted: state.lastExtracted,
       nextId
     };
@@ -1155,6 +1173,36 @@ function renderPreviews(category) {
   });
 }
 
+// Draft photos pulled from the website (applicant photo, signature, house
+// photo...). They are display-only: they never enter the NID/BRN upload
+// lists, so the AI never tries to read an ID card from a house photo.
+function renderPulledImages() {
+  const card = $('pulledCard');
+  const grid = $('pulledPreviews');
+  const badge = $('pulledCount');
+  if (!card || !grid) return;
+  const list = state.pulledImages || [];
+  card.style.display = list.length ? '' : 'none';
+  if (badge) badge.textContent = `${list.length} photo(s)`;
+  grid.replaceChildren();
+  list.forEach((item) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-item';
+    const img = document.createElement('img');
+    img.src = item.dataUrl;
+    img.title = item.name || 'Draft photo';
+    wrap.appendChild(img);
+    const bar = document.createElement('div');
+    bar.className = 'thumb-bar';
+    const label = document.createElement('span');
+    label.className = 'thumb-label';
+    label.textContent = item.name || 'Photo';
+    bar.appendChild(label);
+    wrap.appendChild(bar);
+    grid.appendChild(wrap);
+  });
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1190,12 +1238,15 @@ async function handleUpload(e, category, droppedFiles = null) {
         const canvas = $('cropCanvas');
         canvas.width = 900;
         canvas.height = 600;
-        baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
         zoomLevel = 1;
         rotationAngle = 0;
+        fineAngle = 0;
         panX = 0;
         panY = 0;
         $('zoomRange').value = 1;
+        const rotateRange = $('rotateRange');
+        if (rotateRange) rotateRange.value = 0;
+        updateRotateLabel();
         drawCropCanvas();
       };
       rawImage.onerror = () => {
@@ -1273,12 +1324,15 @@ function openCropForImage(item) {
     const canvas = $('cropCanvas');
     canvas.width = 900;
     canvas.height = 600;
-    baseScale = Math.min(canvas.width / rawImage.width, canvas.height / rawImage.height);
     zoomLevel = 1;
     rotationAngle = 0;
+    fineAngle = 0;
     panX = 0;
     panY = 0;
     $('zoomRange').value = 1;
+    const rotateRange = $('rotateRange');
+    if (rotateRange) rotateRange.value = 0;
+    updateRotateLabel();
     drawCropCanvas();
   };
   rawImage.onerror = () => {
@@ -1299,22 +1353,66 @@ function drawCropCanvas() {
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
 
-  const totalScale = baseScale * zoomLevel;
+  // Total rotation = 90° steps + fine slider. Fit the ROTATED bounding box
+  // into the canvas so a sideways photo is never clipped at the edges.
+  const totalRotation = rotationAngle + fineAngle;
+  const rad = (totalRotation * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const boundW = rawImage.width * cos + rawImage.height * sin;
+  const boundH = rawImage.width * sin + rawImage.height * cos;
+  const fitScale = Math.min(canvas.width / boundW, canvas.height / boundH);
+  const totalScale = fitScale * zoomLevel;
   ctx.scale(totalScale, totalScale);
-  ctx.rotate((rotationAngle * Math.PI) / 180);
+  ctx.rotate(rad);
 
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
+}
+
+function updateRotateLabel() {
+  const el = $('rotateAngleLabel');
+  if (el) el.textContent = `${rotationAngle + fineAngle}°`;
 }
 
 function setupNativeCropper() {
   const canvas = $('cropCanvas');
   const zoomRange = $('zoomRange');
   const rotateBtn = $('rotateCropBtn');
+  const rotateLeftBtn = $('rotateLeftCropBtn');
+  const rotateRange = $('rotateRange');
+  const resetRotateBtn = $('resetRotateBtn');
 
   if (rotateBtn) {
     rotateBtn.addEventListener('click', () => {
       rotationAngle = (rotationAngle + 90) % 360;
+      updateRotateLabel();
+      drawCropCanvas();
+    });
+  }
+
+  if (rotateLeftBtn) {
+    rotateLeftBtn.addEventListener('click', () => {
+      rotationAngle = (rotationAngle - 90 + 360) % 360;
+      updateRotateLabel();
+      drawCropCanvas();
+    });
+  }
+
+  if (rotateRange) {
+    rotateRange.addEventListener('input', (e) => {
+      fineAngle = parseFloat(e.target.value) || 0;
+      updateRotateLabel();
+      drawCropCanvas();
+    });
+  }
+
+  if (resetRotateBtn) {
+    resetRotateBtn.addEventListener('click', () => {
+      rotationAngle = 0;
+      fineAngle = 0;
+      if (rotateRange) rotateRange.value = 0;
+      updateRotateLabel();
       drawCropCanvas();
     });
   }
@@ -2260,10 +2358,21 @@ function exportExtractedJson() {
   const h = state.lastExtracted.head || {};
   const idPart = h.nid || (h.name_en ? h.name_en.replace(/[^A-Z0-9]+/gi, '_') : 'draft');
   const filename = `FC_${idPart}_${new Date().toISOString().slice(0, 10)}.json`;
-  const jsonString = JSON.stringify(state.lastExtracted, null, 2);
+  // Save the photos inside the JSON so an import brings them back: the NID
+  // uploads (head/other) as bare base64, the draft photos as full data URLs.
+  const photoCount = state.head.length + state.other.length + (state.pulledImages || []).length;
+  const exportObj = {
+    ...state.lastExtracted,
+    images: {
+      head: state.head.map((it) => ({ name: it.name, base64: it.base64 })),
+      other: state.other.map((it) => ({ name: it.name, base64: it.base64 })),
+      pulled: (state.pulledImages || []).map((it) => ({ slot: it.slot, name: it.name, dataUrl: it.dataUrl }))
+    }
+  };
+  const jsonString = JSON.stringify(exportObj, null, 2);
 
   window.parent.postMessage({ action: 'FC_DOWNLOAD_JSON', filename, jsonString }, '*');
-  setStatus(`Exported ${filename}!`, 'ok');
+  setStatus(`Exported ${filename}${photoCount ? ` (${photoCount} photo${photoCount > 1 ? 's' : ''} included)` : ''}!`, 'ok');
 }
 
 function importExtractedJson(e) {
@@ -2275,6 +2384,10 @@ function importExtractedJson(e) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
+      // Photos ride separately: keep base64 out of lastExtracted (and the
+      // Raw JSON view) and restore them into the photo lists below.
+      const incomingImages = parsed.images && typeof parsed.images === 'object' ? parsed.images : null;
+      if (parsed.images) delete parsed.images;
       let normalized;
 
       if (parsed.head || parsed.family_members || parsed.full_form_dump) {
@@ -2301,11 +2414,44 @@ function importExtractedJson(e) {
       state.lastExtracted = normalized;
       renderExtractedCards(normalized);
       $('autofillBtn').disabled = false;
-      setStatus(`Imported ${file.name}! Click 2. Auto-Fill Form to apply.`, 'ok');
+      let restoredPhotos = 0;
+      if (incomingImages) restoredPhotos = restoreImportedImages(incomingImages);
+      setStatus(`Imported ${file.name}${restoredPhotos ? ` — ${restoredPhotos} photo${restoredPhotos > 1 ? 's' : ''} restored` : ''}! Click 2. Auto-Fill Form to apply.`, 'ok');
     } catch (err) {
       setStatus(`Import error: ${err.message}`, 'err');
     }
   };
   reader.readAsText(file);
   e.target.value = '';
+}
+
+// Put the photos from an exported JSON back into the photo lists. Merges
+// with whatever is already there (never wipes current uploads) and skips
+// duplicates; old JSON files without an images section restore nothing.
+function restoreImportedImages(images) {
+  let restored = 0;
+  const addBack = (category, list) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((im) => {
+      if (!im || typeof im.base64 !== 'string' || !im.base64) return;
+      if (state[category].some((it) => it.base64 === im.base64)) return;
+      state[category].push({ id: nextId++, base64: im.base64, name: im.name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [] });
+      restored++;
+    });
+  };
+  addBack('head', images.head);
+  addBack('other', images.other);
+  if (Array.isArray(images.pulled)) {
+    images.pulled.forEach((im) => {
+      if (!im || typeof im.dataUrl !== 'string' || !im.dataUrl.startsWith('data:image')) return;
+      if ((state.pulledImages || []).some((it) => it.dataUrl === im.dataUrl)) return;
+      state.pulledImages.push({ slot: im.slot || 'image', name: im.name || 'Photo', dataUrl: im.dataUrl });
+      restored++;
+    });
+  }
+  renderPreviews('head');
+  renderPreviews('other');
+  renderPulledImages();
+  saveSessionState();
+  return restored;
 }
