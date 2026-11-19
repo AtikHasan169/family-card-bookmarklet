@@ -413,6 +413,9 @@
     #cameraZoomRow input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border-radius: 50%; background: #2563eb; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); margin-top: -10px; }
     #cameraZoomRow input[type="range"]::-moz-range-track { height: 8px; border-radius: 4px; background: #cbd5e1; }
     #cameraZoomRow input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: #2563eb; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+    /* Camera zoom preset chips: one tap jumps to 1× / 2× / 3× … */
+    #cameraZoomChips .camera-zoom-chip { padding: 6px 14px; font-size: 13px; font-weight: 700; border-radius: 999px; background: #475569; color: #fff; }
+    #cameraZoomChips .camera-zoom-chip.active { background: #2563eb; }
     .dialog-actions { display: flex; gap: 8px; padding: 12px 14px 14px; }
   </style>
   <script>
@@ -693,6 +696,7 @@
         <button type="button" class="btn" id="zoomInBtn" style="background:#475569; color:#fff; padding:8px 14px; font-size:16px; font-weight:700;" title="Zoom in">+</button>
         <span id="zoomLabel" style="min-width:42px; text-align:center; font-size:12px; font-weight:600;">1.0×</span>
       </div>
+      <div class="camera-zoom-chips" id="cameraZoomChips" style="display:none; align-items:center; justify-content:center; gap:8px; padding:8px 4px 0;"></div>
       <div class="dialog-actions">
       <button type="button" class="btn" id="perspectiveToggleCamBtn" style="background:#2563eb; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Perspective detection: On — tap to turn off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M4 18 L8 6 H16 L20 18 Z"></path><line x1="8" y1="12" x2="16" y2="12"></line></svg><span class="persp-state">On</span></button>
       <button type="button" class="btn" id="frameRotateBtn" style="background:#475569; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Photo frame: landscape 4:3 — tap for portrait 3:4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg><span class="frame-state">4:3</span></button>

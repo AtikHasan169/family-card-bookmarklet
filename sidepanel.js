@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.26-live';
+const CURRENT_VERSION_TAG = 'v4.9.27-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1441,6 +1441,8 @@ function stopPanelCameraTracks() {
   panelCameraZoom = { min: 1, max: 1, step: 0.1, value: 1, supported: false };
   const zoomRow = $('cameraZoomRow');
   if (zoomRow) zoomRow.style.display = 'none';
+  const zoomChips = $('cameraZoomChips');
+  if (zoomChips) { zoomChips.style.display = 'none'; zoomChips.innerHTML = ''; }
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1648,23 +1650,57 @@ function updateCameraZoomUI() {
   const inBtn = $('zoomInBtn');
   if (!row || !range || !label) return;
   const z = panelCameraZoom;
+  row.style.display = 'flex';
   if (!z.supported) {
     // No zoom on this camera — say so instead of showing a dead slider.
-    row.style.display = 'flex';
     if (outBtn) outBtn.style.display = 'none';
     range.style.display = 'none';
     if (inBtn) inBtn.style.display = 'none';
     label.style.minWidth = '0';
     label.textContent = 'This camera has no zoom';
-    return;
+  } else {
+    if (outBtn) outBtn.style.display = '';
+    range.style.display = '';
+    if (inBtn) inBtn.style.display = '';
+    label.style.minWidth = '42px';
+    range.min = z.min; range.max = z.max; range.step = z.step; range.value = z.value;
+    label.textContent = `${Number(z.value).toFixed(1)}×`;
   }
-  row.style.display = 'flex';
-  if (outBtn) outBtn.style.display = '';
-  range.style.display = '';
-  if (inBtn) inBtn.style.display = '';
-  label.style.minWidth = '42px';
-  range.min = z.min; range.max = z.max; range.step = z.step; range.value = z.value;
-  label.textContent = `${Number(z.value).toFixed(1)}×`;
+  updateCameraZoomChips();
+}
+// Zoom preset chips (1×, 2×, 3× …): one tap jumps straight to that level,
+// the slider and the label follow. Only the whole-number levels the camera
+// really offers are shown, so there is never a dead chip.
+function updateCameraZoomChips() {
+  const wrap = $('cameraZoomChips');
+  if (!wrap) return;
+  const z = panelCameraZoom;
+  wrap.innerHTML = '';
+  if (!z.supported) { wrap.style.display = 'none'; return; }
+  const first = Math.max(1, Math.ceil(z.min));
+  const levels = [];
+  for (let lv = first; lv <= Math.floor(z.max) && levels.length < 4; lv++) levels.push(lv);
+  if (!levels.length) levels.push(first);
+  wrap.style.display = 'flex';
+  levels.forEach((lv) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn camera-zoom-chip';
+    b.textContent = `${lv}×`;
+    b.dataset.level = String(lv);
+    b.addEventListener('click', () => applyCameraZoom(lv));
+    wrap.appendChild(b);
+  });
+  updateCameraZoomChipActive();
+}
+function updateCameraZoomChipActive() {
+  const wrap = $('cameraZoomChips');
+  if (!wrap) return;
+  const z = panelCameraZoom;
+  wrap.querySelectorAll('.camera-zoom-chip').forEach((b) => {
+    const lv = parseFloat(b.dataset.level);
+    b.classList.toggle('active', z.supported && Math.abs(z.value - lv) < 0.001);
+  });
 }
 async function applyCameraZoom(value) {
   const track = cameraVideoTrack();
@@ -1679,6 +1715,7 @@ async function applyCameraZoom(value) {
     if (range) range.value = z.value;
     const label = $('zoomLabel');
     if (label) label.textContent = `${Number(z.value).toFixed(1)}×`;
+    updateCameraZoomChipActive();
     return true;
   } catch (_) {
     // The camera refused it — put the slider back where the zoom is.
