@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.5-live';
+const CURRENT_VERSION_TAG = 'v4.6-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1427,25 +1427,30 @@ function scanValidateQuad(quad, w, h) {
   return true;
 }
 
-function detectDocumentQuad(gray, w, h) {
-  // gray: 0..255 values, w*h. Returns ordered quad or null.
-  const n = w * h;
-  // 1. Blur (3x3 box).
-  const blur = new Float32Array(n);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let s = 0, c = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        const yy = y + dy; if (yy < 0 || yy >= h) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx; if (xx < 0 || xx >= w) continue;
-          s += gray[yy * w + xx]; c++;
+function scanBlur(gray, w, h, passes) {
+  let src = Float32Array.from(gray);
+  let dst = new Float32Array(w * h);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0, c = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= h) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= w) continue;
+            s += src[yy * w + xx]; c++;
+          }
         }
+        dst[y * w + x] = s / c;
       }
-      blur[y * w + x] = s / c;
     }
+    const tmp = src; src = dst; dst = tmp;
   }
-  // 2. Sobel edge magnitude.
+  return src;
+}
+
+function scanSobel(blur, w, h) {
+  const n = w * h;
   const mag = new Float32Array(n);
   let maxMag = 0;
   for (let y = 1; y < h - 1; y++) {
@@ -1460,29 +1465,48 @@ function detectDocumentQuad(gray, w, h) {
       if (m > maxMag) maxMag = m;
     }
   }
-  if (maxMag < 40) return null; // no strong edge at all
-  // 3. Threshold strong edges.
-  const thr = Math.max(30, maxMag * 0.3);
-  const edge = new Uint8Array(n);
-  let edgeCount = 0;
-  for (let i = 0; i < n; i++) {
-    if (mag[i] >= thr) { edge[i] = 1; edgeCount++; }
+  return { mag, maxMag };
+}
+
+function scanThreshold(mag, thr) {
+  const edge = new Uint8Array(mag.length);
+  for (let i = 0; i < mag.length; i++) if (mag[i] >= thr) edge[i] = 1;
+  return edge;
+}
+
+function scanDilate(edge, w, h) {
+  // 3x3 dilation: closes 1-2px gaps in a broken outline.
+  const out = new Uint8Array(edge.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let v = 0;
+      for (let dy = -1; dy <= 1 && !v; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx; if (xx < 0 || xx >= w) continue;
+          if (edge[yy * w + xx]) { v = 1; break; }
+        }
+      }
+      out[y * w + x] = v;
+    }
   }
-  if (edgeCount < n * 0.002) return null;
-  // 4. Largest connected edge component (4-connectivity, iterative).
+  return out;
+}
+
+function scanComponents(edge, w, h, topK) {
+  // Connected components (4-connectivity), largest `topK` by pixel count.
+  const n = w * h;
   const label = new Int32Array(n).fill(-1);
-  let bestComp = null, bestSize = 0;
+  const comps = [];
   const stack = [];
   for (let s = 0; s < n; s++) {
     if (!edge[s] || label[s] !== -1) continue;
-    let size = 0;
     const pts = [];
     stack.length = 0;
     stack.push(s);
     label[s] = s;
     while (stack.length) {
       const cur = stack.pop();
-      size++;
       pts.push(cur);
       const cx = cur % w, cy = (cur / w) | 0;
       if (cx > 0 && edge[cur - 1] && label[cur - 1] === -1) { label[cur - 1] = s; stack.push(cur - 1); }
@@ -1490,15 +1514,177 @@ function detectDocumentQuad(gray, w, h) {
       if (cy > 0 && edge[cur - w] && label[cur - w] === -1) { label[cur - w] = s; stack.push(cur - w); }
       if (cy < h - 1 && edge[cur + w] && label[cur + w] === -1) { label[cur + w] = s; stack.push(cur + w); }
     }
-    if (size > bestSize) { bestSize = size; bestComp = pts; }
+    comps.push(pts);
   }
-  if (!bestComp || bestSize < n * 0.002) return null;
-  // 5. Convex hull of the component, then its four corners.
-  const hullPts = bestComp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
-  const hull = scanConvexHull(hullPts);
-  const quad = scanQuadFromHull(hull);
-  if (!scanValidateQuad(quad, w, h)) return null;
-  return quad;
+  comps.sort((a, b) => b.length - a.length);
+  return comps.slice(0, topK);
+}
+
+function scanQuadSupport(quad, mag, thr, w, h) {
+  // Fraction of the quad's perimeter that has a real edge within 2px.
+  // This is the quality test that separates a document from clutter.
+  let hits = 0, total = 0;
+  for (let e = 0; e < 4; e++) {
+    const a = quad[e], b = quad[(e + 1) % 4];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(8, Math.round(len / 10));
+    for (let s = 0; s <= steps; s++) {
+      const x = Math.round(a.x + (b.x - a.x) * (s / steps));
+      const y = Math.round(a.y + (b.y - a.y) * (s / steps));
+      total++;
+      let found = false;
+      for (let dy = -2; dy <= 2 && !found; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          if (mag[yy * w + xx] >= thr) { found = true; break; }
+        }
+      }
+      if (found) hits++;
+    }
+  }
+  return total ? hits / total : 0;
+}
+
+function scanHoughLines(mag, thr, w, h) {
+  // Classic Hough transform: finds the long straight lines in the image,
+  // so a document is found even when its outline is broken into pieces.
+  const pts = [];
+  for (let i = 0; i < w * h; i++) if (mag[i] >= thr) pts.push(i);
+  if (pts.length < 40) return [];
+  const D = Math.ceil(Math.hypot(w, h));
+  const RHO_BINS = 2 * D + 1;
+  const acc = new Float32Array(180 * RHO_BINS);
+  const cosT = [], sinT = [];
+  for (let t = 0; t < 180; t++) {
+    const r = (t * Math.PI) / 180;
+    cosT.push(Math.cos(r)); sinT.push(Math.sin(r));
+  }
+  for (const idx of pts) {
+    const x = idx % w, y = (idx / w) | 0;
+    for (let t = 0; t < 180; t++) {
+      const rho = Math.round(x * cosT[t] + y * sinT[t]) + D;
+      acc[t * RHO_BINS + rho]++;
+    }
+  }
+  let maxVotes = 0;
+  for (let i = 0; i < acc.length; i++) if (acc[i] > maxVotes) maxVotes = acc[i];
+  const minVotes = Math.max(30, maxVotes * 0.25);
+  const suppressed = new Uint8Array(acc.length);
+  const lines = [];
+  for (let k = 0; k < 14; k++) {
+    let bi = -1, bv = 0;
+    for (let i = 0; i < acc.length; i++) {
+      if (!suppressed[i] && acc[i] > bv) { bv = acc[i]; bi = i; }
+    }
+    if (bi < 0 || bv < minVotes) break;
+    const t = (bi / RHO_BINS) | 0, rho = (bi % RHO_BINS) - D;
+    lines.push({ theta: t, rho, votes: bv });
+    for (let dt = -4; dt <= 4; dt++) {
+      const tt = t + dt; if (tt < 0 || tt >= 180) continue;
+      for (let dr = -8; dr <= 8; dr++) {
+        const rr = rho + dr; if (rr < -D || rr > D) continue;
+        suppressed[tt * RHO_BINS + (rr + D)] = 1;
+      }
+    }
+  }
+  return lines;
+}
+
+function scanQuadsFromLines(lines) {
+  // Two roughly-parallel line pairs, roughly perpendicular to each other,
+  // make a quad from their four intersections.
+  const quads = [];
+  const lineAngle = (l) => (l.theta + 90) % 180;
+  const angDiff = (a, b) => { const d = Math.abs(a - b) % 180; return d > 90 ? 180 - d : d; };
+  const inter = (l1, l2) => {
+    const t1 = (l1.theta * Math.PI) / 180, t2 = (l2.theta * Math.PI) / 180;
+    const c1 = Math.cos(t1), s1 = Math.sin(t1), c2 = Math.cos(t2), s2 = Math.sin(t2);
+    const det = c1 * s2 - c2 * s1;
+    if (Math.abs(det) < 0.08) return null;
+    return {
+      x: (l1.rho * s2 - l2.rho * s1) / det,
+      y: (c1 * l2.rho - c2 * l1.rho) / det,
+    };
+  };
+  for (let i = 0; i < lines.length; i++) {
+    for (let j = i + 1; j < lines.length; j++) {
+      if (angDiff(lineAngle(lines[i]), lineAngle(lines[j])) > 20) continue;
+      for (let k = 0; k < lines.length; k++) {
+        if (k === i || k === j) continue;
+        for (let m = k + 1; m < lines.length; m++) {
+          if (m === i || m === j) continue;
+          if (angDiff(lineAngle(lines[k]), lineAngle(lines[m])) > 20) continue;
+          const d = angDiff(lineAngle(lines[i]), lineAngle(lines[k]));
+          if (d < 65 || d > 115) continue;
+          const p1 = inter(lines[i], lines[k]);
+          const p2 = inter(lines[i], lines[m]);
+          const p3 = inter(lines[j], lines[m]);
+          const p4 = inter(lines[j], lines[k]);
+          if (!p1 || !p2 || !p3 || !p4) continue;
+          quads.push(scanOrderCorners([p1, p2, p3, p4]));
+        }
+      }
+    }
+  }
+  return quads;
+}
+
+function scanRefineCorners(quad, mag, w, h, thr) {
+  // Snap each corner to the strongest edge within 5px — tighter crop.
+  return quad.map((p) => {
+    let best = { x: p.x, y: p.y }, bestM = -1;
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        const x = Math.round(p.x) + dx, y = Math.round(p.y) + dy;
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        const m = mag[y * w + x];
+        if (m > bestM) { bestM = m; best = { x, y }; }
+      }
+    }
+    return bestM >= thr ? best : { x: p.x, y: p.y };
+  });
+}
+
+function detectDocumentQuad(gray, w, h) {
+  // gray: 0..255 values, w*h. Returns ordered quad or null.
+  // Strong pipeline: multi-threshold contour candidates + Hough line
+  // candidates, all scored by real edge support along the perimeter,
+  // then corners snapped to the strongest nearby edge.
+  const blur = scanBlur(gray, w, h, 2);
+  const { mag, maxMag } = scanSobel(blur, w, h);
+  if (maxMag < 40) return null; // no strong edge at all
+  let best = null, bestScore = -1;
+  const consider = (quad, thr) => {
+    if (!quad || !scanValidateQuad(quad, w, h)) return;
+    const support = scanQuadSupport(quad, mag, thr, w, h);
+    if (support < 0.55) return;
+    const areaFrac = scanQuadArea(quad) / (w * h);
+    const score = support + 0.1 * Math.min(1, areaFrac / 0.4);
+    if (score > bestScore) { bestScore = score; best = quad; }
+  };
+  // Contour candidates at several thresholds; dilate to close small gaps.
+  for (const f of [0.45, 0.3, 0.18]) {
+    const thr = Math.max(25, maxMag * f);
+    const closed = scanDilate(scanThreshold(mag, thr), w, h);
+    for (const comp of scanComponents(closed, w, h, 5)) {
+      const hullPts = comp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
+      consider(scanQuadFromHull(scanConvexHull(hullPts)), thr);
+    }
+    if (bestScore >= 0.9) break; // clean hit — no need to try more
+  }
+  // Line candidates when the outline is fragmented (shadow, glare, gaps).
+  if (bestScore < 0.8) {
+    const thr = Math.max(25, maxMag * 0.25);
+    for (const quad of scanQuadsFromLines(scanHoughLines(mag, thr, w, h))) {
+      consider(quad, thr);
+    }
+  }
+  if (!best) return null;
+  // Snap corners to the strongest nearby edge.
+  const refined = scanRefineCorners(best, mag, w, h, Math.max(25, maxMag * 0.25));
+  if (refined && scanValidateQuad(refined, w, h)) return refined;
+  return best;
 }
 // --- end document scanner pure functions ---
 
