@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.1-live';
+const CURRENT_VERSION_TAG = 'v4.9.2-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -419,6 +419,8 @@ function initApp() {
   $('cancelCameraBtn').addEventListener('click', stopPanelCamera);
   $('closeCameraBtn').addEventListener('click', stopPanelCamera);
   $('switchCameraBtn').addEventListener('click', switchPanelCamera);
+  const perspCamBtn = $('perspectiveToggleCamBtn');
+  if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
 
   $('extractBtn').addEventListener('click', runExtraction);
   $('stopExtractBtn').addEventListener('click', () => {
@@ -2095,12 +2097,27 @@ async function autoScanCrop(manual) {
 }
 
 function updatePerspectiveToggle() {
-  const btn = $('perspectiveToggleBtn');
-  if (!btn) return;
-  btn.style.background = perspectiveEnabled ? '#2563eb' : '#475569';
-  btn.title = perspectiveEnabled ? 'Perspective detection: On — tap to turn off' : 'Perspective detection: Off — tap to turn on';
-  const label = btn.querySelector('.persp-state');
-  if (label) label.textContent = perspectiveEnabled ? 'On' : 'Off';
+  for (const id of ['perspectiveToggleBtn', 'perspectiveToggleCamBtn']) {
+    const btn = $(id);
+    if (!btn) continue;
+    btn.style.background = perspectiveEnabled ? '#2563eb' : '#475569';
+    btn.title = perspectiveEnabled ? 'Perspective detection: On — tap to turn off' : 'Perspective detection: Off — tap to turn on';
+    const label = btn.querySelector('.persp-state');
+    if (label) label.textContent = perspectiveEnabled ? 'On' : 'Off';
+  }
+}
+
+function togglePerspective() {
+  perspectiveEnabled = !perspectiveEnabled;
+  try { localStorage.setItem('fc_pro_perspective', perspectiveEnabled ? '1' : '0'); } catch (_) {}
+  updatePerspectiveToggle();
+  if (perspectiveEnabled) {
+    setStatus('Perspective detection on.', 'ok');
+  } else {
+    setStatus('Perspective detection off — crop by hand.');
+    drawCameraOverlay(null);
+    setCameraHint('Perspective is off.', '');
+  }
 }
 
 function setupNativeCropper() {
@@ -2112,18 +2129,7 @@ function setupNativeCropper() {
   const perspBtn = $('perspectiveToggleBtn');
 
   if (perspBtn) {
-    perspBtn.addEventListener('click', () => {
-      perspectiveEnabled = !perspectiveEnabled;
-      try { localStorage.setItem('fc_pro_perspective', perspectiveEnabled ? '1' : '0'); } catch (_) {}
-      updatePerspectiveToggle();
-      if (perspectiveEnabled) {
-        setStatus('Perspective detection on.', 'ok');
-      } else {
-        setStatus('Perspective detection off — crop by hand.');
-        drawCameraOverlay(null);
-        setCameraHint('Perspective is off.', '');
-      }
-    });
+    perspBtn.addEventListener('click', togglePerspective);
   }
   updatePerspectiveToggle();
 
