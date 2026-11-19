@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.13-live';
+const CURRENT_VERSION_TAG = 'v4.9.15-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1010,7 +1010,7 @@ function setupImageViewerModal() {
   modal.style.cssText = 'display:none; position:fixed; inset:0; z-index:99999; background:rgba(9,9,11,0.92); backdrop-filter:blur(6px); flex-direction:column; align-items:center; justify-content:flex-start; padding:12px; overflow-y:auto;';
 
   modal.innerHTML = `
-    <div style="position:relative; width:100%; max-width:540px; display:flex; flex-direction:column; gap:10px; margin:auto;">
+    <div style="position:relative; width:100%; max-width:680px; display:flex; flex-direction:column; gap:10px; margin:auto;">
       <div style="display:flex; justify-content:space-between; align-items:center; color:#fff; padding:2px 4px;">
         <span id="fcViewerTitle" style="font-weight:700; font-size:13.5px; color:#38bdf8;">Card Inspector</span>
         <div style="display:flex; gap:6px; align-items:center;">
@@ -1022,10 +1022,10 @@ function setupImageViewerModal() {
           <button type="button" id="fcViewerClose" style="background:#dc2626; color:#fff; border:none; border-radius:6px; width:28px; height:28px; font-weight:bold; font-size:14px; cursor:pointer; margin-left:4px;">✕</button>
         </div>
       </div>
-      <div style="width:100%; max-height:40vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
-        <img id="fcViewerImg" style="max-width:100%; max-height:40vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
+      <div style="width:100%; max-height:60vh; overflow:auto; display:flex; align-items:center; justify-content:center; border-radius:8px;">
+        <img id="fcViewerImg" style="max-width:100%; max-height:60vh; object-fit:contain; transition:transform 0.12s ease; transform-origin:center center;">
       </div>
-      <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:48vh; overflow-y:auto;"></div>
+      <div id="fcViewerMeta" style="width:100%; background:#18181b; color:#f8fafc; padding:12px; border-radius:10px; border:1px solid #27272a; font-size:12px; box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:30vh; overflow-y:auto;"></div>
     </div>`;
   document.body.appendChild(modal);
 
@@ -1041,6 +1041,7 @@ function setupImageViewerModal() {
 
   const closeViewer = () => {
     modal.style.display = 'none';
+    setPanelWide(false); // back to the normal panel width
     if (state.lastExtracted) renderExtractedCards(state.lastExtracted);
   };
   modal.querySelector('#fcViewerClose').onclick = closeViewer;
@@ -1050,6 +1051,7 @@ function setupImageViewerModal() {
 function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
+  setPanelWide(true); // bigger view on tablet/desktop while inspecting
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
   // Undo a crop: bring back the original photo (only shown when the
   // photo was cropped at least once — the original is kept on first crop).
@@ -1381,6 +1383,12 @@ let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
 let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraDetectTimer = null;
+// Ask the bookmarklet (parent page) to widen the panel while the camera
+// is open, so the popup is bigger on a tablet/desktop. Phones already
+// show the panel full-width, so the wide class does nothing there.
+function setPanelWide(wide) {
+  try { window.parent.postMessage({ action: 'FC_PRO_PANEL_WIDE', wide: !!wide }, '*'); } catch (_) {}
+}
 // Photo frame for Capture when there is no green-lock warp: landscape
 // 4:3 (the viewfinder) or portrait 3:4 (tall documents). Remembered
 // across sessions, like the perspective toggle.
@@ -1402,6 +1410,7 @@ function stopPanelCameraTracks() {
 
 function stopPanelCamera() {
   stopPanelCameraTracks();
+  setPanelWide(false); // back to the normal panel width
   const modal = $('cameraModal');
   if (modal) modal.classList.remove('open');
 }
@@ -1620,6 +1629,7 @@ async function openPanelCamera(category) {
   }
   try {
     await startPanelCamera();
+    setPanelWide(true); // bigger popup on tablet/desktop while shooting
   } catch (_) {
     stopPanelCamera();
     setStatus('Camera is blocked here — opening the phone camera instead.', 'err');
@@ -1767,6 +1777,7 @@ function openCropForImage(item) {
   activeCropItem = item;
   activeCategory = null;
   setRetakeLabel(item.source === 'camera');
+  setPanelWide(false); // crop editor uses the normal panel width
   const titleEl = $('cropModalTitle');
   if (titleEl) titleEl.textContent = 'Crop, Scan, Rotate & Zoom Image';
 

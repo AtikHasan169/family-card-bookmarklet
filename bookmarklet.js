@@ -86,7 +86,7 @@
     #fc-drawer-iframe {
       position: fixed; background: #ffffff; border: none;
       pointer-events: auto; will-change: transform;
-      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     .fc-mobile-view #fc-drawer-iframe {
@@ -105,6 +105,12 @@
       transform: translateX(105%);
     }
     .fc-desktop-view #fc-drawer-iframe.open { transform: translateX(0); }
+
+    /* Wide panel while the in-panel camera is open (tablet/desktop only):
+       the phone sheet is already full-width, so this changes nothing there. */
+    .fc-desktop-view #fc-drawer-iframe.fc-wide {
+      width: min(720px, 94vw);
+    }
   `;
   document.head.appendChild(style);
 
@@ -196,6 +202,7 @@
 
     const data = event.data;
     if (data.action === 'FC_CLOSE_SHEET') closeSheet();
+    if (data.action === 'FC_PRO_PANEL_WIDE') iframe.classList.toggle('fc-wide', !!data.wide);
     if (data.action === 'FC_CHECK_STATUS' || data.action === 'FC_GET_API_KEY') {
       sendToPanel({ action: 'FC_STATUS_REPLY', online: true });
       pushSavedCredentials();
