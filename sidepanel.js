@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.5-live';
+const CURRENT_VERSION_TAG = 'v4.9.7-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -788,9 +788,9 @@ function syncJsonOutput() {
 }
 
 function addImage(category, base64, name, source) {
-  // source: 'upload' (file / import — auto-crop applies) or 'camera'
-  // (in-panel capture — the live edge view already did the aiming, so
-  // the photo stays as-shot and is never auto-cropped).
+  // source: 'upload' (file / import — the crop editor auto-scans it) or
+  // 'camera' (in-panel capture — a green lock straightens the shot on
+  // Capture, so the crop editor never auto-scans it).
   state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: source || 'upload' });
   renderPreviews(category);
   saveSessionState();
@@ -1367,6 +1367,7 @@ let panelCameraStream = null;
 let panelCameraFacing = 'environment';
 let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
+let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraDetectTimer = null;
 
 function stopPanelCameraTracks() {
@@ -1377,6 +1378,7 @@ function stopPanelCameraTracks() {
   }
   const video = $('cameraVideo');
   if (video) video.srcObject = null;
+  panelCameraQuad = null;
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1478,17 +1480,19 @@ function runCameraEdgeDetect() {
     }
     const res = detectLiveQuad(gray, w, h);
     if (res && res.support >= 0.55) {
-      // Green lock — the document is framed well. Aiming aid only now:
-      // Capture saves the full frame, nothing is auto-cropped.
+      // Green lock — good enough to straighten the shot on Capture.
       const back = 1 / scale;
-      drawCameraOverlay(res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), '#22c55e');
+      panelCameraQuad = { points: res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), at: Date.now() };
+      drawCameraOverlay(panelCameraQuad.points, '#22c55e');
       setCameraHint('Document found — tap Capture', 'found');
     } else if (res) {
       // Yellow — a document is probably there; hold steady for a lock.
+      panelCameraQuad = null;
       const back = 1 / scale;
       drawCameraOverlay(res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), '#eab308');
       setCameraHint('Hold steady — almost there', 'warn');
     } else {
+      panelCameraQuad = null;
       drawCameraGuide();
       setCameraHint('Point the camera at the card…', '');
     }
@@ -1553,10 +1557,19 @@ function capturePanelPhoto() {
   cv.width = Math.max(1, Math.round(video.videoWidth * scale));
   cv.height = Math.max(1, Math.round(video.videoHeight * scale));
   cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
-  // No auto-crop here: the live edge view is only an aiming aid — the
-  // full frame is saved as-shot, and the crop editor never auto-scans
-  // a camera photo. (Auto-crop is upload-only.)
-  const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+  // If the live edge view found the document, straighten the shot now —
+  // the crop editor then opens on an already-straight photo. With no
+  // green lock (or perspective off) the full frame is saved as-shot.
+  let b64 = '';
+  const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
+  if (quad) {
+    try {
+      const qscale = cv.width / video.videoWidth;
+      const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
+      b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+    } catch (_) { b64 = ''; }
+  }
+  if (!b64) b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
   if (!b64) {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
@@ -1657,9 +1670,10 @@ function openCropForImage(item) {
     panY = 0;
     $('zoomRange').value = 1;
     drawCropCanvas();
-    // Auto-crop (CamScanner-style) is upload-only: a camera photo stays
-    // as-shot here — the live edge view already did the aiming. Items
-    // without a source (older sessions, imports) keep the old behaviour.
+    // Auto-crop (CamScanner-style) is upload-only: a camera photo was
+    // already straightened on Capture when the green lock was on — with
+    // no lock it stays as-shot for manual crop. Items without a source
+    // (older sessions, imports) keep the old behaviour.
     if (item.source !== 'camera') autoScanCrop(false);
   };
   rawImage.onerror = () => {
@@ -2149,9 +2163,9 @@ function warpQuadImage(img, quad) {
 }
 
 async function autoScanCrop(manual) {
-  // Perspective off: no automatic scan (the Scan button still runs one
-  // manually when tapped).
-  if (!perspectiveEnabled && !manual) return false;
+  // Upload auto-scan always runs — exactly like v4.6. The Perspective
+  // toggle only switches the camera's live detection (outlines + the
+  // capture straightening); it never blocks an upload's auto-crop.
   const srcImg = rawImage;
   if (!srcImg) return false;
   try {
@@ -2205,7 +2219,7 @@ function togglePerspective() {
   if (perspectiveEnabled) {
     setStatus('Perspective detection on.', 'ok');
   } else {
-    setStatus('Perspective detection off — crop by hand.');
+    setStatus('Perspective detection off — no outlines in the camera.');
     drawCameraOverlay(null);
     setCameraHint('Perspective is off.', '');
   }
