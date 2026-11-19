@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.15-live';
+const CURRENT_VERSION_TAG = 'v4.9.16-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1485,13 +1485,17 @@ function cameraFrameRect() {
   const sw = video ? video.clientWidth : 0;
   const sh = video ? video.clientHeight : 0;
   if (!sw || !sh) return null;
-  const inset = 3;
+  // The frame sits inside the popup with room to spare (86% of the stage),
+  // so the user can see what is outside the frame before capturing.
+  const S = 0.86;
   if (cameraFramePortrait) {
-    const h = sh - inset * 2;
+    const h = sh * S;
     const w = h * 3 / 4;
-    return { x: (sw - w) / 2, y: inset, w, h };
+    return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
   }
-  return { x: inset, y: inset, w: sw - inset * 2, h: sh - inset * 2 };
+  const w = sw * S;
+  const h = w * 3 / 4;
+  return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
 }
 
 function frameHintText() {

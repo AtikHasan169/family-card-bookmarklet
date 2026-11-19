@@ -109,7 +109,7 @@
     /* Wide panel while the in-panel camera is open (tablet/desktop only):
        the phone sheet is already full-width, so this changes nothing there. */
     .fc-desktop-view #fc-drawer-iframe.fc-wide {
-      width: min(720px, 94vw);
+      width: min(900px, 94vw);
     }
   `;
   document.head.appendChild(style);
