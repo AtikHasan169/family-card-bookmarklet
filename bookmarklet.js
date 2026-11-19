@@ -118,6 +118,18 @@
   root.id = 'fc-floating-root';
   root.className = viewClass;
 
+  // Device rotation: the sheet/drawer layout is picked from the screen
+  // width at load; re-pick it when the orientation changes so the panel
+  // keeps the right shape (a 768px-wide tablet is a sheet in portrait, a
+  // drawer in landscape).
+  function syncPanelViewClass() {
+    const mobile = window.screen.width <= 768;
+    root.classList.toggle('fc-mobile-view', mobile);
+    root.classList.toggle('fc-desktop-view', !mobile);
+  }
+  window.addEventListener('orientationchange', syncPanelViewClass);
+  window.addEventListener('resize', syncPanelViewClass);
+
   const trigger = document.createElement('button');
   trigger.id = 'fc-trigger-btn';
   trigger.type = 'button';

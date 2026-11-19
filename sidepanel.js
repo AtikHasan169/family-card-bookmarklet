@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.16-live';
+const CURRENT_VERSION_TAG = 'v4.9.18-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -108,6 +108,9 @@ let rawImage = null;
 let extractionController = null;
 let zoomLevel = 1;
 let rotationAngle = 0;
+// Crop frame: '4:3' (landscape card), '3:4' (portrait card) or 'free'
+// (the photo as it is, 900x600). Auto-picked from the photo on crop open.
+let cropRatio = '4:3';
 // Perspective detection (auto-scan / live edge view): on by default,
 // remembered across sessions. Off = plain photo, crop by hand.
 let perspectiveEnabled = true;
@@ -432,6 +435,17 @@ function initApp() {
   if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
   const frameBtn = $('frameRotateBtn');
   if (frameBtn) frameBtn.addEventListener('click', toggleFrameOrientation);
+  // Device rotation: the frame/guide/outline are drawn from live sizes,
+  // but a stored green-lock quad belongs to the old orientation — drop it
+  // and re-draw immediately instead of waiting for the next 400ms tick.
+  const resyncCameraView = () => {
+    const modal = $('cameraModal');
+    if (!modal || !modal.classList.contains('open')) return;
+    panelCameraQuad = null;
+    runCameraEdgeDetect();
+  };
+  window.addEventListener('orientationchange', resyncCameraView);
+  window.addEventListener('resize', resyncCameraView);
   updateFrameButton();
 
   $('extractBtn').addEventListener('click', runExtraction);
@@ -1310,9 +1324,9 @@ async function handleUpload(e, category, droppedFiles = null) {
     reader.onload = (evt) => {
       rawImage = new Image();
       rawImage.onload = () => {
+        autoPickCropRatio();
         const canvas = $('cropCanvas');
-        canvas.width = 900;
-        canvas.height = 600;
+        applyCropCanvasSize();
         zoomLevel = 1;
         rotationAngle = 0;
         panX = 0;
@@ -1664,7 +1678,7 @@ function capturePanelPhoto() {
   const maxDim = 1500;
   const cv = document.createElement('canvas');
   // If the live edge view found the document, straighten the shot now —
-  // the crop editor then opens on an already-straight photo.
+  // the photo goes straight into the list (no crop screen after Capture).
   let b64 = '';
   const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
   if (quad) {
@@ -1703,7 +1717,9 @@ function capturePanelPhoto() {
     return;
   }
   // Retake: the new shot replaces the old photo in place (same list
-  // position, same person binding), then opens in the crop editor.
+  // position, same person binding). No crop screen after a capture — the
+  // shot is already framed (green-lock warp or white-frame crop); tap the
+  // thumbnail to crop it if it needs fixing.
   const replacing = retakeItem;
   retakeItem = null;
   stopPanelCamera();
@@ -1714,14 +1730,13 @@ function capturePanelPhoto() {
     replacing.source = 'camera';
     renderPreviews(panelCameraCategory);
     saveSessionState();
-    openCropForImage(replacing);
-    const titleEl = $('cropModalTitle');
-    if (titleEl && cropQueue.length) titleEl.textContent = `Crop ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal} — ${replacing.name}`;
+    // A retake in the middle of a crop queue: carry on with the next photo.
+    if (cropQueue.length) { openNextQueuedCrop(); return; }
+    setStatus('Photo replaced — tap the thumbnail to crop it if needed.', 'ok');
     return;
   }
   addImage(panelCameraCategory, b64, 'Camera.jpg', 'camera');
-  const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
-  if (item) openCropForImage(item); // straight into the crop editor (no auto-scan for a camera photo)
+  setStatus('Photo saved — tap the thumbnail to crop it if needed.', 'ok');
 }
 
 async function switchPanelCamera() {
@@ -1791,9 +1806,9 @@ function openCropForImage(item) {
 
   rawImage = new Image();
   rawImage.onload = () => {
+    autoPickCropRatio();
     const canvas = $('cropCanvas');
-    canvas.width = 900;
-    canvas.height = 600;
+    applyCropCanvasSize();
     zoomLevel = 1;
     rotationAngle = 0;
     panX = 0;
@@ -2328,8 +2343,7 @@ function undoAutoScan() {
   panY = 0;
   $('zoomRange').value = 1;
   const canvas = $('cropCanvas');
-  canvas.width = 900;
-  canvas.height = 600;
+  applyCropCanvasSize();
   drawCropCanvas();
   updateUndoScanBtn();
   setStatus('Auto-crop undone — the original photo is back. Crop it by hand or tap Scan to try again.', 'ok');
@@ -2401,6 +2415,48 @@ function togglePerspective() {
   }
 }
 
+function cropCanvasSize() {
+  if (cropRatio === '3:4') return { w: 675, h: 900 };
+  if (cropRatio === '4:3') return { w: 900, h: 675 };
+  return { w: 900, h: 600 }; // free — the photo as it is
+}
+function applyCropCanvasSize() {
+  const canvas = $('cropCanvas');
+  if (!canvas) return;
+  const s = cropCanvasSize();
+  canvas.width = s.w;
+  canvas.height = s.h;
+}
+function updateCropRatioButtons() {
+  const map = { '4:3': 'cropRatio43Btn', '3:4': 'cropRatio34Btn', 'free': 'cropRatioFreeBtn' };
+  Object.entries(map).forEach(([ratio, id]) => {
+    const btn = $(id);
+    if (btn) btn.style.background = cropRatio === ratio ? '#2563eb' : '#475569';
+  });
+}
+function setCropRatio(r) {
+  if (!rawImage || cropRatio === r) return;
+  cropRatio = r;
+  updateCropRatioButtons();
+  // The frame changed — start from a clean fit (zoom 1, centred).
+  zoomLevel = 1; panX = 0; panY = 0;
+  const zr = $('zoomRange');
+  if (zr) { zr.min = cropRatio === 'free' ? '0.5' : '1'; zr.value = 1; }
+  applyCropCanvasSize();
+  drawCropCanvas();
+}
+function autoPickCropRatio() {
+  // Pick the frame that matches the photo: landscape photo → 4:3,
+  // portrait photo → 3:4. Free is a manual choice, never auto-picked.
+  // In a ratio frame the zoom can never go below 1, so the photo can
+  // never shrink below the frame and bake black bars into the save.
+  if (!rawImage) return;
+  cropRatio = rawImage.width >= rawImage.height ? '4:3' : '3:4';
+  updateCropRatioButtons();
+  const zr = $('zoomRange');
+  if (zr) zr.min = '1';
+}
+
 function setupNativeCropper() {
   const canvas = $('cropCanvas');
   const zoomRange = $('zoomRange');
@@ -2413,6 +2469,14 @@ function setupNativeCropper() {
     perspBtn.addEventListener('click', togglePerspective);
   }
   updatePerspectiveToggle();
+
+  const ratio43Btn = $('cropRatio43Btn');
+  if (ratio43Btn) ratio43Btn.addEventListener('click', () => setCropRatio('4:3'));
+  const ratio34Btn = $('cropRatio34Btn');
+  if (ratio34Btn) ratio34Btn.addEventListener('click', () => setCropRatio('3:4'));
+  const ratioFreeBtn = $('cropRatioFreeBtn');
+  if (ratioFreeBtn) ratioFreeBtn.addEventListener('click', () => setCropRatio('free'));
+  updateCropRatioButtons();
 
   if (rotateBtn) {
     rotateBtn.addEventListener('click', () => {
