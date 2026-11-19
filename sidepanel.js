@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.10-live';
+const CURRENT_VERSION_TAG = 'v4.11-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1292,6 +1292,7 @@ let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
 let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraQuads = []; // all live quads: [{points, support}] — for two-document frames
+let panelCameraSeenTwo = false; // sticky: a second document was seen at least once this session
 let panelCameraDetectTimer = null;
 
 function stopPanelCameraTracks() {
@@ -1304,6 +1305,7 @@ function stopPanelCameraTracks() {
   if (video) video.srcObject = null;
   panelCameraQuad = null;
   panelCameraQuads = [];
+  panelCameraSeenTwo = false;
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1404,6 +1406,7 @@ function runCameraEdgeDetect() {
       gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
     }
     const res = detectLiveQuads(gray, w, h);
+    if (res.length >= 2) panelCameraSeenTwo = true; // a second card flickering in/out still counts
     const back = 1 / scale;
     const toVideo = (quad) => quad.map((p) => ({ x: p.x * back, y: p.y * back }));
     panelCameraQuads = res.map((r) => ({ points: toVideo(r.quad), support: r.support }));
@@ -1490,7 +1493,7 @@ function capturePanelPhoto() {
   // documents in frame, save the whole frame instead — the crop editor
   // splits it into two photos.
   let b64 = '';
-  const twoDocs = panelCameraQuads.length >= 2;
+  const twoDocs = panelCameraQuads.length >= 2 || panelCameraSeenTwo;
   const quad = !twoDocs && panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
   if (quad) {
     try {
@@ -1906,6 +1909,19 @@ function scanRefineCorners(quad, mag, w, h, thr) {
   });
 }
 
+function scanPointInQuad(p, quad) {
+  // Point inside a convex quad (same cross-product sign on all edges).
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i], b = quad[(i + 1) % 4];
+    const cr = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (cr === 0) continue;
+    if (sign === 0) sign = Math.sign(cr);
+    else if (Math.sign(cr) !== sign) return false;
+  }
+  return sign !== 0;
+}
+
 function scanQuadsOverlap(a, b) {
   // Two quads are the same document when every corner of each sits close
   // to a corner of the other (dedup for contour vs Hough candidates).
@@ -1932,10 +1948,17 @@ function scanDetectDocuments(gray, w, h, opts) {
     const score = support + 0.1 * Math.min(1, areaFrac / 0.4);
     found.push({ quad, support, score });
   };
-  // Contour candidates at several thresholds; dilate to close small gaps.
+  // Contour candidates at several thresholds. Each threshold is tried
+  // twice: raw (keeps two close-together cards as separate components)
+  // and dilated (closes 1-2px gaps in a card's own outline).
   for (const f of [0.45, 0.3, 0.18]) {
     const thr = Math.max(25, maxMag * f);
-    const closed = scanDilate(scanThreshold(mag, thr), w, h);
+    const mask = scanThreshold(mag, thr);
+    for (const comp of scanComponents(mask, w, h, 5)) {
+      const hullPts = comp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
+      consider(scanQuadFromHull(scanConvexHull(hullPts)), thr);
+    }
+    const closed = scanDilate(mask, w, h);
     for (const comp of scanComponents(closed, w, h, 5)) {
       const hullPts = comp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
       consider(scanQuadFromHull(scanConvexHull(hullPts)), thr);
@@ -1958,7 +1981,21 @@ function scanDetectDocuments(gray, w, h, opts) {
     if (out.some((g) => scanQuadsOverlap(q, g.quad))) continue;
     out.push({ quad: q, support: f.support });
   }
-  return out;
+  // A quad that fully encloses another quad is the outline around both
+  // documents (e.g. Hough lines joining two cards' collinear edges), not
+  // a document of its own — drop it and keep the real cards. The outer
+  // quad is expanded a few pixels first, so a 1-2px inset still counts.
+  const expandQuad = (quad, px) => {
+    const cx = quad.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = quad.reduce((s, p) => s + p.y, 0) / 4;
+    return quad.map((p) => {
+      const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / d) * px, y: p.y + (dy / d) * px };
+    });
+  };
+  const containsQuad = (outer, inner) => inner.every((p) => scanPointInQuad(p, expandQuad(outer, 4)));
+  // Drop a quad that encloses another one — keep the enclosed (real) cards.
+  return out.filter((f) => !out.some((g) => g !== f && containsQuad(f.quad, g.quad)));
 }
 
 function scanDetectDocument(gray, w, h, opts) {
@@ -1976,7 +2013,9 @@ function detectDocumentQuad(gray, w, h) {
 
 function detectDocumentQuads(gray, w, h) {
   // Every document quad in the photo, best first (empty array if none).
-  return scanDetectDocuments(gray, w, h, {}).map((r) => r.quad);
+  // Slightly looser on size than the single-document detector: two cards
+  // in one photo are each smaller than one card alone.
+  return scanDetectDocuments(gray, w, h, { minArea: 0.08 }).map((r) => r.quad);
 }
 
 function detectLiveQuad(gray, w, h) {
@@ -2114,54 +2153,62 @@ async function autoScanCrop(manual) {
       if (manual) setStatus('No document edge found — crop it by hand.', 'err');
       return false;
     }
-    const warped = warpQuadImage(srcImg, quads[0]);
-    const img = new Image();
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-      img.src = warped.toDataURL('image/jpeg', 0.82);
-    });
-    // The user may have moved on (crop queue) while the scan ran.
-    if (rawImage !== srcImg) return false;
-    rawImage = img;
-    const canvas = $('cropCanvas');
-    canvas.width = warped.width;
-    canvas.height = warped.height;
-    rotationAngle = 0;
-    zoomLevel = 1;
-    panX = 0;
-    panY = 0;
-    $('zoomRange').value = 1;
-    drawCropCanvas();
     if (quads.length === 1) {
+      const warped = warpQuadImage(srcImg, quads[0]);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = warped.toDataURL('image/jpeg', 0.82);
+      });
+      // The user may have moved on (crop queue) while the scan ran.
+      if (rawImage !== srcImg) return false;
+      rawImage = img;
+      const canvas = $('cropCanvas');
+      canvas.width = warped.width;
+      canvas.height = warped.height;
+      rotationAngle = 0;
+      zoomLevel = 1;
+      panX = 0;
+      panY = 0;
+      $('zoomRange').value = 1;
+      drawCropCanvas();
       setStatus('Document detected — auto-cropped.', 'ok');
       return true;
     }
-    // Two documents in one photo: each extra one becomes its own photo,
-    // straightened the same way, and joins the crop queue after this one.
-    const extraItems = [];
-    const cat = activeCropItem && state.head.some((i) => i.id === activeCropItem.id) ? 'head' : 'other';
-    for (const q of quads.slice(1)) {
-      try {
-        const w2 = warpQuadImage(srcImg, q);
-        const b64 = w2.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
-        if (!b64) continue;
-        const item = { id: nextId++, base64: b64, name: 'Scanned doc.jpg', relation: 'Auto', boundRef: null, boundRefs: [] };
-        state[cat].push(item);
-        extraItems.push(item);
-      } catch (_) { /* one bad warp never blocks the rest */ }
+    // Two or more documents: keep them together in ONE photo — one upload,
+    // one API call. Crop to the box around all of them instead of
+    // splitting (splitting would cost an extra extraction per document).
+    const allPts = quads.flat();
+    const pad = 12;
+    const x0 = Math.max(0, Math.floor(Math.min(...allPts.map((p) => p.x))) - pad);
+    const y0 = Math.max(0, Math.floor(Math.min(...allPts.map((p) => p.y))) - pad);
+    const x1 = Math.min(srcImg.naturalWidth, Math.ceil(Math.max(...allPts.map((p) => p.x))) + pad);
+    const y1 = Math.min(srcImg.naturalHeight, Math.ceil(Math.max(...allPts.map((p) => p.y))) + pad);
+    const boxW = Math.max(2, x1 - x0), boxH = Math.max(2, y1 - y0);
+    if (boxW * boxH < 0.98 * srcImg.naturalWidth * srcImg.naturalHeight) {
+      const box = document.createElement('canvas');
+      box.width = boxW; box.height = boxH;
+      box.getContext('2d').drawImage(srcImg, x0, y0, boxW, boxH, 0, 0, boxW, boxH);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = box.toDataURL('image/jpeg', 0.82);
+      });
+      if (rawImage !== srcImg) return false;
+      rawImage = img;
+      const canvas = $('cropCanvas');
+      canvas.width = boxW;
+      canvas.height = boxH;
+      rotationAngle = 0;
+      zoomLevel = 1;
+      panX = 0;
+      panY = 0;
+      $('zoomRange').value = 1;
+      drawCropCanvas();
     }
-    if (extraItems.length) {
-      renderPreviews('head');
-      renderPreviews('other');
-      saveSessionState();
-      const queueWasRunning = cropQueue.length > 0 || cropQueueTotal > 0;
-      cropQueue.push(...extraItems);
-      cropQueueTotal += extraItems.length + (queueWasRunning ? 0 : 1);
-      setStatus(`${quads.length} documents found — split into ${1 + extraItems.length} photos. Crop this one, then the next.`, 'ok');
-    } else {
-      setStatus('Document detected — auto-cropped.', 'ok');
-    }
+    setStatus(`${quads.length} documents found — kept together in one photo.`, 'ok');
     return true;
   } catch (_) {
     if (manual) setStatus('Scan failed — crop it by hand.', 'err');
