@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.11-live';
+const CURRENT_VERSION_TAG = 'v4.12-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1290,9 +1290,7 @@ let panelCameraStream = null;
 let panelCameraFacing = 'environment';
 let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
-let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraQuads = []; // all live quads: [{points, support}] — for two-document frames
-let panelCameraSeenTwo = false; // sticky: a second document was seen at least once this session
 let panelCameraDetectTimer = null;
 
 function stopPanelCameraTracks() {
@@ -1303,9 +1301,7 @@ function stopPanelCameraTracks() {
   }
   const video = $('cameraVideo');
   if (video) video.srcObject = null;
-  panelCameraQuad = null;
   panelCameraQuads = [];
-  panelCameraSeenTwo = false;
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1406,16 +1402,14 @@ function runCameraEdgeDetect() {
       gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
     }
     const res = detectLiveQuads(gray, w, h);
-    if (res.length >= 2) panelCameraSeenTwo = true; // a second card flickering in/out still counts
     const back = 1 / scale;
     const toVideo = (quad) => quad.map((p) => ({ x: p.x * back, y: p.y * back }));
     panelCameraQuads = res.map((r) => ({ points: toVideo(r.quad), support: r.support }));
     const locked = res.find((r) => r.support >= 0.55);
     if (locked) {
-      // Green lock on the best document — good enough to straighten on
-      // Capture. Other documents in the frame draw in blue.
-      panelCameraQuad = { points: toVideo(locked.quad), at: Date.now() };
-      const list = [{ quad: panelCameraQuad.points, color: '#22c55e' }];
+      // Green lock on the best document; other documents in the frame
+      // draw in blue.
+      const list = [{ quad: toVideo(locked.quad), color: '#22c55e' }];
       for (const r of res) {
         if (r !== locked) list.push({ quad: toVideo(r.quad), color: '#38bdf8' });
       }
@@ -1423,11 +1417,9 @@ function runCameraEdgeDetect() {
       setCameraHint(panelCameraQuads.length > 1 ? `${panelCameraQuads.length} documents — tap Capture` : 'Document found — tap Capture', 'found');
     } else if (res.length) {
       // Yellow — a document is probably there; hold steady for a lock.
-      panelCameraQuad = null;
       drawCameraOverlays(res.map((r) => ({ quad: toVideo(r.quad), color: '#eab308' })));
       setCameraHint('Hold steady — almost there', 'warn');
     } else {
-      panelCameraQuad = null;
       drawCameraGuide();
       setCameraHint('Point the camera at the card…', '');
     }
@@ -1488,21 +1480,10 @@ function capturePanelPhoto() {
   cv.width = Math.max(1, Math.round(video.videoWidth * scale));
   cv.height = Math.max(1, Math.round(video.videoHeight * scale));
   cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
-  // If the live edge view found the document, straighten the shot now —
-  // the crop editor then opens on an already-straight photo. With two
-  // documents in frame, save the whole frame instead — the crop editor
-  // splits it into two photos.
-  let b64 = '';
-  const twoDocs = panelCameraQuads.length >= 2 || panelCameraSeenTwo;
-  const quad = !twoDocs && panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
-  if (quad) {
-    try {
-      const qscale = cv.width / video.videoWidth;
-      const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
-      b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
-    } catch (_) { b64 = ''; }
-  }
-  if (!b64) b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+  // Always save the whole frame: the crop editor straightens a single
+  // document (or boxes two together) at full resolution right after.
+  // Warping here could cut a second document out of the shot.
+  const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
   if (!b64) {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
@@ -1671,6 +1652,22 @@ function scanValidateQuad(quad, w, h, opts) {
   const area = scanQuadArea(quad);
   const imgArea = w * h;
   if (area < imgArea * minArea || area > imgArea * maxArea) return false;
+  // No corner on the image border: a document with a corner touching
+  // the frame edge is cut off, and background regions bounded by the
+  // frame edge (gradient, shadow) otherwise pass as false documents.
+  // 1px margin: a card 1px from the edge (frame-filling shot) still counts.
+  for (const p of quad) {
+    if (p.x < 1 || p.x > w - 2 || p.y < 1 || p.y > h - 2) return false;
+  }
+  // A real document (ID card, certificate) is never a long strip: the
+  // longest side is at most ~2.5x the shortest. This rejects shadow
+  // bands, table edges and other tall/thin false outlines.
+  const edges = [];
+  for (let i = 0; i < 4; i++) {
+    edges.push(Math.hypot(quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y));
+  }
+  const longest = Math.max(...edges), shortest = Math.min(...edges);
+  if (shortest < 1 || longest / shortest > 2.5) return false;
   // Convex: all turns the same way.
   let sign = 0;
   for (let i = 0; i < 4; i++) {
@@ -1923,10 +1920,16 @@ function scanPointInQuad(p, quad) {
 }
 
 function scanQuadsOverlap(a, b) {
-  // Two quads are the same document when every corner of each sits close
+  // Two quads are the same document when most corners of each sit close
   // to a corner of the other (dedup for contour vs Hough candidates).
-  const near = (p, qs) => qs.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < 12);
-  return a.every((p) => near(p, b)) && b.every((p) => near(p, a));
+  // 24px: the same card detected at a lower threshold comes back a few
+  // pixels bigger (blur halo + dilation), so the radius must cover that.
+  // 3 of 4 corners: a duplicate can have one corner pulled away by a
+  // shadow or glare while the other three sit on the real card. Two
+  // genuinely different cards share at most one or two corner pairs
+  // (adjacent corners), never three, so they still survive.
+  const nearCount = (p, qs) => p.filter((c) => qs.some((q) => Math.hypot(c.x - q.x, c.y - q.y) < 24)).length;
+  return nearCount(a, b) >= 3 && nearCount(b, a) >= 3;
 }
 
 function scanDetectDocuments(gray, w, h, opts) {
@@ -1950,9 +1953,11 @@ function scanDetectDocuments(gray, w, h, opts) {
   };
   // Contour candidates at several thresholds. Each threshold is tried
   // twice: raw (keeps two close-together cards as separate components)
-  // and dilated (closes 1-2px gaps in a card's own outline).
-  for (const f of [0.45, 0.3, 0.18]) {
-    const thr = Math.max(25, maxMag * f);
+  // and dilated (closes 1-2px gaps in a card's own outline). The lowest
+  // pass (0.10, floor 15) catches faint edges — a pale card on a pale
+  // table — that the higher passes miss entirely.
+  for (const [f, floor] of [[0.45, 25], [0.3, 25], [0.18, 25], [0.10, 15]]) {
+    const thr = Math.max(floor, maxMag * f);
     const mask = scanThreshold(mag, thr);
     for (const comp of scanComponents(mask, w, h, 5)) {
       const hullPts = comp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
@@ -2013,20 +2018,21 @@ function detectDocumentQuad(gray, w, h) {
 
 function detectDocumentQuads(gray, w, h) {
   // Every document quad in the photo, best first (empty array if none).
-  // Slightly looser on size than the single-document detector: two cards
-  // in one photo are each smaller than one card alone.
-  return scanDetectDocuments(gray, w, h, { minArea: 0.08 }).map((r) => r.quad);
+  // Loose on size and edge support: two cards in one photo are each
+  // smaller and fainter than one card alone, and the bounding-box use
+  // only needs the region, not a perfect warp quad.
+  return scanDetectDocuments(gray, w, h, { minSupport: 0.4, minArea: 0.04, maxArea: 0.995 }).map((r) => r.quad);
 }
 
 function detectLiveQuad(gray, w, h) {
   // Relaxed for the live viewfinder: a faint or frame-filling card still
   // gets a guide outline; only a strong lock is used for the capture warp.
-  return scanDetectDocument(gray, w, h, { minSupport: 0.4, minArea: 0.08, maxArea: 0.995 });
+  return scanDetectDocument(gray, w, h, { minSupport: 0.4, minArea: 0.04, maxArea: 0.995 });
 }
 
 function detectLiveQuads(gray, w, h) {
   // Every live quad, best first: {quad, support}.
-  return scanDetectDocuments(gray, w, h, { minSupport: 0.4, minArea: 0.08, maxArea: 0.995 });
+  return scanDetectDocuments(gray, w, h, { minSupport: 0.4, minArea: 0.04, maxArea: 0.995 });
 }
 function scanCoverMap(stageW, stageH, videoW, videoH) {
   // object-fit: cover — how a raw video frame maps onto the displayed stage.
