@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.7-live';
+const CURRENT_VERSION_TAG = 'v4.9.9-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -122,6 +122,11 @@ let activeCropItem = null;
 // (same place in the list, same person binding). Cleared on capture,
 // on save, or when the camera/file picker is cancelled.
 let retakeItem = null;
+// Undo for the crop editor: the photo as it arrived, before any
+// auto-scan warped it. Null until a crop opens; cropAutoScanned is
+// true while the shown photo is a warped result.
+let cropOriginalImage = null;
+let cropAutoScanned = false;
 let cropQueue = [];
 let cropQueueTotal = 0;
 let viewerZoom = 1;
@@ -1309,6 +1314,10 @@ async function handleUpload(e, category, droppedFiles = null) {
         panY = 0;
         $('zoomRange').value = 1;
         drawCropCanvas();
+        cropOriginalImage = rawImage;
+        cropAutoScanned = false;
+        updateUndoScanBtn();
+        setRetakeLabel(false); // a fresh upload is always a Re-upload
         autoScanCrop(false);
       };
       rawImage.onerror = () => {
@@ -1652,6 +1661,7 @@ function openNextQueuedCrop() {
 function openCropForImage(item) {
   activeCropItem = item;
   activeCategory = null;
+  setRetakeLabel(item.source === 'camera');
   const titleEl = $('cropModalTitle');
   if (titleEl) titleEl.textContent = 'Crop, Scan, Rotate & Zoom Image';
 
@@ -1674,6 +1684,9 @@ function openCropForImage(item) {
     // already straightened on Capture when the green lock was on — with
     // no lock it stays as-shot for manual crop. Items without a source
     // (older sessions, imports) keep the old behaviour.
+    cropOriginalImage = rawImage;
+    cropAutoScanned = false;
+    updateUndoScanBtn();
     if (item.source !== 'camera') autoScanCrop(false);
   };
   rawImage.onerror = () => {
@@ -2162,6 +2175,46 @@ function warpQuadImage(img, quad) {
   return out;
 }
 
+// Retake button label/icon follows the photo's source: a camera photo
+// is retaken with the camera, an upload is replaced by picking a new
+// file (Re-upload).
+function setRetakeLabel(isCamera) {
+  const btn = $('cancelCropBtn');
+  if (!btn) return;
+  const camIc = btn.querySelector('.retake-ic-cam');
+  const upIc = btn.querySelector('.retake-ic-up');
+  const label = btn.querySelector('.retake-label');
+  if (camIc) camIc.style.display = isCamera ? '' : 'none';
+  if (upIc) upIc.style.display = isCamera ? 'none' : '';
+  if (label) label.textContent = isCamera ? 'Retake' : 'Re-upload';
+  btn.title = isCamera ? 'Retake this photo with the camera' : 'Re-upload a different photo';
+}
+
+function updateUndoScanBtn() {
+  const btn = $('undoScanBtn');
+  if (!btn) return;
+  btn.style.display = cropAutoScanned ? '' : 'none';
+}
+
+// Undo a wrong auto-crop: put the photo back exactly as it arrived,
+// so it can be cropped by hand or scanned again with the Scan button.
+function undoAutoScan() {
+  if (!cropAutoScanned || !cropOriginalImage) return;
+  rawImage = cropOriginalImage;
+  cropAutoScanned = false;
+  rotationAngle = 0;
+  zoomLevel = 1;
+  panX = 0;
+  panY = 0;
+  $('zoomRange').value = 1;
+  const canvas = $('cropCanvas');
+  canvas.width = 900;
+  canvas.height = 600;
+  drawCropCanvas();
+  updateUndoScanBtn();
+  setStatus('Auto-crop undone — the original photo is back. Crop it by hand or tap Scan to try again.', 'ok');
+}
+
 async function autoScanCrop(manual) {
   // Upload auto-scan always runs — exactly like v4.6. The Perspective
   // toggle only switches the camera's live detection (outlines + the
@@ -2184,6 +2237,8 @@ async function autoScanCrop(manual) {
     // The user may have moved on (crop queue) while the scan ran.
     if (rawImage !== srcImg) return false;
     rawImage = img;
+    cropAutoScanned = true;
+    updateUndoScanBtn();
     const canvas = $('cropCanvas');
     canvas.width = warped.width;
     canvas.height = warped.height;
@@ -2256,6 +2311,12 @@ function setupNativeCropper() {
     scanBtn.addEventListener('click', () => { autoScanCrop(true); });
   }
 
+  const undoBtn = $('undoScanBtn');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', undoAutoScan);
+  }
+  updateUndoScanBtn();
+
   if (zoomRange) {
     zoomRange.addEventListener('input', (e) => {
       zoomLevel = parseFloat(e.target.value);
@@ -2301,15 +2362,28 @@ function setupNativeCropper() {
   $('cancelCropBtn').addEventListener('click', () => {
     $('cropModal').classList.remove('open');
     // Real Retake: discard this shot and take a fresh one in its place.
-    // The camera opens for this photo's list; Capture replaces THIS
-    // photo (same place, same person) and opens its crop editor.
-    // Cancelling the camera keeps the old photo exactly as it was.
+    // Camera photo → the camera opens; Capture replaces THIS photo.
+    // Upload photo → pick a replacement file instead (Re-upload).
+    // Cancelling keeps the old photo exactly as it was.
     const item = activeCropItem;
     const cat = (item && itemCategory(item)) || activeCategory || 'head';
+    const isCamera = !!item && item.source === 'camera';
     activeCropItem = null;
     activeCategory = null;
     if (item && itemCategory(item)) retakeItem = item;
-    openPanelCamera(cat);
+    if (isCamera) {
+      openPanelCamera(cat);
+      return;
+    }
+    const input = $(cat === 'head' ? 'headUpload' : 'otherUpload');
+    if (input) {
+      // Picker dismissed without a file: the re-upload is abandoned, so
+      // the old photo must not be replaced by a later unrelated upload.
+      input.addEventListener('cancel', () => { retakeItem = null; }, { once: true });
+      input.click();
+    } else {
+      openCameraFileInput(cat);
+    }
   });
 
   $('saveCropBtn').addEventListener('click', async () => {
