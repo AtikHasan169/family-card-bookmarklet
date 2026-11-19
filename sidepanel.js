@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.12-live';
+const CURRENT_VERSION_TAG = 'v4.9.13-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1531,6 +1531,18 @@ function drawCameraFrame() {
   } else {
     ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
   }
+  // Grid: one vertical + one horizontal line through the frame centre,
+  // so several documents can be framed — one per cell. Two is the
+  // common case (head's card in one half, husband's in the other).
+  // Viewfinder aid only: the photo stays one photo, nothing is split.
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(fr.x + fr.w / 2, fr.y);
+  ctx.lineTo(fr.x + fr.w / 2, fr.y + fr.h);
+  ctx.moveTo(fr.x, fr.y + fr.h / 2);
+  ctx.lineTo(fr.x + fr.w, fr.y + fr.h / 2);
+  ctx.stroke();
 }
 function setCameraHint(text, kind) {
   const hint = $('cameraHint');
