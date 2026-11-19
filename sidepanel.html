@@ -625,7 +625,7 @@
   </footer>
 
   <div class="modal" id="cropModal">
-    <h3 id="cropModalTitle" style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Rotate &amp; Zoom Image</h3>
+    <h3 id="cropModalTitle" style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Scan, Rotate &amp; Zoom Image</h3>
     <div class="crop-container">
       <canvas id="cropCanvas"></canvas>
     </div>
@@ -635,14 +635,8 @@
       <input type="range" id="zoomRange" min="0.5" max="3.5" step="0.05" value="1" style="flex: 1; accent-color: #2563eb; cursor: pointer;">
     </div>
 
-    <div style="padding: 10px 14px; background: #18181b; display: flex; align-items: center; gap: 12px; border-top: 1px solid #334155;">
-      <span style="color: #94a3b8; font-size: 11px; font-weight: 600; min-width: 35px; display: inline-flex; align-items: center; gap: 5px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>ROTATE</span>
-      <input type="range" id="rotateRange" min="-45" max="45" step="1" value="0" style="flex: 1; accent-color: #2563eb; cursor: pointer;">
-      <span id="rotateAngleLabel" style="color:#fff; font-size:12px; font-weight:700; min-width:36px; text-align:right;">0°</span>
-      <button type="button" class="btn" id="resetRotateBtn" style="background:#475569; color:#fff; padding: 6px 10px; font-size:12px;" title="Reset rotation to 0°">Reset</button>
-    </div>
-
     <div style="display:flex; gap:8px; padding-top: 10px; background: #09090b;">
+      <button type="button" class="btn" id="scanCropBtn" style="background:#2563eb; color:#fff; padding: 8px 14px; font-size:16px;" title="Auto-scan document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg></button>
       <button type="button" class="btn" id="rotateLeftCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate left 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg></button>
       <button type="button" class="btn" id="rotateCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate right 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg></button>
       <button type="button" class="btn" id="cancelCropBtn" style="flex:1; background:#dc2626; color:#fff;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>Retake</button>

@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.4-live';
+const CURRENT_VERSION_TAG = 'v4.5-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -108,7 +108,6 @@ let rawImage = null;
 let extractionController = null;
 let zoomLevel = 1;
 let rotationAngle = 0;
-let fineAngle = 0;
 let panX = 0;
 let panY = 0;
 let isDragging = false;
@@ -1240,14 +1239,11 @@ async function handleUpload(e, category, droppedFiles = null) {
         canvas.height = 600;
         zoomLevel = 1;
         rotationAngle = 0;
-        fineAngle = 0;
         panX = 0;
         panY = 0;
         $('zoomRange').value = 1;
-        const rotateRange = $('rotateRange');
-        if (rotateRange) rotateRange.value = 0;
-        updateRotateLabel();
         drawCropCanvas();
+        autoScanCrop(false);
       };
       rawImage.onerror = () => {
         $('cropModal').classList.remove('open');
@@ -1302,7 +1298,7 @@ function openNextQueuedCrop() {
   const item = cropQueue.shift();
   if (!item) {
     cropQueueTotal = 0;
-    if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Image';
+    if (titleEl) titleEl.textContent = 'Crop, Scan, Rotate & Zoom Image';
     return;
   }
   openCropForImage(item);
@@ -1313,7 +1309,7 @@ function openCropForImage(item) {
   activeCropItem = item;
   activeCategory = null;
   const titleEl = $('cropModalTitle');
-  if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Image';
+  if (titleEl) titleEl.textContent = 'Crop, Scan, Rotate & Zoom Image';
 
   // Show the crop screen immediately; the photo draws as soon as it decodes.
   $('fcViewerModal').style.display = 'none';
@@ -1326,14 +1322,11 @@ function openCropForImage(item) {
     canvas.height = 600;
     zoomLevel = 1;
     rotationAngle = 0;
-    fineAngle = 0;
     panX = 0;
     panY = 0;
     $('zoomRange').value = 1;
-    const rotateRange = $('rotateRange');
-    if (rotateRange) rotateRange.value = 0;
-    updateRotateLabel();
     drawCropCanvas();
+    autoScanCrop(false);
   };
   rawImage.onerror = () => {
     $('cropModal').classList.remove('open');
@@ -1341,6 +1334,173 @@ function openCropForImage(item) {
   };
   rawImage.src = `data:image/jpeg;base64,${item.base64}`;
 }
+
+// --- Document scanner: pure functions (no DOM) — tested by tests/sidepanel_scan_test.js ---
+// CamScanner-style: find the document's four corners in a photo and return
+// them ordered [top-left, top-right, bottom-right, bottom-left], or null.
+function scanQuadArea(quad) {
+  let a = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = quad[i], q = quad[(i + 1) % 4];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
+}
+
+function scanConvexHull(points) {
+  // Andrew's monotone chain. points: [{x, y}]. Returns hull, CCW order.
+  const pts = points.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+
+function scanOrderCorners(pts) {
+  // Order 4 points as [top-left, top-right, bottom-right, bottom-left].
+  // In screen coords (y down), ascending atan2 runs clockwise.
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  const sorted = pts.slice().sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  let tlIdx = 0;
+  sorted.forEach((p, i) => { if (p.y + p.x < sorted[tlIdx].y + sorted[tlIdx].x) tlIdx = i; });
+  const ordered = [];
+  for (let i = 0; i < 4; i++) ordered.push(sorted[(tlIdx + i) % 4]);
+  return ordered;
+}
+
+function scanQuadFromHull(hull) {
+  if (!hull || hull.length < 4) return null;
+  if (hull.length === 4) return scanOrderCorners(hull);
+  // A rectangle's corners are the extreme points in the 4 diagonal
+  // directions from its centre (y down: +x+y = bottom-right, etc.).
+  const cx = hull.reduce((s, p) => s + p.x, 0) / hull.length;
+  const cy = hull.reduce((s, p) => s + p.y, 0) / hull.length;
+  const dirs = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const corners = dirs.map(([dx, dy]) => {
+    let best = hull[0], bestD = -Infinity;
+    for (const p of hull) {
+      const d = (p.x - cx) * dx + (p.y - cy) * dy;
+      if (d > bestD) { bestD = d; best = p; }
+    }
+    return best;
+  });
+  return scanOrderCorners(corners);
+}
+
+function scanValidateQuad(quad, w, h) {
+  if (!quad || quad.length !== 4) return false;
+  // Distinct corners (at least 8px apart).
+  for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+    const dx = quad[i].x - quad[j].x, dy = quad[i].y - quad[j].y;
+    if (dx * dx + dy * dy < 64) return false;
+  }
+  const area = scanQuadArea(quad);
+  const imgArea = w * h;
+  if (area < imgArea * 0.12 || area > imgArea * 0.98) return false;
+  // Convex: all turns the same way.
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i], b = quad[(i + 1) % 4], c = quad[(i + 2) % 4];
+    const cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (cr === 0) continue;
+    if (sign === 0) sign = Math.sign(cr);
+    else if (Math.sign(cr) !== sign) return false;
+  }
+  if (sign === 0) return false;
+  // Each edge at least 8% of the smaller image side.
+  const minEdge = Math.min(w, h) * 0.08;
+  for (let i = 0; i < 4; i++) {
+    const a = quad[i], b = quad[(i + 1) % 4];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < minEdge) return false;
+  }
+  return true;
+}
+
+function detectDocumentQuad(gray, w, h) {
+  // gray: 0..255 values, w*h. Returns ordered quad or null.
+  const n = w * h;
+  // 1. Blur (3x3 box).
+  const blur = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx; if (xx < 0 || xx >= w) continue;
+          s += gray[yy * w + xx]; c++;
+        }
+      }
+      blur[y * w + x] = s / c;
+    }
+  }
+  // 2. Sobel edge magnitude.
+  const mag = new Float32Array(n);
+  let maxMag = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = -blur[i - w - 1] - 2 * blur[i - 1] - blur[i + w - 1]
+        + blur[i - w + 1] + 2 * blur[i + 1] + blur[i + w + 1];
+      const gy = -blur[i - w - 1] - 2 * blur[i - w] - blur[i - w + 1]
+        + blur[i + w - 1] + 2 * blur[i + w] + blur[i + w + 1];
+      const m = Math.sqrt(gx * gx + gy * gy);
+      mag[i] = m;
+      if (m > maxMag) maxMag = m;
+    }
+  }
+  if (maxMag < 40) return null; // no strong edge at all
+  // 3. Threshold strong edges.
+  const thr = Math.max(30, maxMag * 0.3);
+  const edge = new Uint8Array(n);
+  let edgeCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (mag[i] >= thr) { edge[i] = 1; edgeCount++; }
+  }
+  if (edgeCount < n * 0.002) return null;
+  // 4. Largest connected edge component (4-connectivity, iterative).
+  const label = new Int32Array(n).fill(-1);
+  let bestComp = null, bestSize = 0;
+  const stack = [];
+  for (let s = 0; s < n; s++) {
+    if (!edge[s] || label[s] !== -1) continue;
+    let size = 0;
+    const pts = [];
+    stack.length = 0;
+    stack.push(s);
+    label[s] = s;
+    while (stack.length) {
+      const cur = stack.pop();
+      size++;
+      pts.push(cur);
+      const cx = cur % w, cy = (cur / w) | 0;
+      if (cx > 0 && edge[cur - 1] && label[cur - 1] === -1) { label[cur - 1] = s; stack.push(cur - 1); }
+      if (cx < w - 1 && edge[cur + 1] && label[cur + 1] === -1) { label[cur + 1] = s; stack.push(cur + 1); }
+      if (cy > 0 && edge[cur - w] && label[cur - w] === -1) { label[cur - w] = s; stack.push(cur - w); }
+      if (cy < h - 1 && edge[cur + w] && label[cur + w] === -1) { label[cur + w] = s; stack.push(cur + w); }
+    }
+    if (size > bestSize) { bestSize = size; bestComp = pts; }
+  }
+  if (!bestComp || bestSize < n * 0.002) return null;
+  // 5. Convex hull of the component, then its four corners.
+  const hullPts = bestComp.map((idx) => ({ x: idx % w, y: (idx / w) | 0 }));
+  const hull = scanConvexHull(hullPts);
+  const quad = scanQuadFromHull(hull);
+  if (!scanValidateQuad(quad, w, h)) return null;
+  return quad;
+}
+// --- end document scanner pure functions ---
 
 function drawCropCanvas() {
   const canvas = $('cropCanvas');
@@ -1353,10 +1513,9 @@ function drawCropCanvas() {
   ctx.save();
   ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
 
-  // Total rotation = 90° steps + fine slider. Fit the ROTATED bounding box
-  // into the canvas so a sideways photo is never clipped at the edges.
-  const totalRotation = rotationAngle + fineAngle;
-  const rad = (totalRotation * Math.PI) / 180;
+  // Fit the ROTATED bounding box into the canvas so a sideways photo is
+  // never clipped at the edges.
+  const rad = (rotationAngle * Math.PI) / 180;
   const cos = Math.abs(Math.cos(rad));
   const sin = Math.abs(Math.sin(rad));
   const boundW = rawImage.width * cos + rawImage.height * sin;
@@ -1370,9 +1529,114 @@ function drawCropCanvas() {
   ctx.restore();
 }
 
-function updateRotateLabel() {
-  const el = $('rotateAngleLabel');
-  if (el) el.textContent = `${rotationAngle + fineAngle}°`;
+function detectDocumentInImage(img) {
+  // Downscale, greyscale, detect the quad, scale corners back to full size.
+  const maxW = 480;
+  const scale = Math.min(1, maxW / img.naturalWidth);
+  const w = Math.max(2, Math.round(img.naturalWidth * scale));
+  const h = Math.max(2, Math.round(img.naturalHeight * scale));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+  }
+  const quad = detectDocumentQuad(gray, w, h);
+  if (!quad) return null;
+  const back = 1 / scale;
+  return quad.map((p) => ({ x: p.x * back, y: p.y * back }));
+}
+
+function affineFromTriangles(src, dst) {
+  // Canvas setTransform (a,b,c,d,e,f) mapping 3 source points to 3 dest points.
+  const x1 = src[0].x, y1 = src[0].y, x2 = src[1].x, y2 = src[1].y, x3 = src[2].x, y3 = src[2].y;
+  const u1 = dst[0].x, v1 = dst[0].y, u2 = dst[1].x, v2 = dst[1].y, u3 = dst[2].x, v3 = dst[2].y;
+  const det = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1);
+  if (Math.abs(det) < 1e-6) return null;
+  const a = ((u2 - u1) * (y3 - y1) - (u3 - u1) * (y2 - y1)) / det;
+  const b = ((v2 - v1) * (y3 - y1) - (v3 - v1) * (y2 - y1)) / det;
+  const c = ((u3 - u1) * (x2 - x1) - (u2 - u1) * (x3 - x1)) / det;
+  const d = ((v3 - v1) * (x2 - x1) - (v2 - v1) * (x3 - x1)) / det;
+  const e = u1 - a * x1 - c * y1;
+  const f = v1 - b * x1 - d * y1;
+  return [a, b, c, d, e, f];
+}
+
+function warpQuadImage(img, quad) {
+  // Straighten the detected quad into a rectangle, strip by strip
+  // (each strip is near-affine, so 32 strips approximate perspective well).
+  const [tl, tr, br, bl] = quad;
+  const topLen = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+  const botLen = Math.hypot(br.x - bl.x, br.y - bl.y);
+  const leftLen = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  const rightLen = Math.hypot(br.x - tr.x, br.y - tr.y);
+  const scale = Math.min(1, 1200 / Math.max(topLen, botLen, leftLen, rightLen));
+  const W = Math.max(200, Math.round(Math.max(topLen, botLen) * scale));
+  const H = Math.max(200, Math.round(Math.max(leftLen, rightLen) * scale));
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  const STRIPS = 32;
+  const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  for (let i = 0; i < STRIPS; i++) {
+    const v0 = i / STRIPS, v1 = (i + 1) / STRIPS;
+    const y0 = v0 * H, y1 = v1 * H;
+    const p00 = lerp(tl, bl, v0), p10 = lerp(tr, br, v0), p01 = lerp(tl, bl, v1);
+    const m = affineFromTriangles(
+      [p00, p10, p01],
+      [{ x: 0, y: y0 }, { x: W, y: y0 }, { x: 0, y: y1 }]
+    );
+    if (!m) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, y0, W, y1 - y0 + 0.5);
+    ctx.clip();
+    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+  return out;
+}
+
+async function autoScanCrop(manual) {
+  const srcImg = rawImage;
+  if (!srcImg) return false;
+  try {
+    const quad = detectDocumentInImage(srcImg);
+    if (!quad) {
+      if (manual) setStatus('No document edge found — crop it by hand.', 'err');
+      return false;
+    }
+    const warped = warpQuadImage(srcImg, quad);
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = warped.toDataURL('image/jpeg', 0.82);
+    });
+    // The user may have moved on (crop queue) while the scan ran.
+    if (rawImage !== srcImg) return false;
+    rawImage = img;
+    const canvas = $('cropCanvas');
+    canvas.width = warped.width;
+    canvas.height = warped.height;
+    rotationAngle = 0;
+    zoomLevel = 1;
+    panX = 0;
+    panY = 0;
+    $('zoomRange').value = 1;
+    drawCropCanvas();
+    setStatus('Document detected — auto-cropped.', 'ok');
+    return true;
+  } catch (_) {
+    if (manual) setStatus('Scan failed — crop it by hand.', 'err');
+    return false;
+  }
 }
 
 function setupNativeCropper() {
@@ -1380,13 +1644,11 @@ function setupNativeCropper() {
   const zoomRange = $('zoomRange');
   const rotateBtn = $('rotateCropBtn');
   const rotateLeftBtn = $('rotateLeftCropBtn');
-  const rotateRange = $('rotateRange');
-  const resetRotateBtn = $('resetRotateBtn');
+  const scanBtn = $('scanCropBtn');
 
   if (rotateBtn) {
     rotateBtn.addEventListener('click', () => {
       rotationAngle = (rotationAngle + 90) % 360;
-      updateRotateLabel();
       drawCropCanvas();
     });
   }
@@ -1394,27 +1656,12 @@ function setupNativeCropper() {
   if (rotateLeftBtn) {
     rotateLeftBtn.addEventListener('click', () => {
       rotationAngle = (rotationAngle - 90 + 360) % 360;
-      updateRotateLabel();
       drawCropCanvas();
     });
   }
 
-  if (rotateRange) {
-    rotateRange.addEventListener('input', (e) => {
-      fineAngle = parseFloat(e.target.value) || 0;
-      updateRotateLabel();
-      drawCropCanvas();
-    });
-  }
-
-  if (resetRotateBtn) {
-    resetRotateBtn.addEventListener('click', () => {
-      rotationAngle = 0;
-      fineAngle = 0;
-      if (rotateRange) rotateRange.value = 0;
-      updateRotateLabel();
-      drawCropCanvas();
-    });
+  if (scanBtn) {
+    scanBtn.addEventListener('click', () => { autoScanCrop(true); });
   }
 
   if (zoomRange) {
