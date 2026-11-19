@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.3-live';
+const CURRENT_VERSION_TAG = 'v4.9.5-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -787,10 +787,33 @@ function syncJsonOutput() {
   saveSessionState();
 }
 
-function addImage(category, base64, name) {
-  state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [] });
+function addImage(category, base64, name, source) {
+  // source: 'upload' (file / import — auto-crop applies) or 'camera'
+  // (in-panel capture — the live edge view already did the aiming, so
+  // the photo stays as-shot and is never auto-cropped).
+  state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: source || 'upload' });
   renderPreviews(category);
   saveSessionState();
+}
+
+// Downscale a base64 JPEG for keeping as the pre-crop original. The crop
+// editor outputs at most 900px wide, so a 1000px original is more than
+// enough for a re-crop — and it keeps the saved session small.
+function downscaleBase64(b64, maxDim = 1000, quality = 0.78) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      if (scale >= 1) { resolve(b64); return; }
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(img.width * scale));
+      cv.height = Math.max(1, Math.round(img.height * scale));
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      resolve(cv.toDataURL('image/jpeg', quality).split(',')[1] || b64);
+    };
+    img.onerror = () => resolve(b64);
+    img.src = `data:image/jpeg;base64,${b64}`;
+  });
 }
 
 function removeImage(category, id) {
@@ -984,6 +1007,7 @@ function setupImageViewerModal() {
         <span id="fcViewerTitle" style="font-weight:700; font-size:13.5px; color:#38bdf8;">Card Inspector</span>
         <div style="display:flex; gap:6px; align-items:center;">
           <button type="button" id="fcCropImgBtn" style="background:#059669; color:#fff; border:none; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer; margin-right:4px;">Crop</button>
+          <button type="button" id="fcRestoreOrigBtn" style="display:none; background:#475569; color:#fff; border:none; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:700; cursor:pointer; margin-right:4px;" title="Undo the crop — bring back the original photo">↩ Original</button>
           <button type="button" id="fcZoomOutBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 9px; font-size:12px; font-weight:700; cursor:pointer;">−</button>
           <button type="button" id="fcZoomResetBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer;">100%</button>
           <button type="button" id="fcZoomInBtn" style="background:#27272a; color:#fff; border:1px solid #3f3f46; border-radius:6px; padding:3px 9px; font-size:12px; font-weight:700; cursor:pointer;">+</button>
@@ -1019,6 +1043,21 @@ function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
+  // Undo a crop: bring back the original photo (only shown when the
+  // photo was cropped at least once — the original is kept on first crop).
+  const restoreBtn = modal.querySelector('#fcRestoreOrigBtn');
+  if (restoreBtn) {
+    restoreBtn.style.display = item.originalBase64 ? '' : 'none';
+    restoreBtn.onclick = () => {
+      if (!item.originalBase64) return;
+      item.base64 = item.originalBase64;
+      item.originalBase64 = null;
+      renderPreviews(itemCategory(item));
+      saveSessionState();
+      setStatus('Original photo restored.', 'ok');
+      showImageViewer(item); // rebuild the viewer on the original
+    };
+  }
   viewerZoom = 1;
   $('fcViewerImg').src = `data:image/jpeg;base64,${item.base64}`;
   $('fcViewerImg').style.transform = 'scale(1)';
@@ -1296,9 +1335,11 @@ async function handleUpload(e, category, droppedFiles = null) {
           // old photo; the rest are added as usual.
           replacing.base64 = b64;
           replacing.name = file.name;
+          replacing.originalBase64 = null; // the old original belongs to the old shot
+          replacing.source = 'upload';
           replacedDone = true;
         } else {
-          addImage(category, b64, file.name);
+          addImage(category, b64, file.name, 'upload');
         }
       } catch (err) {
         setStatus(err.message, 'err');
@@ -1326,7 +1367,6 @@ let panelCameraStream = null;
 let panelCameraFacing = 'environment';
 let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
-let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraDetectTimer = null;
 
 function stopPanelCameraTracks() {
@@ -1337,7 +1377,6 @@ function stopPanelCameraTracks() {
   }
   const video = $('cameraVideo');
   if (video) video.srcObject = null;
-  panelCameraQuad = null;
   drawCameraOverlay(null);
   setCameraHint('Point the camera at the card…', '');
 }
@@ -1439,19 +1478,17 @@ function runCameraEdgeDetect() {
     }
     const res = detectLiveQuad(gray, w, h);
     if (res && res.support >= 0.55) {
-      // Green lock — good enough to straighten the shot on Capture.
+      // Green lock — the document is framed well. Aiming aid only now:
+      // Capture saves the full frame, nothing is auto-cropped.
       const back = 1 / scale;
-      panelCameraQuad = { points: res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), at: Date.now() };
-      drawCameraOverlay(panelCameraQuad.points, '#22c55e');
+      drawCameraOverlay(res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), '#22c55e');
       setCameraHint('Document found — tap Capture', 'found');
     } else if (res) {
       // Yellow — a document is probably there; hold steady for a lock.
-      panelCameraQuad = null;
       const back = 1 / scale;
       drawCameraOverlay(res.quad.map((p) => ({ x: p.x * back, y: p.y * back })), '#eab308');
       setCameraHint('Hold steady — almost there', 'warn');
     } else {
-      panelCameraQuad = null;
       drawCameraGuide();
       setCameraHint('Point the camera at the card…', '');
     }
@@ -1516,18 +1553,10 @@ function capturePanelPhoto() {
   cv.width = Math.max(1, Math.round(video.videoWidth * scale));
   cv.height = Math.max(1, Math.round(video.videoHeight * scale));
   cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
-  // If the live edge view found the document, straighten the shot now —
-  // the crop editor then opens on an already-straight photo.
-  let b64 = '';
-  const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
-  if (quad) {
-    try {
-      const qscale = cv.width / video.videoWidth;
-      const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
-      b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
-    } catch (_) { b64 = ''; }
-  }
-  if (!b64) b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+  // No auto-crop here: the live edge view is only an aiming aid — the
+  // full frame is saved as-shot, and the crop editor never auto-scans
+  // a camera photo. (Auto-crop is upload-only.)
+  const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
   if (!b64) {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
@@ -1540,6 +1569,8 @@ function capturePanelPhoto() {
   if (replacing) {
     replacing.base64 = b64;
     replacing.name = 'Camera.jpg';
+    replacing.originalBase64 = null; // the old original belongs to the old shot
+    replacing.source = 'camera';
     renderPreviews(panelCameraCategory);
     saveSessionState();
     openCropForImage(replacing);
@@ -1547,9 +1578,9 @@ function capturePanelPhoto() {
     if (titleEl && cropQueue.length) titleEl.textContent = `Crop ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal} — ${replacing.name}`;
     return;
   }
-  addImage(panelCameraCategory, b64, 'Camera.jpg');
+  addImage(panelCameraCategory, b64, 'Camera.jpg', 'camera');
   const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
-  if (item) openCropForImage(item); // straight into crop/scan, like a single upload
+  if (item) openCropForImage(item); // straight into the crop editor (no auto-scan for a camera photo)
 }
 
 async function switchPanelCamera() {
@@ -1626,13 +1657,18 @@ function openCropForImage(item) {
     panY = 0;
     $('zoomRange').value = 1;
     drawCropCanvas();
-    autoScanCrop(false);
+    // Auto-crop (CamScanner-style) is upload-only: a camera photo stays
+    // as-shot here — the live edge view already did the aiming. Items
+    // without a source (older sessions, imports) keep the old behaviour.
+    if (item.source !== 'camera') autoScanCrop(false);
   };
   rawImage.onerror = () => {
     $('cropModal').classList.remove('open');
     setStatus('Could not load this photo for cropping.', 'err');
   };
-  rawImage.src = `data:image/jpeg;base64,${item.base64}`;
+  // Re-cropping always starts from the original photo, never from a
+  // previous crop — so a crop you didn't like can simply be done again.
+  rawImage.src = `data:image/jpeg;base64,${item.originalBase64 || item.base64}`;
 }
 
 // --- Document scanner: pure functions (no DOM) — tested by tests/sidepanel_scan_test.js ---
@@ -2262,7 +2298,7 @@ function setupNativeCropper() {
     openPanelCamera(cat);
   });
 
-  $('saveCropBtn').addEventListener('click', () => {
+  $('saveCropBtn').addEventListener('click', async () => {
     const canvas = $('cropCanvas');
     if (!canvas) return;
     const b64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
@@ -2270,11 +2306,17 @@ function setupNativeCropper() {
 
     if (activeCropItem) {
       const croppedItem = activeCropItem;
+      activeCropItem = null; // claim it before the async downscale, so a tap during the wait can't steal it
+      // Keep the original (first crop only) so a crop you didn't like can
+      // be re-done from the original or undone — the true original is
+      // never lost. Later crops never overwrite it.
+      if (!croppedItem.originalBase64) {
+        croppedItem.originalBase64 = await downscaleBase64(croppedItem.base64);
+      }
       croppedItem.base64 = b64;
       renderPreviews('head');
       renderPreviews('other');
       saveSessionState();
-      activeCropItem = null;
 
       // Cropping queue: advance to the next photo instead of the viewer.
       if (cropQueue.length) {
@@ -2297,6 +2339,8 @@ function setupNativeCropper() {
       if (replacing) {
         replacing.base64 = b64;
         replacing.name = activeCropName || replacing.name;
+        replacing.originalBase64 = null; // the old original belongs to the old shot
+        replacing.source = 'upload';
         renderPreviews(itemCategory(replacing));
         saveSessionState();
         if (cropQueue.length) {
@@ -2307,7 +2351,15 @@ function setupNativeCropper() {
           showImageViewer(replacing);
         }
       } else {
-        addImage(cat, b64, activeCropName || 'Cropped_Photo.jpg');
+        // First crop of a fresh upload: the photo isn't in the list yet,
+        // so keep the uploaded original (downscaled) alongside the crop —
+        // otherwise this first crop could never be undone or re-done.
+        const origB64 = rawImage && rawImage.src ? rawImage.src.split(',')[1] : '';
+        const item = { id: nextId++, base64: b64, name: activeCropName || 'Cropped_Photo.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: 'upload' };
+        if (origB64 && origB64 !== b64) item.originalBase64 = await downscaleBase64(origB64);
+        state[cat].push(item);
+        renderPreviews(cat);
+        saveSessionState();
         setStatus('Cropped photo added.', 'ok');
       }
     }
@@ -3241,7 +3293,7 @@ function restoreImportedImages(images) {
     list.forEach((im) => {
       if (!im || typeof im.base64 !== 'string' || !im.base64) return;
       if (state[category].some((it) => it.base64 === im.base64)) return;
-      state[category].push({ id: nextId++, base64: im.base64, name: im.name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [] });
+      state[category].push({ id: nextId++, base64: im.base64, name: im.name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: 'upload' });
       restored++;
     });
   };
