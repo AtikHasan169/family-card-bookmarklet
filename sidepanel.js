@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.9-live';
+const CURRENT_VERSION_TAG = 'v4.9.11-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1460,6 +1460,30 @@ function drawCameraGuide() {
   ctx.stroke();
 }
 
+function drawCameraFrame() {
+  // Perspective off: mark the 4:3 frame that Capture will save, so the
+  // user can see exactly what the photo will include.
+  const overlay = $('cameraOverlay');
+  if (!overlay) return;
+  const stage = overlay.parentElement;
+  const sw = stage ? stage.clientWidth : 0;
+  const sh = stage ? stage.clientHeight : 0;
+  if (!sw || !sh) return;
+  overlay.width = sw; overlay.height = sh;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, sw, sh);
+  const inset = 3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  if (ctx.roundRect) {
+    ctx.beginPath();
+    ctx.roundRect(inset, inset, sw - inset * 2, sh - inset * 2, 8);
+    ctx.stroke();
+  } else {
+    ctx.strokeRect(inset, inset, sw - inset * 2, sh - inset * 2);
+  }
+}
 function setCameraHint(text, kind) {
   const hint = $('cameraHint');
   if (!hint) return;
@@ -1469,7 +1493,7 @@ function setCameraHint(text, kind) {
 }
 
 function runCameraEdgeDetect() {
-  if (!perspectiveEnabled) return; // perspective off: plain viewfinder
+  if (!perspectiveEnabled) { drawCameraFrame(); return; } // perspective off: show the 4:3 frame Capture will save
   const video = $('cameraVideo');
   const modal = $('cameraModal');
   if (!video || !video.videoWidth || !modal || !modal.classList.contains('open')) return;
@@ -1519,7 +1543,10 @@ async function startPanelCamera() {
   video.srcObject = panelCameraStream;
   $('cameraModal').classList.add('open');
   await video.play();
-  if (!perspectiveEnabled) setCameraHint('Perspective is off.', '');
+  if (!perspectiveEnabled) {
+    setCameraHint('Perspective is off — the white frame is the photo.', '');
+    drawCameraFrame();
+  }
   if (panelCameraDetectTimer) clearInterval(panelCameraDetectTimer);
   panelCameraDetectTimer = setInterval(runCameraEdgeDetect, 400);
 }
@@ -1561,24 +1588,37 @@ function capturePanelPhoto() {
     return;
   }
   const maxDim = 1500;
-  const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
   const cv = document.createElement('canvas');
-  cv.width = Math.max(1, Math.round(video.videoWidth * scale));
-  cv.height = Math.max(1, Math.round(video.videoHeight * scale));
-  cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
   // If the live edge view found the document, straighten the shot now —
-  // the crop editor then opens on an already-straight photo. With no
-  // green lock (or perspective off) the full frame is saved as-shot.
+  // the crop editor then opens on an already-straight photo.
   let b64 = '';
   const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
   if (quad) {
+    const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+    cv.width = Math.max(1, Math.round(video.videoWidth * scale));
+    cv.height = Math.max(1, Math.round(video.videoHeight * scale));
+    cv.getContext('2d').drawImage(video, 0, 0, cv.width, cv.height);
     try {
       const qscale = cv.width / video.videoWidth;
       const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
       b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
     } catch (_) { b64 = ''; }
   }
-  if (!b64) b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+  if (!b64) {
+    // No green lock: save exactly what the 4:3 viewfinder showed — the
+    // cover-cropped frame — so the photo has less background outside
+    // the card instead of the full wide video frame.
+    const m = scanCoverMap(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight);
+    const sx = Math.max(0, -m.offsetX / m.scale);
+    const sy = Math.max(0, -m.offsetY / m.scale);
+    const sw = Math.min(video.videoWidth - sx, video.clientWidth / m.scale);
+    const sh = Math.min(video.videoHeight - sy, video.clientHeight / m.scale);
+    const csc = Math.min(1, maxDim / Math.max(sw, sh));
+    cv.width = Math.max(1, Math.round(sw * csc));
+    cv.height = Math.max(1, Math.round(sh * csc));
+    cv.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+  }
   if (!b64) {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
@@ -2276,7 +2316,8 @@ function togglePerspective() {
   } else {
     setStatus('Perspective detection off — no outlines in the camera.');
     drawCameraOverlay(null);
-    setCameraHint('Perspective is off.', '');
+    setCameraHint('Perspective is off — the white frame is the photo.', '');
+    drawCameraFrame();
   }
 }
 

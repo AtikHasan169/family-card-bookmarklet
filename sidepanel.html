@@ -639,7 +639,10 @@
   </footer>
 
   <div class="modal" id="cropModal">
-    <h3 id="cropModalTitle" style="color:#fff; margin:0 0 8px; font-size:14px; text-align:center;">Crop, Scan, Rotate &amp; Zoom Image</h3>
+    <div style="display:flex; align-items:center; gap:8px; margin:0 0 8px;">
+      <h3 id="cropModalTitle" style="color:#fff; margin:0; font-size:14px; text-align:center; flex:1;">Crop, Scan, Rotate &amp; Zoom Image</h3>
+      <button type="button" class="btn" id="undoScanBtn" style="display:none; background:#475569; color:#fff; padding: 6px 10px; font-size:12px; font-weight:600; gap:6px;" title="Undo the auto-crop — bring back the photo as it was"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg><span>Undo</span></button>
+    </div>
     <div class="crop-container">
       <canvas id="cropCanvas"></canvas>
     </div>
@@ -651,7 +654,6 @@
 
     <div style="display:flex; gap:8px; padding-top: 10px; background: #09090b;">
       <button type="button" class="btn" id="scanCropBtn" style="background:#2563eb; color:#fff; padding: 8px 14px; font-size:16px;" title="Auto-scan document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><line x1="7" y1="12" x2="17" y2="12"></line></svg></button>
-      <button type="button" class="btn" id="undoScanBtn" style="display:none; background:#475569; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Undo the auto-crop — bring back the photo as it was"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg><span>Undo</span></button>
       <button type="button" class="btn" id="perspectiveToggleBtn" style="background:#2563eb; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;" title="Perspective detection: On — tap to turn off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M4 18 L8 6 H16 L20 18 Z"></path><line x1="8" y1="12" x2="16" y2="12"></line></svg><span class="persp-state">On</span></button>
       <button type="button" class="btn" id="rotateLeftCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate left 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg></button>
       <button type="button" class="btn" id="rotateCropBtn" style="background:#475569; color:#fff; padding: 8px 14px; font-size:16px;" title="Rotate right 90°"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg></button>
