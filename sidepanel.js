@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.11-live';
+const CURRENT_VERSION_TAG = 'v4.9.12-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -430,6 +430,9 @@ function initApp() {
   $('switchCameraBtn').addEventListener('click', switchPanelCamera);
   const perspCamBtn = $('perspectiveToggleCamBtn');
   if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
+  const frameBtn = $('frameRotateBtn');
+  if (frameBtn) frameBtn.addEventListener('click', toggleFrameOrientation);
+  updateFrameButton();
 
   $('extractBtn').addEventListener('click', runExtraction);
   $('stopExtractBtn').addEventListener('click', () => {
@@ -1378,6 +1381,11 @@ let panelCameraDeviceId = null;
 let panelCameraCategory = 'head';
 let panelCameraQuad = null; // {points, at} — last live-detected quad, raw video px
 let panelCameraDetectTimer = null;
+// Photo frame for Capture when there is no green-lock warp: landscape
+// 4:3 (the viewfinder) or portrait 3:4 (tall documents). Remembered
+// across sessions, like the perspective toggle.
+let cameraFramePortrait = false;
+try { cameraFramePortrait = localStorage.getItem('fc_pro_frame_portrait') === '1'; } catch (_) {}
 
 function stopPanelCameraTracks() {
   if (panelCameraDetectTimer) { clearInterval(panelCameraDetectTimer); panelCameraDetectTimer = null; }
@@ -1460,9 +1468,48 @@ function drawCameraGuide() {
   ctx.stroke();
 }
 
+// The white frame in the viewfinder, in stage (display) px. Landscape
+// 4:3 fills the stage; portrait 3:4 is a centred upright rectangle.
+// Capture crops to exactly this rect, so the photo matches the frame.
+function cameraFrameRect() {
+  const video = $('cameraVideo');
+  const sw = video ? video.clientWidth : 0;
+  const sh = video ? video.clientHeight : 0;
+  if (!sw || !sh) return null;
+  const inset = 3;
+  if (cameraFramePortrait) {
+    const h = sh - inset * 2;
+    const w = h * 3 / 4;
+    return { x: (sw - w) / 2, y: inset, w, h };
+  }
+  return { x: inset, y: inset, w: sw - inset * 2, h: sh - inset * 2 };
+}
+
+function frameHintText() {
+  return cameraFramePortrait ? 'Portrait frame — the white frame is the photo.' : 'Perspective is off — the white frame is the photo.';
+}
+
+function updateFrameButton() {
+  const btn = $('frameRotateBtn');
+  if (!btn) return;
+  const label = btn.querySelector('.frame-state');
+  if (label) label.textContent = cameraFramePortrait ? '3:4' : '4:3';
+  btn.title = cameraFramePortrait ? 'Photo frame: portrait 3:4 — tap for landscape 4:3' : 'Photo frame: landscape 4:3 — tap for portrait 3:4';
+}
+
+function toggleFrameOrientation() {
+  cameraFramePortrait = !cameraFramePortrait;
+  try { localStorage.setItem('fc_pro_frame_portrait', cameraFramePortrait ? '1' : '0'); } catch (_) {}
+  updateFrameButton();
+  if (!perspectiveEnabled) {
+    drawCameraFrame();
+    setCameraHint(frameHintText(), '');
+  }
+}
+
 function drawCameraFrame() {
-  // Perspective off: mark the 4:3 frame that Capture will save, so the
-  // user can see exactly what the photo will include.
+  // Perspective off: mark the frame that Capture will save, so the user
+  // can see exactly what the photo will include.
   const overlay = $('cameraOverlay');
   if (!overlay) return;
   const stage = overlay.parentElement;
@@ -1472,16 +1519,17 @@ function drawCameraFrame() {
   overlay.width = sw; overlay.height = sh;
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, sw, sh);
-  const inset = 3;
+  const fr = cameraFrameRect();
+  if (!fr) return;
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 2.5;
   ctx.lineJoin = 'round';
   if (ctx.roundRect) {
     ctx.beginPath();
-    ctx.roundRect(inset, inset, sw - inset * 2, sh - inset * 2, 8);
+    ctx.roundRect(fr.x, fr.y, fr.w, fr.h, 8);
     ctx.stroke();
   } else {
-    ctx.strokeRect(inset, inset, sw - inset * 2, sh - inset * 2);
+    ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
   }
 }
 function setCameraHint(text, kind) {
@@ -1544,7 +1592,7 @@ async function startPanelCamera() {
   $('cameraModal').classList.add('open');
   await video.play();
   if (!perspectiveEnabled) {
-    setCameraHint('Perspective is off — the white frame is the photo.', '');
+    setCameraHint(frameHintText(), '');
     drawCameraFrame();
   }
   if (panelCameraDetectTimer) clearInterval(panelCameraDetectTimer);
@@ -1605,14 +1653,19 @@ function capturePanelPhoto() {
     } catch (_) { b64 = ''; }
   }
   if (!b64) {
-    // No green lock: save exactly what the 4:3 viewfinder showed — the
-    // cover-cropped frame — so the photo has less background outside
-    // the card instead of the full wide video frame.
+    // No green lock: save exactly what the white frame showed — the
+    // frame's crop of the video (4:3 landscape, or 3:4 portrait) — so
+    // the photo has less background outside the card instead of the
+    // full wide video frame.
     const m = scanCoverMap(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight);
-    const sx = Math.max(0, -m.offsetX / m.scale);
-    const sy = Math.max(0, -m.offsetY / m.scale);
-    const sw = Math.min(video.videoWidth - sx, video.clientWidth / m.scale);
-    const sh = Math.min(video.videoHeight - sy, video.clientHeight / m.scale);
+    const fr = cameraFrameRect();
+    let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+    if (fr) {
+      sx = Math.max(0, (fr.x - m.offsetX) / m.scale);
+      sy = Math.max(0, (fr.y - m.offsetY) / m.scale);
+      sw = Math.min(video.videoWidth - sx, fr.w / m.scale);
+      sh = Math.min(video.videoHeight - sy, fr.h / m.scale);
+    }
     const csc = Math.min(1, maxDim / Math.max(sw, sh));
     cv.width = Math.max(1, Math.round(sw * csc));
     cv.height = Math.max(1, Math.round(sh * csc));
@@ -2316,7 +2369,7 @@ function togglePerspective() {
   } else {
     setStatus('Perspective detection off — no outlines in the camera.');
     drawCameraOverlay(null);
-    setCameraHint('Perspective is off — the white frame is the photo.', '');
+    setCameraHint(frameHintText(), '');
     drawCameraFrame();
   }
 }
