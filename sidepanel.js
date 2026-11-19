@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.2-live';
+const CURRENT_VERSION_TAG = 'v4.9.3-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -118,6 +118,10 @@ let isDragging = false;
 let startX = 0;
 let startY = 0;
 let activeCropItem = null;
+// Retake in progress: the state item the next capture/upload replaces
+// (same place in the list, same person binding). Cleared on capture,
+// on save, or when the camera/file picker is cancelled.
+let retakeItem = null;
 let cropQueue = [];
 let cropQueueTotal = 0;
 let viewerZoom = 1;
@@ -416,8 +420,8 @@ function initApp() {
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
 
   $('capturePhotoBtn').addEventListener('click', capturePanelPhoto);
-  $('cancelCameraBtn').addEventListener('click', stopPanelCamera);
-  $('closeCameraBtn').addEventListener('click', stopPanelCamera);
+  $('cancelCameraBtn').addEventListener('click', cancelPanelCamera);
+  $('closeCameraBtn').addEventListener('click', cancelPanelCamera);
   $('switchCameraBtn').addEventListener('click', switchPanelCamera);
   const perspCamBtn = $('perspectiveToggleCamBtn');
   if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
@@ -793,6 +797,14 @@ function removeImage(category, id) {
   state[category] = state[category].filter((item) => item.id !== id);
   renderPreviews(category);
   saveSessionState();
+}
+
+// Which list ('head' / 'other') an item lives in, or null.
+function itemCategory(item) {
+  if (!item) return null;
+  if (state.head.includes(item)) return 'head';
+  if (state.other.includes(item)) return 'other';
+  return null;
 }
 
 function moveImage(category, idx, dir) {
@@ -1238,6 +1250,10 @@ function fileToBase64(file) {
 async function handleUpload(e, category, droppedFiles = null) {
   const files = Array.from(droppedFiles || (e ? e.target.files : []));
   if (!files.length) return;
+  // A retake is only valid for its own category; a pending retake for a
+  // different list means the user moved on — drop it.
+  const replacing = retakeItem && itemCategory(retakeItem) === category ? retakeItem : null;
+  if (retakeItem && !replacing) retakeItem = null;
 
   if (files.length === 1 && files[0].type.startsWith('image/')) {
     const file = files[0];
@@ -1270,19 +1286,33 @@ async function handleUpload(e, category, droppedFiles = null) {
     reader.readAsDataURL(file);
   } else {
     const beforeCount = state[category].length;
+    let replacedDone = false;
     for (const file of files) {
       if (!file.type.startsWith('image/')) continue;
       try {
         const b64 = await fileToBase64(file);
-        addImage(category, b64, file.name);
+        if (replacing && !replacedDone) {
+          // Retake via several picked files: the first one replaces the
+          // old photo; the rest are added as usual.
+          replacing.base64 = b64;
+          replacing.name = file.name;
+          replacedDone = true;
+        } else {
+          addImage(category, b64, file.name);
+        }
       } catch (err) {
         setStatus(err.message, 'err');
       }
     }
     const added = state[category].slice(beforeCount);
+    if (replacing) {
+      retakeItem = null; // consumed either way — a later upload must not replace by surprise
+      if (replacedDone) { renderPreviews(category); saveSessionState(); added.unshift(replacing); }
+    }
     setStatus(`${files.length} images added.`, 'ok');
     // Many photos at once: crop them one by one, auto-opening each in turn.
     if (added.length >= 2) queueCrops(added);
+    else if (replacing) openCropForImage(replacing);
   }
   if (e && e.target) e.target.value = '';
 }
@@ -1316,6 +1346,13 @@ function stopPanelCamera() {
   stopPanelCameraTracks();
   const modal = $('cameraModal');
   if (modal) modal.classList.remove('open');
+}
+
+// Camera dismissed (Cancel / X): the retake is abandoned and the old
+// photo stays exactly as it was.
+function cancelPanelCamera() {
+  retakeItem = null;
+  stopPanelCamera();
 }
 
 function drawCameraOverlay(quad, color) {
@@ -1457,6 +1494,9 @@ function openCameraFileInput(category) {
   const input = $('cameraInput');
   input.value = '';
   input.onchange = (e) => handleUpload(e, category);
+  // Picker dismissed without a photo: the retake is abandoned, so the
+  // old photo must not be replaced by some later unrelated upload.
+  input.addEventListener('cancel', () => { retakeItem = null; }, { once: true });
   input.click();
 }
 
@@ -1492,7 +1532,21 @@ function capturePanelPhoto() {
     setStatus('Could not capture this photo — try again.', 'err');
     return;
   }
+  // Retake: the new shot replaces the old photo in place (same list
+  // position, same person binding), then opens in the crop editor.
+  const replacing = retakeItem;
+  retakeItem = null;
   stopPanelCamera();
+  if (replacing) {
+    replacing.base64 = b64;
+    replacing.name = 'Camera.jpg';
+    renderPreviews(panelCameraCategory);
+    saveSessionState();
+    openCropForImage(replacing);
+    const titleEl = $('cropModalTitle');
+    if (titleEl && cropQueue.length) titleEl.textContent = `Crop ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal} — ${replacing.name}`;
+    return;
+  }
   addImage(panelCameraCategory, b64, 'Camera.jpg');
   const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
   if (item) openCropForImage(item); // straight into crop/scan, like a single upload
@@ -1529,7 +1583,8 @@ async function switchPanelCamera() {
 }
 
 // Auto-crop queue: after a multi-photo upload, the crop editor opens for
-// each new photo one by one. Apply Crop saves and advances; Retake skips.
+// each new photo one by one. Apply Crop saves and advances; Retake opens
+// the camera for a fresh shot of that photo (the queue resumes after it).
 function queueCrops(items) {
   cropQueue.push(...items);
   cropQueueTotal += items.length;
@@ -2195,19 +2250,16 @@ function setupNativeCropper() {
 
   $('cancelCropBtn').addEventListener('click', () => {
     $('cropModal').classList.remove('open');
-    // Cropping queue: Retake skips this photo and opens the next one.
-    if (cropQueue.length) {
-      activeCropItem = null;
-      openNextQueuedCrop();
-      return;
-    }
-    if (activeCropItem) {
-      const item = activeCropItem;
-      activeCropItem = null;
-      // Rebuild the preview for THIS photo instead of reopening
-      // whatever the viewer last showed.
-      showImageViewer(item);
-    }
+    // Real Retake: discard this shot and take a fresh one in its place.
+    // The camera opens for this photo's list; Capture replaces THIS
+    // photo (same place, same person) and opens its crop editor.
+    // Cancelling the camera keeps the old photo exactly as it was.
+    const item = activeCropItem;
+    const cat = (item && itemCategory(item)) || activeCategory || 'head';
+    activeCropItem = null;
+    activeCategory = null;
+    if (item && itemCategory(item)) retakeItem = item;
+    openPanelCamera(cat);
   });
 
   $('saveCropBtn').addEventListener('click', () => {
@@ -2235,9 +2287,29 @@ function setupNativeCropper() {
         showImageViewer(croppedItem);
       }
     } else if (activeCategory) {
-      addImage(activeCategory, b64, activeCropName || 'Cropped_Photo.jpg');
-      setStatus('Cropped photo added.', 'ok');
+      // Single upload (or retake via the file picker): the photo is only
+      // added when Apply Crop is tapped. A retake replaces the old photo
+      // instead of adding a new one.
+      const cat = activeCategory;
+      const replacing = retakeItem;
+      retakeItem = null;
       activeCategory = null;
+      if (replacing) {
+        replacing.base64 = b64;
+        replacing.name = activeCropName || replacing.name;
+        renderPreviews(itemCategory(replacing));
+        saveSessionState();
+        if (cropQueue.length) {
+          setStatus(`Cropped ${cropQueueTotal - cropQueue.length} of ${cropQueueTotal}.`, 'ok');
+          openNextQueuedCrop();
+        } else {
+          setStatus('Photo retaken.', 'ok');
+          showImageViewer(replacing);
+        }
+      } else {
+        addImage(cat, b64, activeCropName || 'Cropped_Photo.jpg');
+        setStatus('Cropped photo added.', 'ok');
+      }
     }
   });
 }
