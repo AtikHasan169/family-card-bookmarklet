@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.19-live';
+const CURRENT_VERSION_TAG = 'v4.9.20-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -109,8 +109,18 @@ let extractionController = null;
 let zoomLevel = 1;
 let rotationAngle = 0;
 // Crop frame: '4:3' (landscape card), '3:4' (portrait card) or 'free'
-// (the photo as it is, 900x600). Auto-picked from the photo on crop open.
+// (Freeform — a crop box you drag by its corners, like a phone editor).
+// Auto-picked from the photo on crop open.
 let cropRatio = '4:3';
+// Freeform crop box, in canvas px. Only drawn in Free mode; starts as
+// the full photo and Apply saves exactly the boxed region.
+let freeCropRect = null;
+// Box drag in progress: { mode, startX, startY, rect } — mode is a
+// handle ('nw','ne','sw','se','n','s','e','w') or 'inside' (move).
+let freeDrag = null;
+// Last fit computed by drawCropCanvas ({ boundW, boundH, fitScale }) —
+// the Freeform box starts from it, so the box and the drawn photo agree.
+let lastCropFit = null;
 // Perspective detection (auto-scan / live edge view): on by default,
 // remembered across sessions. Off = plain photo, crop by hand.
 let perspectiveEnabled = true;
@@ -1499,17 +1509,7 @@ function cameraFrameRect() {
   const sw = video ? video.clientWidth : 0;
   const sh = video ? video.clientHeight : 0;
   if (!sw || !sh) return null;
-  // The frame sits inside the popup with room to spare (86% of the stage),
-  // so the user can see what is outside the frame before capturing.
-  const S = 0.86;
-  if (cameraFramePortrait) {
-    const h = sh * S;
-    const w = h * 3 / 4;
-    return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
-  }
-  const w = sw * S;
-  const h = w * 3 / 4;
-  return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
+  return fitFrameRect(sw, sh, cameraFramePortrait);
 }
 
 function frameHintText() {
@@ -2208,6 +2208,72 @@ function scanCoverMap(stageW, stageH, videoW, videoH) {
 
 // --- end document scanner pure functions ---
 
+// --- Freeform crop box + camera frame: pure helpers (no DOM) — tested by tests/sidepanel_freeform_test.js ---
+// Camera frame: 86% of the stage, centred — clamped so the frame always
+// fits inside the stage even when the dialog squeezes it short
+// (landscape): a 4:3 frame taller than a squished stage used to lose its
+// top and bottom borders.
+function fitFrameRect(sw, sh, portrait) {
+  const S = 0.86;
+  if (portrait) {
+    let h = sh * S, w = h * 3 / 4;
+    if (w > sw * S) { w = sw * S; h = w * 4 / 3; }
+    return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
+  }
+  let w = sw * S, h = w * 3 / 4;
+  if (h > sh * S) { h = sh * S; w = h * 4 / 3; }
+  return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
+}
+// Keep a Freeform box inside the canvas, at least minSize on a side.
+function clampFreeRect(r, cw, ch, minSize) {
+  const m = minSize || 20;
+  let w = Math.max(m, Math.min(r.w, cw));
+  let h = Math.max(m, Math.min(r.h, ch));
+  let x = Math.max(0, Math.min(r.x, cw - w));
+  let y = Math.max(0, Math.min(r.y, ch - h));
+  return { x, y, w, h };
+}
+// Which part of the box is under (x, y) — a corner/edge handle, inside
+// (move), or null (outside). tol is in the same units as the rect.
+function freeRectHandleAt(r, x, y, tol) {
+  const t = tol || 14;
+  const near = (a, b) => Math.abs(a - b) <= t;
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  if (near(x, r.x) && near(y, r.y)) return 'nw';
+  if (near(x, r.x + r.w) && near(y, r.y)) return 'ne';
+  if (near(x, r.x) && near(y, r.y + r.h)) return 'sw';
+  if (near(x, r.x + r.w) && near(y, r.y + r.h)) return 'se';
+  if (near(y, r.y) && x > r.x && x < r.x + r.w) return 'n';
+  if (near(y, r.y + r.h) && x > r.x && x < r.x + r.w) return 's';
+  if (near(x, r.x) && y > r.y && y < r.y + r.h) return 'w';
+  if (near(x, r.x + r.w) && y > r.y && y < r.y + r.h) return 'e';
+  if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) return 'inside';
+  return null;
+}
+// Move/resize a box by (dx, dy) from a handle, clamped so the box stays
+// inside the canvas and never shrinks below minSize (the drag stops at
+// the limit instead of sliding the box).
+function resizeFreeRect(r, handle, dx, dy, cw, ch, minSize) {
+  const m = minSize || 20;
+  let { x, y, w, h } = r;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  if (handle === 'inside') {
+    dx = clamp(dx, -x, cw - (x + w));
+    dy = clamp(dy, -y, ch - (y + h));
+    return { x: x + dx, y: y + dy, w, h };
+  }
+  if (handle === 'se' || handle === 'ne' || handle === 'e') dx = clamp(dx, -(w - m), cw - (x + w));
+  if (handle === 'se' || handle === 'sw' || handle === 's') dy = clamp(dy, -(h - m), ch - (y + h));
+  if (handle === 'nw' || handle === 'sw' || handle === 'w') dx = clamp(dx, -x, w - m);
+  if (handle === 'nw' || handle === 'ne' || handle === 'n') dy = clamp(dy, -y, h - m);
+  if (handle === 'nw' || handle === 'sw' || handle === 'w') { x += dx; w -= dx; }
+  if (handle === 'ne' || handle === 'se' || handle === 'e') { w += dx; }
+  if (handle === 'nw' || handle === 'ne' || handle === 'n') { y += dy; h -= dy; }
+  if (handle === 'sw' || handle === 'se' || handle === 's') { h += dy; }
+  return clampFreeRect({ x, y, w, h }, cw, ch, m);
+}
+// --- end freeform crop box pure helpers ---
+
 function drawCropCanvas() {
   const canvas = $('cropCanvas');
   if (!rawImage || !canvas) return;
@@ -2228,11 +2294,91 @@ function drawCropCanvas() {
   const boundH = rawImage.width * sin + rawImage.height * cos;
   const fitScale = Math.min(canvas.width / boundW, canvas.height / boundH);
   const totalScale = fitScale * zoomLevel;
+  lastCropFit = { boundW, boundH, fitScale };
   ctx.scale(totalScale, totalScale);
   ctx.rotate(rad);
 
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
+  drawFreeCropBox();
+}
+
+// Freeform box (DOM helpers — the geometry lives in the pure section).
+function cropCanvasPoint(clientX, clientY) {
+  const canvas = $('cropCanvas');
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: (clientX - rect.left) * (canvas.width / rect.width),
+    y: (clientY - rect.top) * (canvas.height / rect.height)
+  };
+}
+function freeHandleTol() {
+  const canvas = $('cropCanvas');
+  if (!canvas) return 14;
+  const rect = canvas.getBoundingClientRect();
+  return rect.width ? 14 * (canvas.width / rect.width) : 14;
+}
+// The photo's drawn bounds in canvas px — what the Freeform box starts as.
+function fittedPhotoRect() {
+  const canvas = $('cropCanvas');
+  if (!rawImage || !canvas) return null;
+  if (!lastCropFit) drawCropCanvas();
+  if (!lastCropFit) return null;
+  const w = lastCropFit.boundW * lastCropFit.fitScale * zoomLevel;
+  const h = lastCropFit.boundH * lastCropFit.fitScale * zoomLevel;
+  return clampFreeRect({
+    x: canvas.width / 2 + panX - w / 2,
+    y: canvas.height / 2 + panY - h / 2,
+    w, h
+  }, canvas.width, canvas.height, 20);
+}
+function initFreeCropBox() {
+  if (cropRatio !== 'free') return;
+  freeCropRect = fittedPhotoRect();
+}
+function drawFreeCropBox() {
+  const canvas = $('cropCanvas');
+  if (cropRatio !== 'free' || !freeCropRect || !canvas) return;
+  const ctx = canvas.getContext('2d');
+  const r = freeCropRect;
+  // Dim everything outside the box, so the selection reads clearly.
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, canvas.width, r.y);
+  ctx.fillRect(0, r.y + r.h, canvas.width, canvas.height - (r.y + r.h));
+  ctx.fillRect(0, r.y, r.x, r.h);
+  ctx.fillRect(r.x + r.w, r.y, canvas.width - (r.x + r.w), r.h);
+  // White border + corner/edge handles. Handles are sized in display px
+  // so they stay grabbable however the canvas is shown.
+  const disp = canvas.getBoundingClientRect();
+  const scale = disp.width ? canvas.width / disp.width : 1;
+  const hs = 11 * scale; // handle half-size (~11 display px)
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  const pts = [
+    [r.x, r.y], [r.x + r.w / 2, r.y], [r.x + r.w, r.y],
+    [r.x, r.y + r.h / 2], [r.x + r.w, r.y + r.h / 2],
+    [r.x, r.y + r.h], [r.x + r.w / 2, r.y + r.h], [r.x + r.w, r.y + r.h]
+  ];
+  pts.forEach(([px, py]) => {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(px - hs, py - hs, hs * 2, hs * 2);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px - hs, py - hs, hs * 2, hs * 2);
+  });
+}
+// In Free mode Apply saves exactly the boxed region, not the whole canvas.
+function freeRegionDataUrl(canvas) {
+  const r = freeCropRect;
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(r.w));
+  out.height = Math.max(1, Math.round(r.h));
+  const ctx = out.getContext('2d');
+  ctx.drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, out.width, out.height);
+  return out.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
 function detectDocumentInImage(img) {
@@ -2345,6 +2491,7 @@ function undoAutoScan() {
   applyCropCanvasSize();
   drawCropCanvas();
   updateUndoScanBtn();
+  if (cropRatio === 'free') { initFreeCropBox(); drawCropCanvas(); }
   setStatus('Auto-crop undone — the original photo is back. Crop it by hand or tap Scan to try again.', 'ok');
 }
 
@@ -2381,6 +2528,7 @@ async function autoScanCrop(manual) {
     panY = 0;
     $('zoomRange').value = 1;
     drawCropCanvas();
+    if (cropRatio === 'free') { initFreeCropBox(); drawCropCanvas(); }
     setStatus('Document detected — auto-cropped.', 'ok');
     return true;
   } catch (_) {
@@ -2443,6 +2591,8 @@ function setCropRatio(r) {
   if (zr) { zr.min = cropRatio === 'free' ? '0.5' : '1'; zr.value = 1; }
   applyCropCanvasSize();
   drawCropCanvas();
+  // Entering Free: the box starts as the full photo.
+  if (cropRatio === 'free') { initFreeCropBox(); drawCropCanvas(); }
 }
 function autoPickCropRatio() {
   // Pick the frame that matches the photo: landscape photo → 4:3,
@@ -2510,23 +2660,54 @@ function setupNativeCropper() {
 
   if (canvas) {
     canvas.addEventListener('mousedown', (e) => {
+      // Freeform: grabbing a handle resizes the box, grabbing inside it
+      // moves it — only a grab outside the box pans the photo.
+      if (cropRatio === 'free' && freeCropRect) {
+        const p = cropCanvasPoint(e.clientX, e.clientY);
+        if (p) {
+          const mode = freeRectHandleAt(freeCropRect, p.x, p.y, freeHandleTol());
+          if (mode) {
+            freeDrag = { mode, startX: p.x, startY: p.y, rect: { ...freeCropRect } };
+            return;
+          }
+        }
+      }
       isDragging = true;
       startX = e.clientX - panX;
       startY = e.clientY - panY;
     });
 
     window.addEventListener('mousemove', (e) => {
+      if (freeDrag) {
+        const p = cropCanvasPoint(e.clientX, e.clientY);
+        const cv = $('cropCanvas');
+        if (p && cv) {
+          freeCropRect = resizeFreeRect(freeDrag.rect, freeDrag.mode, p.x - freeDrag.startX, p.y - freeDrag.startY, cv.width, cv.height);
+          drawCropCanvas();
+        }
+        return;
+      }
       if (!isDragging) return;
       panX = e.clientX - startX;
       panY = e.clientY - startY;
       drawCropCanvas();
     });
 
-    window.addEventListener('mouseup', () => { isDragging = false; });
+    window.addEventListener('mouseup', () => { isDragging = false; freeDrag = null; });
 
     canvas.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
         e.preventDefault();
+        if (cropRatio === 'free' && freeCropRect) {
+          const p = cropCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
+          if (p) {
+            const mode = freeRectHandleAt(freeCropRect, p.x, p.y, freeHandleTol());
+            if (mode) {
+              freeDrag = { mode, startX: p.x, startY: p.y, rect: { ...freeCropRect } };
+              return;
+            }
+          }
+        }
         isDragging = true;
         startX = e.touches[0].clientX - panX;
         startY = e.touches[0].clientY - panY;
@@ -2534,13 +2715,22 @@ function setupNativeCropper() {
     }, { passive: false });
 
     window.addEventListener('touchmove', (e) => {
+      if (freeDrag && e.touches.length === 1) {
+        const p = cropCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
+        const cv = $('cropCanvas');
+        if (p && cv) {
+          freeCropRect = resizeFreeRect(freeDrag.rect, freeDrag.mode, p.x - freeDrag.startX, p.y - freeDrag.startY, cv.width, cv.height);
+          drawCropCanvas();
+        }
+        return;
+      }
       if (!isDragging || e.touches.length !== 1) return;
       panX = e.touches[0].clientX - startX;
       panY = e.touches[0].clientY - startY;
       drawCropCanvas();
     }, { passive: true });
 
-    window.addEventListener('touchend', () => { isDragging = false; });
+    window.addEventListener('touchend', () => { isDragging = false; freeDrag = null; });
   }
 
   $('cancelCropBtn').addEventListener('click', () => {
@@ -2573,7 +2763,10 @@ function setupNativeCropper() {
   $('saveCropBtn').addEventListener('click', async () => {
     const canvas = $('cropCanvas');
     if (!canvas) return;
-    const b64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    // Freeform: Apply saves exactly the boxed region, not the whole canvas.
+    const b64 = (cropRatio === 'free' && freeCropRect)
+      ? freeRegionDataUrl(canvas)
+      : canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
     $('cropModal').classList.remove('open');
 
     if (activeCropItem) {
