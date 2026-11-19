@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.24-live';
+const CURRENT_VERSION_TAG = 'v4.9.26-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -448,9 +448,9 @@ function initApp() {
   const zoomRange = $('zoomRange');
   if (zoomRange) zoomRange.addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) applyCameraZoom(v); });
   const zoomOutBtn = $('zoomOutBtn');
-  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value - 0.5));
+  if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value - Math.max(panelCameraZoom.step, 0.1)));
   const zoomInBtn = $('zoomInBtn');
-  if (zoomInBtn) zoomInBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value + 0.5));
+  if (zoomInBtn) zoomInBtn.addEventListener('click', () => applyCameraZoom(panelCameraZoom.value + Math.max(panelCameraZoom.step, 0.1)));
   // Device rotation: the frame/guide/outline are drawn from live sizes,
   // but a stored green-lock quad belongs to the old orientation — drop it
   // and re-draw immediately instead of waiting for the next 400ms tick.
@@ -2363,7 +2363,7 @@ function resizeFreeRect(r, handle, dx, dy, cw, ch, minSize) {
 }
 // --- end freeform crop box pure helpers ---
 
-function drawCropCanvas() {
+function drawCropCanvas(drawBox = true) {
   const canvas = $('cropCanvas');
   if (!rawImage || !canvas) return;
   const ctx = canvas.getContext('2d');
@@ -2389,7 +2389,7 @@ function drawCropCanvas() {
 
   ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   ctx.restore();
-  drawFreeCropBox();
+  if (drawBox) drawFreeCropBox();
 }
 
 // Freeform box (DOM helpers — the geometry lives in the pure section).
@@ -2460,8 +2460,12 @@ function drawFreeCropBox() {
   });
 }
 // In Free mode Apply saves exactly the boxed region, not the whole canvas.
+// The white box outline and handles are drawn on this same canvas while
+// editing — so redraw the photo WITHOUT them first, or the box gets baked
+// into the saved photo as a white border.
 function freeRegionDataUrl(canvas) {
   const r = freeCropRect;
+  drawCropCanvas(false); // clean redraw: photo only, no box, no handles
   const out = document.createElement('canvas');
   out.width = Math.max(1, Math.round(r.w));
   out.height = Math.max(1, Math.round(r.h));
