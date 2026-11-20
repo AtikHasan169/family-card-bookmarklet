@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v20';
+  const FC_INJECT_VERSION = 'v21';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1289,12 +1289,6 @@
     const female = isFemaleGenderId(genderId);
     const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
-    let literacy = null, literacyIds = [];
-    if (age !== null) {
-      literacy = age < 5 ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
-      literacyIds = age < 5 ? [LOOKUP_IDS.literacy.no] : [LOOKUP_IDS.literacy.yes];
-    }
-
     // Education by age band, using the real type-8 ids. Student ages
     // 18-24 follow the study ladder (HSC -> Graduate -> Post Graduate);
     // age 25+ defaults to Class 1-4 (190) — override via form_defaults
@@ -1314,6 +1308,16 @@
       else if (age <= 22) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
       else if (age <= 24) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
       else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
+    }
+
+    // Literacy follows education, not just age: a child in Play/KG
+    // (pre-primary, 188) cannot read or write yet, same as নিরক্ষর (88).
+    // Class 1 and above can.
+    let literacy = null, literacyIds = [];
+    if (age !== null) {
+      const cannotWrite = age < 5 || educationIds[0] === E.none || educationIds[0] === E.prePrimary;
+      literacy = cannotWrite ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
+      literacyIds = cannotWrite ? [LOOKUP_IDS.literacy.no] : [LOOKUP_IDS.literacy.yes];
     }
 
     let livelihood = null, livelihoodIds = [];
@@ -1430,18 +1434,18 @@
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
         const patterns = field.patternsOf(pats) || [];
         let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
-        // নিরক্ষর (education 88) means cannot read or write: literacy
-        // must be "No" (243), not the age-derived "Yes". Literacy is
-        // resolved before education in this loop, so check the panel's
-        // explicit education (and the row) here.
+        // নিরক্ষর (88) and Play/KG pre-primary (188) mean cannot read or
+        // write: literacy must be "No" (243), not the age-derived "Yes".
+        // Literacy is resolved before education in this loop, so check
+        // the panel's explicit education (and the row) here.
         if (field.key === 'literacy_id' && (overrideVal === undefined || overrideVal === null || String(overrideVal).trim() === '')) {
           const eduRaw = m.education_status_id ?? m.education_status ?? row.education_status_id;
-          let eduIsNone = false;
+          let eduCannotWrite = false;
           if (eduRaw !== undefined && eduRaw !== null && String(eduRaw).trim() !== '') {
-            if (/^\d+$/.test(String(eduRaw).trim())) eduIsNone = Number(eduRaw) === LOOKUP_IDS.education.none;
-            else eduIsNone = OPTION_PATTERNS.educationNone.some(re => re.test(String(eduRaw)));
+            if (/^\d+$/.test(String(eduRaw).trim())) eduCannotWrite = Number(eduRaw) === LOOKUP_IDS.education.none || Number(eduRaw) === LOOKUP_IDS.education.prePrimary;
+            else eduCannotWrite = OPTION_PATTERNS.educationNone.some(re => re.test(String(eduRaw))) || OPTION_PATTERNS.educationPrePrimary.some(re => re.test(String(eduRaw)));
           }
-          if (eduIsNone) overrideVal = LOOKUP_IDS.literacy.no;
+          if (eduCannotWrite) overrideVal = LOOKUP_IDS.literacy.no;
         }
         // String disability type ("physical", "শারীরিক") -> real id.
         if (field.key === 'disability_type_id' && typeof overrideVal === 'string' && overrideVal.trim() && !/^\d+$/.test(overrideVal.trim())) {
@@ -1607,15 +1611,17 @@
     }
 
     // ---- Literacy follows education: a row whose education is নিরক্ষর
-    // (88) cannot read or write (literacy 243), even if literacy was
-    // filled as "Yes" before the education was corrected on the member
-    // page. Only when the payload did not set literacy explicitly.
+    // (88) or Play/KG pre-primary (188) cannot read or write (literacy
+    // 243), even if literacy was filled as "Yes" before the education
+    // was corrected on the member page. Only when the payload did not
+    // set literacy explicitly.
     const litControls = byField.get('member.literacy_id') || [];
     const litOneToOne = litControls.length === memberRows.length;
     targetMemberList.forEach((m, idx) => {
       const row = memberRows[idx];
       if (!row) return;
-      if (Number(row.education_status_id || 0) !== LOOKUP_IDS.education.none) return;
+      const rowEduId = Number(row.education_status_id || 0);
+      if (rowEduId !== LOOKUP_IDS.education.none && rowEduId !== LOOKUP_IDS.education.prePrimary) return;
       if (String(row.literacy_id ?? '') === String(LOOKUP_IDS.literacy.no)) return;
       const explicitLit = memberOverrides.literacy_id ?? m.literacy_id ?? m.literacy;
       if (explicitLit !== undefined && explicitLit !== null && String(explicitLit).trim() !== '') return;
