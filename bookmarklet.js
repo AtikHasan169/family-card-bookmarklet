@@ -238,6 +238,9 @@
     if (data.action === 'FC_PULL_DRAFT') {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_REQUEST'));
     }
+    if (data.action === 'FC_READ_LIVE_EDUCATION') {
+      window.dispatchEvent(new CustomEvent('FC_PRO_LIVE_EDUCATION_REQUEST'));
+    }
     if (data.action === 'FC_DOWNLOAD_JSON') {
       try {
         const blob = new Blob([data.jsonString], { type: 'application/json;charset=utf-8' });
@@ -274,5 +277,9 @@
 
   window.addEventListener('FC_PRO_PULL_RESULT', (event) => {
     sendToPanel({ action: 'FC_PULL_RESPONSE', detail: event.detail });
+  });
+
+  window.addEventListener('FC_PRO_LIVE_EDUCATION_RESULT', (event) => {
+    sendToPanel({ action: 'FC_LIVE_EDUCATION_RESPONSE', detail: event.detail });
   });
 })();

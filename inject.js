@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v23';
+  const FC_INJECT_VERSION = 'v24';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -3100,6 +3100,38 @@
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
         detail: { version: FC_INJECT_VERSION, success: false, message: err.message }
       }));
+    }
+  });
+
+  // Read the education already on the live form, so the panel's popup
+  // only asks for people whose education is still empty on the form.
+  // A hand-filled value (or one from an earlier fill) must not be
+  // asked again. Reads the Vue MODEL, not the DOM selects, so it works
+  // even when the head/member tab is not the one showing.
+  window.addEventListener('FC_PRO_LIVE_EDUCATION_REQUEST', async () => {
+    const reply = (detail) => {
+      try { window.dispatchEvent(new CustomEvent('FC_PRO_LIVE_EDUCATION_RESULT', { detail })); } catch (_) {}
+    };
+    try {
+      const { vmHead, vmMembers } = getVueNodes();
+      if (!vmHead && !vmMembers) {
+        reply({ version: FC_INJECT_VERSION, success: false, message: 'No active Vue form instance found on this page.' });
+        return;
+      }
+      const d = getHeadTargetObj(vmHead) || {};
+      const rows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
+      const dId = String(d.verification_number || d.nid || '').trim();
+      // The head row: relationship Head/Self (260), or the row holding
+      // the head's NID (same rule Pull Draft uses).
+      const headRow = rows.find((r) => r && (Number(r.relationship_id) === 260 ||
+        (dId && String(r.verification_number || r.nid || r.brn_id || '').trim() === dId)));
+      const headEdu = Number(d.education_status || (headRow && headRow.education_status_id) || 0) || null;
+      // The spouse row: Husband (159) or Wife (186).
+      const spouseRow = rows.find((r) => r && (Number(r.relationship_id) === 159 || Number(r.relationship_id) === 186));
+      const spouseEdu = spouseRow ? (Number(spouseRow.education_status_id || 0) || null) : null;
+      reply({ version: FC_INJECT_VERSION, success: true, head: headEdu, spouse: spouseEdu });
+    } catch (err) {
+      reply({ version: FC_INJECT_VERSION, success: false, message: String(err && err.message || err) });
     }
   });
 })();

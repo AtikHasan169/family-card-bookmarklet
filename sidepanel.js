@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.31-live';
+const CURRENT_VERSION_TAG = 'v4.9.32-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -582,6 +582,18 @@ function handleIncomingMessages(e) {
     if (e.data.online) {
       pill.classList.add('online');
       $('connText').textContent = 'Form Ready';
+    }
+  }
+
+  if (e.data.action === 'FC_LIVE_EDUCATION_RESPONSE') {
+    // The injector's answer to requestLiveEducation(): { success, head, spouse }.
+    // A failed read is the same as no answer — the popup falls back to
+    // the panel's own data.
+    if (liveEducationWaiter) {
+      const w = liveEducationWaiter;
+      liveEducationWaiter = null;
+      const res = e.data.detail || {};
+      w.resolve(res.success ? { head: res.head || null, spouse: res.spouse || null } : null);
     }
   }
 
@@ -3936,6 +3948,32 @@ function applyEducationChoices(extracted, choices) {
   }
   return extracted;
 }
+
+// Drop popup targets whose education is already on the live form
+// (hand-filled, or filled by an earlier run). live is
+// { head?: id|null, spouse?: id|null } from the injector, or null when
+// the injector never answered — then nothing is dropped, so the fill
+// is never blocked by the check.
+function filterEducationTargetsByLive(targets, live) {
+  if (!live || !Array.isArray(targets)) return targets;
+  return targets.filter((t) => {
+    const liveId = t.key === 'head' ? live.head : (t.key === 'spouse' ? live.spouse : null);
+    return !eduHasExplicitId(liveId);
+  });
+}
+
+// Remember a live education value on the panel's record (same places
+// as a popup pick), so the popup does not ask for it again even if the
+// injector is silent next time. Returns true when it stored anything.
+function rememberLiveEducation(extracted, live) {
+  if (!extracted || !live) return false;
+  const choices = {};
+  if (eduHasExplicitId(live.head)) choices.head = Number(live.head);
+  if (eduHasExplicitId(live.spouse)) choices.spouse = Number(live.spouse);
+  if (!Object.keys(choices).length) return false;
+  applyEducationChoices(extracted, choices);
+  return true;
+}
 // --- end education popup pure helpers ---
 
 function sendAutofillPayload() {
@@ -3994,12 +4032,44 @@ function showEducationPopup(targets) {
   modal.classList.add('open');
 }
 
-function triggerFormAutofill() {
+// Pending "what education is already on the form?" request. The
+// injector answers through FC_LIVE_EDUCATION_RESPONSE; if it never
+// does (old injector / old bookmarklet), the timeout resolves null
+// and the popup falls back to the panel's own data — the fill is
+// never blocked by the check.
+let liveEducationWaiter = null;
+function requestLiveEducation(timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (live) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (liveEducationWaiter && liveEducationWaiter.resolve === finish) liveEducationWaiter = null;
+      resolve(live);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    liveEducationWaiter = { resolve: finish };
+    window.parent.postMessage({ action: 'FC_READ_LIVE_EDUCATION' }, '*');
+  });
+}
+
+async function triggerFormAutofill() {
   if (!state.lastExtracted) return;
   handleAreaPresetChange();
   // The popup asks only when the 25+ age guess (Class 1-4) would be used
   // for the head or the spouse — and only for this run.
-  const targets = educationPopupTargets(state.lastExtracted);
+  let targets = educationPopupTargets(state.lastExtracted);
+  if (targets.length) {
+    // Ask the form first: a hand-filled education (or one from an
+    // earlier run) must not be asked again. A silent injector falls
+    // back to the panel's data, so the fill is never delayed.
+    const live = await requestLiveEducation();
+    if (live) {
+      if (rememberLiveEducation(state.lastExtracted, live)) saveSessionState();
+      targets = filterEducationTargetsByLive(targets, live);
+    }
+  }
   if (!targets.length) { sendAutofillPayload(); return; }
   showEducationPopup(targets);
 }
