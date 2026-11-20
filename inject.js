@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v18';
+  const FC_INJECT_VERSION = 'v20';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1359,6 +1359,24 @@
     return { literacy, literacyIds, education, educationIds, livelihood, livelihoodIds, profession, professionIds, marital, maritalIds, maritalExcludes, health, healthIds, healthExcludes, isDisabled };
   }
 
+  // Head education follows the head member row: the head's education is
+  // asked twice — once on the head page (data/form.education_status)
+  // and once on the সদস্য page (row 0, Head/Self). The row is the
+  // source of truth, so a "didn't study" correction on the member page
+  // reaches the head page too. Returns null when there is no head row
+  // or the row has no education yet.
+  function headRowEducationId(memberRows, targetMemberList) {
+    if (!Array.isArray(memberRows) || !Array.isArray(targetMemberList)) return null;
+    const idx = targetMemberList.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
+    if (idx < 0) return null;
+    const row = memberRows[idx];
+    if (!row) return null;
+    const v = row.education_status_id;
+    if (v === undefined || v === null || String(v).trim() === '') return null;
+    const n = Number(v);
+    return Number.isNaN(n) ? null : n;
+  }
+
   // Fill every option control the old injector skipped. `memberRows` are the
   // live Vue row objects (same order as targetMemberList). `headMember` is
   // the payload head (for age/gender/relation-aware head defaults).
@@ -1412,6 +1430,19 @@
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
         const patterns = field.patternsOf(pats) || [];
         let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
+        // নিরক্ষর (education 88) means cannot read or write: literacy
+        // must be "No" (243), not the age-derived "Yes". Literacy is
+        // resolved before education in this loop, so check the panel's
+        // explicit education (and the row) here.
+        if (field.key === 'literacy_id' && (overrideVal === undefined || overrideVal === null || String(overrideVal).trim() === '')) {
+          const eduRaw = m.education_status_id ?? m.education_status ?? row.education_status_id;
+          let eduIsNone = false;
+          if (eduRaw !== undefined && eduRaw !== null && String(eduRaw).trim() !== '') {
+            if (/^\d+$/.test(String(eduRaw).trim())) eduIsNone = Number(eduRaw) === LOOKUP_IDS.education.none;
+            else eduIsNone = OPTION_PATTERNS.educationNone.some(re => re.test(String(eduRaw)));
+          }
+          if (eduIsNone) overrideVal = LOOKUP_IDS.literacy.no;
+        }
         // String disability type ("physical", "শারীরিক") -> real id.
         if (field.key === 'disability_type_id' && typeof overrideVal === 'string' && overrideVal.trim() && !/^\d+$/.test(overrideVal.trim())) {
           const kid = keywordToId(overrideVal, DISABILITY_TYPE_KEYWORDS);
@@ -1508,7 +1539,12 @@
               if (c.vInst.disabled || c.vInst.readonly) continue;
               const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
               if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
-              const overrideVal = headOverrides[key];
+              // Education: the head member row (সদস্য page) is the source
+              // of truth — it wins over the age derivation, unless an
+              // explicit head override is set.
+              const overrideVal = key === 'education_status'
+                ? (headOverrides[key] ?? headRowEducationId(memberRows, targetMemberList))
+                : headOverrides[key];
               const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats), field.idsOf(headPats));
               if (choice && choice.id !== undefined) {
                 const want = String(choice.id);
@@ -1546,6 +1582,50 @@
         triggerVeeValidate(c.wrap);
       }
     }
+
+    // ---- Head education follows the head member row on every pass:
+    // a hand correction on the সদস্য page (e.g. Class 1-4 -> "didn't
+    // study") reaches the head page within a watcher tick. One way
+    // only — the member row is never overwritten from the head form.
+    // Runs even on empty-only passes, so it is not blocked by the
+    // head field already being filled. An explicit head override
+    // (form_defaults.head_options.education_status) still wins.
+    const rowEdu = headRowEducationId(memberRows, targetMemberList);
+    const hasHeadEduOverride = headOverrides.education_status !== undefined && headOverrides.education_status !== null;
+    if (rowEdu !== null && !hasHeadEduOverride && headTarget) {
+      for (const scope of ['data', 'form']) {
+        const list = byField.get(scope + '.education_status') || [];
+        for (const c of list) {
+          if (!c.isSelect || c.vInst.disabled || c.vInst.readonly) continue;
+          const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
+          if (String(currentVal ?? '') === String(rowEdu)) continue;
+          selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === String(rowEdu));
+          setReactive(vmHead, headTarget, 'education_status', rowEdu);
+          triggerVeeValidate(c.wrap);
+        }
+      }
+    }
+
+    // ---- Literacy follows education: a row whose education is নিরক্ষর
+    // (88) cannot read or write (literacy 243), even if literacy was
+    // filled as "Yes" before the education was corrected on the member
+    // page. Only when the payload did not set literacy explicitly.
+    const litControls = byField.get('member.literacy_id') || [];
+    const litOneToOne = litControls.length === memberRows.length;
+    targetMemberList.forEach((m, idx) => {
+      const row = memberRows[idx];
+      if (!row) return;
+      if (Number(row.education_status_id || 0) !== LOOKUP_IDS.education.none) return;
+      if (String(row.literacy_id ?? '') === String(LOOKUP_IDS.literacy.no)) return;
+      const explicitLit = memberOverrides.literacy_id ?? m.literacy_id ?? m.literacy;
+      if (explicitLit !== undefined && explicitLit !== null && String(explicitLit).trim() !== '') return;
+      setReactive(vmMembers, row, 'literacy_id', LOOKUP_IDS.literacy.no);
+      const c = litOneToOne ? litControls[idx] : null;
+      if (c && c.isSelect && !c.vInst.disabled && !c.vInst.readonly) {
+        selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === String(LOOKUP_IDS.literacy.no));
+        triggerVeeValidate(c.wrap);
+      }
+    });
 
     return unfilled;
   }
