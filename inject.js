@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v22';
+  const FC_INJECT_VERSION = 'v23';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1075,6 +1075,7 @@
   const OPTION_PATTERNS = {
     literacyYes: [/পড়তে ও লিখতে পারেন|পড়তে.*লিখতে.*পার/i, /able to read and write/i],
     literacyNo: [/কোনোটিই পারেন না|পারেন? না/i, /cannot read or write/i],
+    literacyReadOnly: [/শুধু পড়তে পারেন|শুধু.*পড়তে/i, /can read only/i],
     educationNone: [/নিরক্ষর|শিক্ষা প্রতিষ্ঠানে যায়নি|illiterate/i],
     educationPrePrimary: [/প্রাক-প্রাথমিক|প্রাক|pre.?primary|play|nursery|kg/i],
     educationClass1to4: [/১ম–৪র্থ|১ম-৪র্থ|class 1-4/i, /১ম শ্রেণি|class 1\b/i],
@@ -1310,14 +1311,15 @@
       else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
     }
 
-    // Literacy follows education, not just age: a child in Play/KG
-    // (pre-primary, 188) cannot read or write yet, same as নিরক্ষর (88).
-    // Class 1 and above can.
+    // Literacy follows education in three levels: নিরক্ষর (88) cannot
+    // read or write (243); Play/KG (188) can read only (242); Class 1
+    // and above can read and write (241).
     let literacy = null, literacyIds = [];
     if (age !== null) {
-      const cannotWrite = age < 5 || educationIds[0] === E.none || educationIds[0] === E.prePrimary;
-      literacy = cannotWrite ? OPTION_PATTERNS.literacyNo : OPTION_PATTERNS.literacyYes;
-      literacyIds = cannotWrite ? [LOOKUP_IDS.literacy.no] : [LOOKUP_IDS.literacy.yes];
+      const edu0 = educationIds[0];
+      if (edu0 === E.none) { literacy = OPTION_PATTERNS.literacyNo; literacyIds = [LOOKUP_IDS.literacy.no]; }
+      else if (edu0 === E.prePrimary) { literacy = OPTION_PATTERNS.literacyReadOnly; literacyIds = [LOOKUP_IDS.literacy.readOnly]; }
+      else { literacy = OPTION_PATTERNS.literacyYes; literacyIds = [LOOKUP_IDS.literacy.yes]; }
     }
 
     let livelihood = null, livelihoodIds = [];
@@ -1434,18 +1436,25 @@
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
         const patterns = field.patternsOf(pats) || [];
         let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
-        // নিরক্ষর (88) and Play/KG pre-primary (188) mean cannot read or
-        // write: literacy must be "No" (243), not the age-derived "Yes".
-        // Literacy is resolved before education in this loop, so check
-        // the panel's explicit education (and the row) here.
+        // Literacy follows the education: নিরক্ষর (88) -> "cannot read
+        // or write" (243); Play/KG (188) -> "read only" (242). Class 1+
+        // keeps the age-derived "read and write" (241). Literacy is
+        // resolved before education in this loop, so check the panel's
+        // explicit education (and the row) here.
         if (field.key === 'literacy_id' && (overrideVal === undefined || overrideVal === null || String(overrideVal).trim() === '')) {
           const eduRaw = m.education_status_id ?? m.education_status ?? row.education_status_id;
-          let eduCannotWrite = false;
+          let eduLitId = null;
           if (eduRaw !== undefined && eduRaw !== null && String(eduRaw).trim() !== '') {
-            if (/^\d+$/.test(String(eduRaw).trim())) eduCannotWrite = Number(eduRaw) === LOOKUP_IDS.education.none || Number(eduRaw) === LOOKUP_IDS.education.prePrimary;
-            else eduCannotWrite = OPTION_PATTERNS.educationNone.some(re => re.test(String(eduRaw))) || OPTION_PATTERNS.educationPrePrimary.some(re => re.test(String(eduRaw)));
+            if (/^\d+$/.test(String(eduRaw).trim())) {
+              const n = Number(eduRaw);
+              if (n === LOOKUP_IDS.education.none) eduLitId = LOOKUP_IDS.literacy.no;
+              else if (n === LOOKUP_IDS.education.prePrimary) eduLitId = LOOKUP_IDS.literacy.readOnly;
+            } else {
+              if (OPTION_PATTERNS.educationNone.some(re => re.test(String(eduRaw)))) eduLitId = LOOKUP_IDS.literacy.no;
+              else if (OPTION_PATTERNS.educationPrePrimary.some(re => re.test(String(eduRaw)))) eduLitId = LOOKUP_IDS.literacy.readOnly;
+            }
           }
-          if (eduCannotWrite) overrideVal = LOOKUP_IDS.literacy.no;
+          if (eduLitId !== null) overrideVal = eduLitId;
         }
         // String disability type ("physical", "শারীরিক") -> real id.
         if (field.key === 'disability_type_id' && typeof overrideVal === 'string' && overrideVal.trim() && !/^\d+$/.test(overrideVal.trim())) {
@@ -1610,25 +1619,27 @@
       }
     }
 
-    // ---- Literacy follows education: a row whose education is নিরক্ষর
-    // (88) or Play/KG pre-primary (188) cannot read or write (literacy
-    // 243), even if literacy was filled as "Yes" before the education
-    // was corrected on the member page. Only when the payload did not
-    // set literacy explicitly.
+    // ---- Literacy follows education: নিরক্ষর (88) -> cannot read or
+    // write (243); Play/KG (188) -> read only (242). Fix a row whose
+    // literacy was filled as "Yes" before the education was corrected
+    // on the member page. Only when the payload did not set literacy
+    // explicitly.
     const litControls = byField.get('member.literacy_id') || [];
     const litOneToOne = litControls.length === memberRows.length;
     targetMemberList.forEach((m, idx) => {
       const row = memberRows[idx];
       if (!row) return;
       const rowEduId = Number(row.education_status_id || 0);
-      if (rowEduId !== LOOKUP_IDS.education.none && rowEduId !== LOOKUP_IDS.education.prePrimary) return;
-      if (String(row.literacy_id ?? '') === String(LOOKUP_IDS.literacy.no)) return;
+      const wantLit = rowEduId === LOOKUP_IDS.education.none ? LOOKUP_IDS.literacy.no
+        : rowEduId === LOOKUP_IDS.education.prePrimary ? LOOKUP_IDS.literacy.readOnly : null;
+      if (wantLit === null) return;
+      if (String(row.literacy_id ?? '') === String(wantLit)) return;
       const explicitLit = memberOverrides.literacy_id ?? m.literacy_id ?? m.literacy;
       if (explicitLit !== undefined && explicitLit !== null && String(explicitLit).trim() !== '') return;
-      setReactive(vmMembers, row, 'literacy_id', LOOKUP_IDS.literacy.no);
+      setReactive(vmMembers, row, 'literacy_id', wantLit);
       const c = litOneToOne ? litControls[idx] : null;
       if (c && c.isSelect && !c.vInst.disabled && !c.vInst.readonly) {
-        selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === String(LOOKUP_IDS.literacy.no));
+        selectVuetifyItem(c.vInst, it => String(optionItemId(c.vInst, it)) === String(wantLit));
         triggerVeeValidate(c.wrap);
       }
     });
