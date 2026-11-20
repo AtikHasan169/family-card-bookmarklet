@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v21';
+  const FC_INJECT_VERSION = 'v22';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1818,7 +1818,16 @@
     const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
 
     const headAge = headMember ? calculateAgeYears(headMember.dob) : null;
-    const headEduId = headTarget ? Number(headTarget.education_status || 0) : 0;
+    // Q14 (head education band) reads the head MEMBER row first — the
+    // source of truth for education (v19) — falling back to the head
+    // form. The head form's education_status is only set when the head
+    // tab's education select is rendered; on the real site the fill
+    // often runs from the member tab, so the head form stays empty
+    // while the member row IS filled (Class 1-4) — and Q14 never
+    // derived, even though Q18 (spouse, read from the spouse row)
+    // filled fine. Reading the row fixes that.
+    const headRowEdu = headRowEducationId(memberRows, targetMemberList);
+    const headEduId = Number(headRowEdu || (headTarget ? headTarget.education_status : 0) || 0);
     let spouseEduId = 0;
     targetMemberList.forEach((m, idx) => {
       if ((m.relation === 'Husband' || m.relation === 'Wife') && memberRows[idx]) {
