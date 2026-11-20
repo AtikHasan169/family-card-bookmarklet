@@ -707,6 +707,21 @@
     </div>
   </div>
 
+  <div class="modal dialog-modal" id="eduModal">
+    <div class="dialog-card" style="max-width:480px;">
+      <div class="dialog-head">
+        <h3>শিক্ষাগত যোগ্যতা যাচাই করুন</h3>
+        <button type="button" class="icon-btn" id="closeEduBtn" title="Skip — use the guess" aria-label="Close education check"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div style="padding: 0 14px 4px; font-size:13px; color:#94a3b8;">২৫ বছরের বেশি বয়সের জন্য Auto-Fill ১ম–৪র্থ শ্রেণি অনুমান করবে। সঠিকটা বেছে নিন — দুই জায়গায় (প্রধান পাতা + সদস্য পাতা) একসাথে বসবে। না বাছলে অনুমান দিয়েই পূরণ হবে।</div>
+      <div id="eduModalRows" style="display:flex; flex-direction:column; gap:12px; padding:10px 14px;"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="eduSkipBtn" style="flex:1; background:#475569; color:#fff;">অনুমান দিয়েই চালান</button>
+        <button type="button" class="btn" id="eduConfirmBtn" style="flex:1; background:#2563eb; color:#fff;">এই দিয়ে পূরণ করুন</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bypasses aggressive browser caching forever -->
   <script>
     const v = new URLSearchParams(window.location.search).get('t') || Date.now();

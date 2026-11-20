@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.27-live';
+const CURRENT_VERSION_TAG = 'v4.9.30-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -3808,11 +3808,169 @@ async function runExtraction() {
   }
 }
 
+// --- Education popup: pure helpers ---
+// Ask once, at Auto-Fill, when the head or the spouse (husband/wife) is
+// 25+ and their education would otherwise be the age guess (Class 1-4,
+// id 190) — the guess is wrong for families where they didn't study, and
+// it is asked in two places (head page + member page), so one pick must
+// fill both. The choice is written into the payload for this run only
+// (never saved as a global default — every family is different): head ->
+// form_defaults.head_options.education_status + the Head/Self member row,
+// spouse -> that member row's education_status_id. inject.js v19 already
+// treats both as explicit overrides that beat the age guess, and the head
+// page copies the member row too — so no inject.js change is needed.
+// NOTE: handleAreaPresetChange() rebuilds form_defaults, so the choices
+// must be applied AFTER it runs, right before the payload is sent.
+const EDUCATION_OPTIONS = [
+  { id: 88, label: 'নিরক্ষর / Didn\'t study' },
+  { id: 188, label: 'প্রাক-প্রাথমিক / Pre-Primary' },
+  { id: 189, label: '১ম শ্রেণি / Class 1' },
+  { id: 190, label: '১ম–৪র্থ শ্রেণি / Class 1-4' },
+  { id: 191, label: '৫ম / Class 5' },
+  { id: 192, label: '৬ষ্ঠ–৭ম / Class 6-7' },
+  { id: 89, label: 'অষ্টম / JSC' },
+  { id: 193, label: '৯ম / Class 9' },
+  { id: 90, label: 'এসএসসি / SSC' },
+  { id: 91, label: 'এইচএসসি / HSC' },
+  { id: 92, label: 'স্নাতক / Graduate' },
+  { id: 93, label: 'স্নাতকোত্তর / Post Graduate' }
+];
+const EDUCATION_GUESS_ID = 190;
+
+function eduAgeYears(rawDob) {
+  const clean = String(rawDob || '').replace(/\[.*?\]/g, '').trim();
+  if (!clean) return null;
+  let dd, mm, yyyy;
+  const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) { dd = +dmy[1]; mm = +dmy[2]; yyyy = +dmy[3]; }
+  else {
+    const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (!ymd) return null;
+    yyyy = +ymd[1]; mm = +ymd[2]; dd = +ymd[3];
+  }
+  const today = new Date();
+  let age = today.getFullYear() - yyyy;
+  if (today.getMonth() + 1 < mm || (today.getMonth() + 1 === mm && today.getDate() < dd)) age--;
+  return age;
+}
+
+function eduPersonName(p, fallback) {
+  const n = (p && (p.name_en || p.name_bn) || '').trim();
+  return n || fallback;
+}
+
+function eduHasExplicitId(v) {
+  return v !== undefined && v !== null && String(v).trim() !== '';
+}
+
+// Who needs asking: head and/or spouse, 25+, with no explicit education
+// anywhere the injector would read it. Returns [] when nothing to ask.
+function educationPopupTargets(extracted) {
+  if (!extracted || !extracted.head) return [];
+  const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
+  const headOpts = (extracted.form_defaults && extracted.form_defaults.head_options) || {};
+  const headRowIdx = members.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
+  const headRow = headRowIdx >= 0 ? members[headRowIdx] : null;
+  const targets = [];
+  const headAge = eduAgeYears(extracted.head.dob);
+  const headExplicit = eduHasExplicitId(headOpts.education_status)
+    || eduHasExplicitId(extracted.head.education_status_id)
+    || (headRow && eduHasExplicitId(headRow.education_status_id));
+  if (headAge !== null && headAge >= 25 && !headExplicit) {
+    targets.push({ key: 'head', memberIndex: headRowIdx, name: eduPersonName(extracted.head, 'প্রধান (Head)'), age: headAge });
+  }
+  const spouseIdx = members.findIndex(m => m && (m.relation === 'Husband' || m.relation === 'Wife'));
+  if (spouseIdx >= 0) {
+    const spouse = members[spouseIdx];
+    const spouseAge = eduAgeYears(spouse.dob);
+    if (spouseAge !== null && spouseAge >= 25 && !eduHasExplicitId(spouse.education_status_id)) {
+      targets.push({ key: 'spouse', memberIndex: spouseIdx, name: eduPersonName(spouse, spouse.relation || 'স্বামী/স্ত্রী (Spouse)'), age: spouseAge });
+    }
+  }
+  return targets;
+}
+
+// Apply the popup picks to the payload, in the exact places inject.js
+// reads: head -> head_options override (+ Head/Self row when present),
+// spouse -> that member row. Choices is { head?: id, spouse?: id }.
+function applyEducationChoices(extracted, choices) {
+  if (!extracted || !choices) return extracted;
+  const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
+  if (choices.head !== undefined && choices.head !== null && String(choices.head) !== '') {
+    extracted.form_defaults = extracted.form_defaults || {};
+    extracted.form_defaults.head_options = Object.assign({}, extracted.form_defaults.head_options, { education_status: Number(choices.head) });
+    const headRowIdx = members.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
+    if (headRowIdx >= 0) members[headRowIdx].education_status_id = Number(choices.head);
+  }
+  if (choices.spouse !== undefined && choices.spouse !== null && String(choices.spouse) !== '') {
+    const spouseIdx = members.findIndex(m => m && (m.relation === 'Husband' || m.relation === 'Wife'));
+    if (spouseIdx >= 0) members[spouseIdx].education_status_id = Number(choices.spouse);
+  }
+  return extracted;
+}
+// --- end education popup pure helpers ---
+
+function sendAutofillPayload() {
+  window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
+  setStatus('Sent auto-fill data (Members, Gender, Religion, Post Code & Area) to form!', 'ok');
+}
+
+function showEducationPopup(targets) {
+  const modal = $('eduModal');
+  // Older panel HTML without the modal: never block the fill.
+  if (!modal || !$('eduConfirmBtn') || !$('eduSkipBtn') || !$('closeEduBtn')) { sendAutofillPayload(); return; }
+  const rowsEl = $('eduModalRows');
+  if (rowsEl) {
+    rowsEl.innerHTML = '';
+    targets.forEach((t) => {
+      const wrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.style.cssText = 'display:block; font-size:13px; font-weight:600; margin-bottom:6px;';
+      label.textContent = `${t.name} — ${t.age} বছর (${t.key === 'head' ? 'প্রধান / Head' : 'স্বামী/স্ত্রী / Spouse'})`;
+      const sel = document.createElement('select');
+      sel.dataset.eduKey = t.key;
+      EDUCATION_OPTIONS.forEach((opt) => {
+        const o = document.createElement('option');
+        o.value = String(opt.id);
+        o.textContent = opt.label;
+        if (opt.id === EDUCATION_GUESS_ID) o.selected = true;
+        sel.appendChild(o);
+      });
+      wrap.appendChild(label);
+      wrap.appendChild(sel);
+      rowsEl.appendChild(wrap);
+    });
+  }
+  const close = () => {
+    modal.classList.remove('open');
+    sendAutofillPayload(); // Skip = the age guess, exactly as before.
+  };
+  const confirm = () => {
+    const choices = {};
+    (rowsEl ? rowsEl.querySelectorAll('select[data-edu-key]') : []).forEach((sel) => {
+      choices[sel.dataset.eduKey] = Number(sel.value);
+    });
+    applyEducationChoices(state.lastExtracted, choices);
+    const rawOut = $('rawJsonOutput');
+    if (rawOut) rawOut.textContent = JSON.stringify(state.lastExtracted, null, 2);
+    modal.classList.remove('open');
+    sendAutofillPayload();
+  };
+  $('eduConfirmBtn').onclick = confirm;
+  $('eduSkipBtn').onclick = close;
+  $('closeEduBtn').onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  modal.classList.add('open');
+}
+
 function triggerFormAutofill() {
   if (!state.lastExtracted) return;
   handleAreaPresetChange();
-  window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
-  setStatus('Sent auto-fill data (Members, Gender, Religion, Post Code & Area) to form!', 'ok');
+  // The popup asks only when the 25+ age guess (Class 1-4) would be used
+  // for the head or the spouse — and only for this run.
+  const targets = educationPopupTargets(state.lastExtracted);
+  if (!targets.length) { sendAutofillPayload(); return; }
+  showEducationPopup(targets);
 }
 
 function exportExtractedJson() {
