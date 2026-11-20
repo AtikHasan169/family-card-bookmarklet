@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.30-live';
+const CURRENT_VERSION_TAG = 'v4.9.31-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -787,6 +787,11 @@ function recalculateHouseholdSummary(data) {
   const finalReligion = data.head?.religion || detectedReligion || 'Islam';
   const finalReligionId = RELIGION_ID_MAP[finalReligion] || 1;
 
+  // Rebuilding form_defaults from scratch used to wipe user choices
+  // that live there (the education popup's head_options pick, PMT /
+  // program overrides) — the popup then asked again on every Auto-Fill.
+  // Keep them across the rebuild.
+  const prevDefaults = data.form_defaults || {};
   data.form_defaults = {
     total_members: totalMembers,
     male_count: maleCount,
@@ -803,7 +808,11 @@ function recalculateHouseholdSummary(data) {
     is_ethnic: Number(areaPresets.is_ethnic ?? 0),
     khudro_nrigosthi_label: Number(areaPresets.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
     area_type_id: Number(areaPresets.area_type_id ?? 1),
-    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)'
+    area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)',
+    ...(prevDefaults.head_options ? { head_options: prevDefaults.head_options } : {}),
+    ...(prevDefaults.pmt ? { pmt: prevDefaults.pmt } : {}),
+    ...(prevDefaults.program_fields ? { program_fields: prevDefaults.program_fields } : {}),
+    ...(prevDefaults.member_options ? { member_options: prevDefaults.member_options } : {})
   };
 
   if ($('fcSummaryTotalMembers')) $('fcSummaryTotalMembers').value = String(data.form_defaults.total_members);
@@ -3018,6 +3027,12 @@ function normalizeOutput(raw, preserveOrder = false) {
     age: headAge,
     source_images: Array.isArray(h.source_images) ? h.source_images : []
   };
+  // A remembered education pick (from the popup) lives on the head
+  // record — keep it through rebuilds, or a session restore drops it
+  // and the popup asks again.
+  if (h.education_status_id !== undefined && h.education_status_id !== null && String(h.education_status_id).trim() !== '') {
+    head.education_status_id = Number(h.education_status_id);
+  }
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -3068,6 +3083,11 @@ function normalizeOutput(raw, preserveOrder = false) {
       is_disabled: Number(m?.is_disabled) === 1 ? 1 : 0,
       source_images: Array.isArray(m?.source_images) ? m.source_images : []
     };
+    // Same: keep a member's explicit education (e.g. the spouse pick
+    // from the popup) through rebuilds.
+    if (m?.education_status_id !== undefined && m?.education_status_id !== null && String(m.education_status_id).trim() !== '') {
+      entry.education_status_id = Number(m.education_status_id);
+    }
 
     if (preserveOrder) {
       deduped.push(entry);
@@ -3893,12 +3913,20 @@ function educationPopupTargets(extracted) {
 // Apply the popup picks to the payload, in the exact places inject.js
 // reads: head -> head_options override (+ Head/Self row when present),
 // spouse -> that member row. Choices is { head?: id, spouse?: id }.
+// The head pick ALSO goes on the head record itself
+// (head.education_status_id): the panel's family_members has no
+// Head/Self row (the injector adds the head as row 0 at fill time), so
+// head_options was the pick's only home — and recalculateHousehold-
+// Summary rebuilds form_defaults from scratch on every Auto-Fill,
+// wiping it. The pick was lost and the popup asked again every time.
+// The head record survives that rebuild, so the pick sticks.
 function applyEducationChoices(extracted, choices) {
   if (!extracted || !choices) return extracted;
   const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
   if (choices.head !== undefined && choices.head !== null && String(choices.head) !== '') {
     extracted.form_defaults = extracted.form_defaults || {};
     extracted.form_defaults.head_options = Object.assign({}, extracted.form_defaults.head_options, { education_status: Number(choices.head) });
+    if (extracted.head) extracted.head.education_status_id = Number(choices.head);
     const headRowIdx = members.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
     if (headRowIdx >= 0) members[headRowIdx].education_status_id = Number(choices.head);
   }
@@ -3951,6 +3979,9 @@ function showEducationPopup(targets) {
       choices[sel.dataset.eduKey] = Number(sel.value);
     });
     applyEducationChoices(state.lastExtracted, choices);
+    // Persist the pick now, or a panel reload loses it and the popup
+    // asks again on the next Auto-Fill.
+    saveSessionState();
     const rawOut = $('rawJsonOutput');
     if (rawOut) rawOut.textContent = JSON.stringify(state.lastExtracted, null, 2);
     modal.classList.remove('open');
