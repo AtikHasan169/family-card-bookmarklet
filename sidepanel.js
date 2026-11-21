@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.58-live';
+const CURRENT_VERSION_TAG = 'v4.9.60-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -125,6 +125,30 @@ const RELATION_GENDER_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.
 const GENDER_ID_MAP = { Male: 1, Female: 2, Other: 3 };
 const RELIGION_ID_MAP = { Islam: 1, Hinduism: 2, Buddhism: 3, Christianity: 4, Other: 5 };
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// (v39) The v38 sections (General / Nominee / Bank / Address /
+// Permanent Address / Socio-Economic) are PULLED website data —
+// a hand-typed New Form has none of it, so showing them there is
+// just a wall of empty rows. A section only renders when the record
+// actually carries pulled data: any one of these keys set (a count
+// of 0 counts — String(0) is '0', not empty — so a pulled draft
+// whose counts are all 0 still shows its sections, while a New
+// Form head, which never has these keys, shows only the core card).
+const PULLED_SECTION_KEYS = [
+  'spouse_name_bn', 'spouse_name_en', 'identification_mark', 'nationality', 'email', 'mobile_operator', 'disability_id', 'house_size', 'no_of_room_name',
+  'nominee_bn', 'nominee_en', 'nominee_verification_number', 'nominee_date_of_birth', 'nominee_address', 'nominee_relation_with_beneficiary', 'nominee_nationality',
+  'account_type', 'bank_name', 'branch_name', 'bank_division_name', 'bank_district_name', 'account_name', 'account_owner', 'account_number', 'mfs_number',
+  'address_location_type_id', 'address_division_name', 'address_district_name', 'address_thana_name', 'address_union_name', 'address_pouro_name', 'address_city_name', 'address_ward_name', 'address_post_code', 'address_text',
+  'permanent_address_location_type_id', 'permanent_address_division_name', 'permanent_address_district_name', 'permanent_address_thana_name', 'permanent_address_union_name', 'permanent_address_pouro_name', 'permanent_address_city_name', 'permanent_address_ward_name', 'permanent_address_post_code', 'permanent_address_text',
+  'program_male', 'program_female', 'program_hijra', 'program_abroad_male', 'program_abroad_female', 'program_abroad_hijra'
+];
+function hasPulledSections(targetObj) {
+  if (!targetObj || typeof targetObj !== 'object') return false;
+  return PULLED_SECTION_KEYS.some((k) => {
+    const v = targetObj[k];
+    return v !== undefined && v !== null && String(v).trim() !== '';
+  });
+}
 
 const HEAD_FIELDS = [
   // Order (v4.9.41): identity first — name, then the parents' names
@@ -765,17 +789,7 @@ function initApp() {
   $('importJsonBtn').addEventListener('click', () => $('importJsonInput').click());
   $('importJsonInput').addEventListener('change', importExtractedJson);
 
-  $('clearAllBtn').addEventListener('click', () => {
-    state.head = [];
-    state.other = [];
-    state.lastExtracted = null;
-    window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: null }, '*');
-    renderPreviews('head');
-    renderPreviews('other');
-    $('resultsWrap').classList.remove('visible');
-    $('autofillBtn').disabled = true;
-    setStatus('Cards cleared (Saved Area settings kept for next family).', 'idle');
-  });
+  $('clearAllBtn').addEventListener('click', clearAll);
 
   $('pullFromWebBtn').addEventListener('click', () => {
     window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
@@ -3208,6 +3222,28 @@ function resetPulledImages() {
   state.pulledImages = [];
   renderPulledImages();
   saveSessionState();
+}
+
+// (v40) The RED Reset: clears EVERYTHING — the upload lists, the
+// record, AND the pulled draft photos. Before v40 it left
+// state.pulledImages alone, so the Draft Photos (from website)
+// stayed on screen after a Reset and the user had to use the small
+// section Reset (or New Form) to get rid of them. The session is
+// wiped too (sessionData: null), so a reload does not bring any of
+// it back. Saved Area settings are untouched. Top-level (not inside
+// initApp) so the reset test can extract it.
+function clearAll() {
+  state.head = [];
+  state.other = [];
+  state.pulledImages = [];
+  state.lastExtracted = null;
+  window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: null }, '*');
+  renderPreviews('head');
+  renderPreviews('other');
+  renderPulledImages();
+  $('resultsWrap').classList.remove('visible');
+  $('autofillBtn').disabled = true;
+  setStatus('All cleared — uploads, record and draft photos (Saved Area settings kept for next family).', 'idle');
 }
 
 function fileToBase64(file) {
@@ -5948,6 +5984,14 @@ function renderExtractedCards(data) {
     let lastSection = null;
     let pendingSection = null;
     fields.forEach((f) => {
+      // (v39) A sectioned field only renders when the record carries
+      // pulled website data — a hand-typed New Form has none, so its
+      // head card stays the core fields only (name, parents, gender,
+      // religion, DOB, NID, mobile, education, profession, marital,
+      // disability/health, SSNP/DSS). Typing a value into a section
+      // field by hand brings that section up, since the record then
+      // has the data.
+      if (f.section && !hasPulledSections(targetObj)) return;
       if (f.hideWhenEmpty && (targetObj[f.key] === undefined || targetObj[f.key] === null || String(targetObj[f.key]).trim() === '')) return;
       if (f.section && f.section !== lastSection) pendingSection = f.section;
       if (pendingSection) {

@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v39';
+  const FC_INJECT_VERSION = 'v40';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1243,6 +1243,30 @@
     }
   }
 
+  // (v40) Wait for the program allowance values to land: they arrive
+  // with the DRAFT data, which is async — waitForFormReady only waits
+  // for the static lookup lists, so on a slow connection the pull
+  // used to read applicationAllowanceValues while it was still the
+  // initial [] and report MFS as unanswered. Polls the live VMs
+  // (re-scanning each tick, so a late mount is seen) and returns as
+  // soon as any non-empty array exists; a draft that genuinely has
+  // no program answers just waits out the timeout, then the pull
+  // proceeds with what it has.
+  async function waitForProgramValues(timeoutMs = 4000) {
+    const t0 = Date.now();
+    for (;;) {
+      const nodes = getVueNodes();
+      const vms = [nodes.vmHead, nodes.vmMembers, ...(nodes.allVms || [])];
+      for (const v of vms) {
+        if (!v) continue;
+        const lists = [v.applicationAllowanceValues, v.data && v.data.applicationAllowanceValues];
+        if (lists.some((l) => Array.isArray(l) && l.length)) return true;
+      }
+      if (Date.now() - t0 > timeoutMs) return false;
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
   // Why autofill used to need TWO clicks: the site loads its dropdown
   // data (lookups, PMT) over the network in created()/bootPage(),
   // renders expansion-panel content lazily, and may overwrite the
@@ -2130,20 +2154,35 @@
   // Program additional-field values + field definitions (the parent
   // owns both; DynamicAdditionalFields only renders them).
   function resolveProgramState(vmHead, allVms, headTarget) {
-    let values = null, fields = null;
+    // (v40) Prefer a NON-EMPTY applicationAllowanceValues array: the
+    // main form component initialises it to [] and it only fills when
+    // the draft data lands, so taking the first array found (v38)
+    // let an empty array shadow the populated one on the program
+    // component — and the pull then read MFS as unanswered even
+    // though বিকাশ was selected on the program tab. If every array
+    // is empty, fall back to the first one found (the fill only ever
+    // mutates entries that already exist, so returning the populated
+    // array is safe for it too).
+    let values = null, fields = null, firstValues = null;
     const consider = (v) => {
       if (!v) return;
-      if (!values && Array.isArray(v.applicationAllowanceValues)) values = v.applicationAllowanceValues;
+      if (Array.isArray(v.applicationAllowanceValues)) {
+        if (!firstValues) firstValues = v.applicationAllowanceValues;
+        if (!values && v.applicationAllowanceValues.length) values = v.applicationAllowanceValues;
+      }
       if (!fields && Array.isArray(v.displayAdditionalFields) && v.displayAdditionalFields.length) fields = v.displayAdditionalFields;
       if (v.data) {
-        if (!values && Array.isArray(v.data.applicationAllowanceValues)) values = v.data.applicationAllowanceValues;
+        if (Array.isArray(v.data.applicationAllowanceValues)) {
+          if (!firstValues) firstValues = v.data.applicationAllowanceValues;
+          if (!values && v.data.applicationAllowanceValues.length) values = v.data.applicationAllowanceValues;
+        }
         if (!fields && Array.isArray(v.data.displayAdditionalFields) && v.data.displayAdditionalFields.length) fields = v.data.displayAdditionalFields;
       }
     };
     consider(vmHead);
     if (headTarget) consider(headTarget);
     (allVms || []).forEach(consider);
-    return { values, fields };
+    return { values: values || firstValues, fields };
   }
 
   // Cash usage — the 2500 Tk distribution (v27). The form component
@@ -3602,12 +3641,16 @@
   }
   function findMfsProviderName(vms, id) {
     for (const vm of (vms || [])) {
-      if (!vm || !Array.isArray(vm.mfss)) continue;
-      const entry = vm.mfss.find((e) => e && Number(e.id) === Number(id));
-      if (entry) {
-        const name = entry.value_en || entry.value_bn || entry.name_en || entry.name_bn || entry.name || entry.label || '';
-        const key = mfsNameKey(name);
-        if (key) return key;
+      if (!vm) continue;
+      // (v40) The list can live on the VM or under its data object.
+      const lists = [vm.mfss, vm.data && vm.data.mfss].filter((l) => Array.isArray(l));
+      for (const list of lists) {
+        const entry = list.find((e) => e && Number(e.id) === Number(id));
+        if (entry) {
+          const name = entry.value_en || entry.value_bn || entry.name_en || entry.name_bn || entry.name || entry.label || '';
+          const key = mfsNameKey(name);
+          if (key) return key;
+        }
       }
     }
     return null;
@@ -3963,6 +4006,17 @@
       if (fresh.allVms && fresh.allVms.length) allVms = fresh.allVms;
       if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
       if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      // (v40) Wait for the draft's program values before reading
+      // anything — they land async with the draft data, and reading
+      // an empty applicationAllowanceValues reports MFS (and the
+      // program counts) as unanswered. Returns at once when the
+      // values are already there; re-reads the VMs after, in case a
+      // late mount replaced them.
+      await waitForProgramValues(4000);
+      const freshProg = getVueNodes();
+      if (freshProg.vmHead) vmHead = freshProg.vmHead;
+      if (freshProg.vmMembers) vmMembers = freshProg.vmMembers;
+      if (freshProg.allVms && freshProg.allVms.length) allVms = freshProg.allVms;
 
       const d = getHeadTargetObj(vmHead) || {};
       const rawMembers = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
@@ -3985,9 +4039,28 @@
       // data.mfs_name (an mfss-list id, mapped by name).
       const pullPmt = resolvePmtState(vmHead, allVms, d);
       const pullProg = resolveProgramState(vmHead, allVms, d);
-      const pullAllowance = Array.isArray(pullProg.values) ? pullProg.values
-        : (Array.isArray(d.application_allowance_values) ? d.application_allowance_values : []);
-      const allowanceEntry = (fid) => (Array.isArray(pullAllowance) ? pullAllowance : [])
+      // (v40) Merge every non-empty allowance source, first entry
+      // per field id wins: the resolved array, the draft's own
+      // snake_case list, and any VM's non-empty array. An empty
+      // array must never shadow a populated one again.
+      const allowanceLists = [];
+      if (Array.isArray(pullProg.values) && pullProg.values.length) allowanceLists.push(pullProg.values);
+      if (Array.isArray(d.application_allowance_values) && d.application_allowance_values.length) allowanceLists.push(d.application_allowance_values);
+      for (const v of (allVms || [])) {
+        if (!v) continue;
+        if (Array.isArray(v.applicationAllowanceValues) && v.applicationAllowanceValues.length) allowanceLists.push(v.applicationAllowanceValues);
+        if (v.data && Array.isArray(v.data.applicationAllowanceValues) && v.data.applicationAllowanceValues.length) allowanceLists.push(v.data.applicationAllowanceValues);
+      }
+      const allowanceById = new Map();
+      for (const list of allowanceLists) {
+        for (const x of list) {
+          if (!x) continue;
+          const fid = Number(x.allowance_program_additional_field_id);
+          if (Number.isFinite(fid) && fid > 0 && !allowanceById.has(fid)) allowanceById.set(fid, x);
+        }
+      }
+      const pullAllowance = [...allowanceById.values()];
+      const allowanceEntry = (fid) => pullAllowance
         .find((x) => x && Number(x.allowance_program_additional_field_id) === Number(fid));
       const allowanceValId = (fid) => {
         const e = allowanceEntry(fid);
