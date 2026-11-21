@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v38';
+  const FC_INJECT_VERSION = 'v39';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -3711,6 +3711,13 @@
       for (const c of controls) {
         if (!c || !c.vInst || !Array.isArray(c.vInst.items)) continue;
         const ident = identifyDynamicControl(c);
+        // (v38 fix) identifyDynamicControl returns null for a control
+        // that is neither PMT nor program (bank / geo / lookup) — the
+        // fill loop guards this, the pull's resolvePmtAnswer did not,
+        // so the first non-PMT control on the page threw
+        // "Cannot read properties of null (reading 'kind')" and the
+        // whole pull died before sending anything.
+        if (!ident) continue;
         if (ident.kind !== 'pmt' || Number(ident.id) !== qid) continue;
         for (const it of c.vInst.items) {
           if (it && typeof it === 'object') byId.set(Number(optionItemId(c.vInst, it)), itemDisplayName(it));
