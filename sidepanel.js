@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.50-live';
+const CURRENT_VERSION_TAG = 'v4.9.52-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1072,7 +1072,9 @@ function inferDocType(idStr, explicitType) {
   if (up === 'NID' || up === 'BRN') return up;
   const clean = String(idStr || '').replace(/\s+/g, '');
   if (clean.length === 10 || clean.length === 13) return 'NID';
-  if (clean.length === 17) return 'BRN';
+  // Over 13 digits (v4.9.52): a number longer than a 13-digit old NID
+  // is a birth certificate (BRN) — the user asked for it.
+  if (clean.length > 13) return 'BRN';
   return 'NID';
 }
 
@@ -1978,8 +1980,8 @@ function toggleMobileWarning(el, targetObj) {
 }
 
 // Records whose Doc Type the user picked by hand (v4.9.49): a hand
-// pick wins over the 17-digit rule below, so a genuine 17-digit NID
-// stays NID. WeakSet — it never enters the JSON.
+// pick wins over the over-13-digit rule below, so a genuine 17-digit
+// NID stays NID. WeakSet — it never enters the JSON.
 const manualDocTypePicked = new WeakSet();
 // 17-digit values that started life as a 13-digit NID (v4.9.49):
 // the birth year was prepended, so they are NIDs, not BRNs. A Set of
@@ -2006,13 +2008,14 @@ function convertCardIdNumber(inputEl, targetObj, key) {
     changed = true;
     if (was13) converted13NidValues.add(chk.value);
   }
-  // Manual 17-digit (v4.9.49): a 17-digit number typed by hand is
-  // mainly a birth certificate (BRN) — few have a 17-digit NID. The
-  // AI already gets this right, so this only fires on the card: when
-  // the number is 17 digits and it did NOT come from a 13-digit NID,
-  // flip the Doc Type to BRN. A hand-picked NID stays NID.
+  // Manual over-13-digit (v4.9.49, v4.9.52): a number longer than 13
+  // digits typed by hand is mainly a birth certificate (BRN) — few
+  // have a 17-digit NID. The AI already gets this right, so this only
+  // fires on the card: when the number is over 13 digits and it did
+  // NOT come from a 13-digit NID, flip the Doc Type to BRN. A
+  // hand-picked NID stays NID.
   const nowDigits = toEnglishDigits(String(targetObj[key] || '')).replace(/\s+/g, '');
-  if (nowDigits.length === 17 && !was13 && !converted13NidValues.has(nowDigits)
+  if (nowDigits.length > 13 && !was13 && !converted13NidValues.has(nowDigits)
       && (targetObj.doc_type === 'NID' || !targetObj.doc_type)
       && !manualDocTypePicked.has(targetObj)) {
     targetObj.doc_type = 'BRN';
@@ -2214,8 +2217,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.value = targetObj.doc_type || 'NID';
     inputEl.addEventListener('change', (e) => {
       targetObj.doc_type = e.target.value;
-      // A hand pick wins over the 17-digit rule (v4.9.49): if the user
-      // says this 17-digit number is an NID, it stays an NID.
+      // A hand pick wins over the over-13-digit rule (v4.9.49,
+      // v4.9.52): if the user says this long number is an NID, it
+      // stays an NID.
       manualDocTypePicked.add(targetObj);
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
@@ -2287,13 +2291,20 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
           if (typeSel) typeSel.value = '';
           if (typeRow) typeRow.style.display = 'none';
         }
-        // Health (v4.9.49): the কর্মক্ষম default does not apply to a
-        // disabled member — blank the health select when Disabled
-        // turns Yes (unless a health was picked by hand), and restore
-        // the 203 default when it turns No.
+        // Health (v4.9.49, v4.9.51): Disabled Yes means Health
+        // প্রতিবন্ধী (206); Disabled No means Health কর্মক্ষম (203).
+        // The select follows the toggle, stored in the record as well
+        // as shown — the user can still refine it by hand afterwards
+        // (204 সম্পূর্ণ অক্ষম / 205 আংশিক কর্মক্ষম).
         const hSel = cardContainer.querySelector('[data-field="health_condition_id"]');
-        if (hSel && (targetObj.health_condition_id === undefined || targetObj.health_condition_id === null)) {
-          hSel.value = v === '1' ? '' : '203';
+        if (hSel) {
+          if (v === '1') {
+            targetObj.health_condition_id = 206;
+            hSel.value = '206';
+          } else if (v === '0') {
+            targetObj.health_condition_id = 203;
+            hSel.value = '203';
+          }
         }
       }
       toggleWarning(inputEl);
@@ -2377,10 +2388,11 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       notifyChange('mfs_provider_id', v === '' ? null : Number(v));
     });
   } else if (f.type === 'health_select') {
-    // Health (type 43, v4.9.49). Default কর্মক্ষম (203) when the
+    // Health (type 43, v4.9.49, v4.9.51). Default কর্মক্ষম (203) when the
     // member is not disabled and nothing was picked — the form's own
-    // default for an able-bodied member. A disabled member shows blank
-    // so the user picks the right option instead of the default.
+    // default for an able-bodied member. A disabled member with
+    // nothing picked defaults to প্রতিবন্ধী (206), same as the
+    // Disabled toggle sets.
     inputEl = document.createElement('select');
     inputEl.setAttribute('data-field', 'health_condition_id');
     inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
@@ -2393,7 +2405,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       o.textContent = `${opt.id} — ${opt.label}`;
       inputEl.appendChild(o);
     });
-    const defHealth = (targetObj.is_disabled === 1 || targetObj.is_disabled === '1') ? '' : '203';
+    const defHealth = (targetObj.is_disabled === 1 || targetObj.is_disabled === '1') ? '206' : '203';
     inputEl.value = targetObj.health_condition_id !== undefined && targetObj.health_condition_id !== null && String(targetObj.health_condition_id).trim() !== '' ? String(targetObj.health_condition_id) : defHealth;
     inputEl.addEventListener('change', (e) => {
       const v = e.target.value;
@@ -5367,10 +5379,14 @@ function makeMemberHead(memberIdx) {
 // Manual entry (v4.9.37): add a blank member card the user fills by
 // hand (no photo, no AI, no internet). The summary recounts
 // automatically on every change.
-// A blank form (v4.9.48): the New Form button's record — an empty
-// head (Female, the head is always a woman) and no members yet. The
-// user types every name by hand and adds members with Add Member;
-// no photos or AI extract needed.
+// A blank form (v4.9.48, v4.9.51): the New Form button's record — an
+// empty head (Female, the head is always a woman) and no members yet.
+// The head carries the fixed defaults (they do not depend on a DOB:
+// Housewife 181, Married 101, not disabled, কর্মক্ষম 203, SSNP/DSS
+// No) so the card shows them at once; education stays blank until a
+// DOB is typed, then the derivation fills it. The user types every
+// name by hand and adds members with Add Member; no photos or AI
+// extract needed.
 function blankFormData() {
   return {
     head: {
@@ -5380,7 +5396,13 @@ function blankFormData() {
       name_bn: '', name_en: '',
       father_name_bn: '', father_name_en: '',
       mother_name_bn: '', mother_name_en: '',
-      nid: '', dob: '', source_images: []
+      nid: '', dob: '', source_images: [],
+      // Fixed head defaults (v4.9.51) — education stays blank: it
+      // needs an age, and the DOB derivation fills it when a DOB is typed.
+      profession: 181, marital_status: 101,
+      is_disabled: 0, health_condition_id: 203,
+      is_ssnp_covered: 0, facilities_ids: [],
+      is_dss_training_or_financial_benefit: 0
     },
     family_members: []
   };
@@ -5413,7 +5435,7 @@ function addManualMember() {
     father_name_bn: '', father_name_en: '',
     mother_name_bn: '', mother_name_en: '',
     doc_type: 'NID', dob: '', nid: '', nid_or_brn: '',
-    is_disabled: 0, is_currently_student: 0,
+    is_disabled: 0, is_currently_student: 0, health_condition_id: 203,
     // Benefit defaults are No (0) — the user asked for No as the default.
     is_ssnp_covered: 0, facilities_ids: [],
     is_dss_training_or_financial_benefit: 0,
