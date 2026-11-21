@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.49-live';
+const CURRENT_VERSION_TAG = 'v4.9.50-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -144,14 +144,22 @@ const HEAD_FIELDS = [
   // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid', label: 'NID / BRN No' },
-  // Phone + MFS (v4.9.49): the head's mobile number fills the form's
-  // mobile_number (never auto-filled before); the MFS pick fills PMT
-  // field 138 (Bkash/Nagad/...) via form_defaults.program_fields.
+  // Phone + MFS (v4.9.49, v4.9.50): the head's mobile number fills the
+  // form's ONE mobile field, data.mobile (the form never asks for a
+  // mobile anywhere else); the MFS pick fills PMT field 138
+  // (Bkash/Nagad/...) via form_defaults.program_fields.
   { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
   { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  // Disability + Health (v4.9.50): the head is a person too — the same
+  // Disabled / Disability Type / Health fields as a member card. They
+  // ride on the head member row (the head form itself has no health
+  // or disability fields); the form's health select is required.
+  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
+  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
+  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
   // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
   // head is the one the Halnagad check reports on.
   { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
@@ -174,9 +182,9 @@ const MEMBER_FIELDS = [
   // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid_or_brn', label: 'NID / BRN No' },
-  // Phone (v4.9.49): a member's mobile number, filled on the form by
-  // the injector (never auto-filled before).
-  { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
+  // (No member Mobile: the form asks for a mobile number in ONE place
+  // only — data.mobile on the head form. Member rows never render a
+  // mobile input, so the member card has no Mobile field. v4.9.50.)
   // Education / profession / marital (v4.9.39): same three the head card
   // has, so a member's derived values (e.g. the husband's Agriculture)
   // are visible and changeable offline. Profession here is the type-44
@@ -4757,6 +4765,27 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   } else if (headPrev && headPrev.mfs_provider_id !== undefined && headPrev.mfs_provider_id !== null && String(headPrev.mfs_provider_id).trim() !== '') {
     head.mfs_provider_id = Number(headPrev.mfs_provider_id);
   }
+  // Disability + Health (v4.9.50): the head card carries the same
+  // Disabled / Disability Type / Health fields as a member card — they
+  // ride on the head member row. A previous record's values carry over
+  // only for the SAME person (headPrev).
+  if (h.is_disabled === 0 || h.is_disabled === 1 || h.is_disabled === '0' || h.is_disabled === '1') {
+    head.is_disabled = Number(h.is_disabled);
+  } else if (headPrev && (headPrev.is_disabled === 0 || headPrev.is_disabled === 1 || headPrev.is_disabled === '0' || headPrev.is_disabled === '1')) {
+    head.is_disabled = Number(headPrev.is_disabled);
+  } else {
+    head.is_disabled = 0;
+  }
+  if (h.disability_type_id !== undefined && h.disability_type_id !== null && String(h.disability_type_id).trim() !== '') {
+    head.disability_type_id = Number(h.disability_type_id);
+  } else if (headPrev && headPrev.disability_type_id !== undefined && headPrev.disability_type_id !== null && String(headPrev.disability_type_id).trim() !== '') {
+    head.disability_type_id = Number(headPrev.disability_type_id);
+  }
+  if (h.health_condition_id !== undefined && h.health_condition_id !== null && String(h.health_condition_id).trim() !== '') {
+    head.health_condition_id = Number(h.health_condition_id);
+  } else if (headPrev && headPrev.health_condition_id !== undefined && headPrev.health_condition_id !== null && String(headPrev.health_condition_id).trim() !== '') {
+    head.health_condition_id = Number(headPrev.health_condition_id);
+  }
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -4824,7 +4853,12 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     // previous record's pick (matched by NID, else name) is the
     // fallback. Otherwise the DOB derivation would refill the display
     // with the guess and disagree with what the user picked.
-    const prevM2 = prevMemberBenefit(prev, entry.nid_or_brn, entry.name_bn, entry.name_en);
+    // Same-person only (v4.9.50): a previous record's profession /
+    // marital / disability / health carry over only when the NID/BRN
+    // matches — never by name, so nothing bleeds into a different
+    // person who happens to share the name (or into a different
+    // family in the same tab). Same rule as the SSNP/phone fix.
+    const prevM2 = prevMemberBenefitById(prev, entry.nid_or_brn);
     if (m?.livelihood_profession_id !== undefined && m?.livelihood_profession_id !== null && String(m.livelihood_profession_id).trim() !== '') {
       entry.livelihood_profession_id = Number(m.livelihood_profession_id);
     } else if (prevM2 && prevM2.livelihood_profession_id !== undefined && prevM2.livelihood_profession_id !== null && String(prevM2.livelihood_profession_id).trim() !== '') {
@@ -4853,16 +4887,9 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     } else if (prevM2 && prevM2.disability_type_id !== undefined && prevM2.disability_type_id !== null && String(prevM2.disability_type_id).trim() !== '') {
       entry.disability_type_id = Number(prevM2.disability_type_id);
     }
-    // Phone (v4.9.49): the member's mobile number, normalized to
-    // English digits (the site rejects Bangla digits in a mobile).
-    // The fallback uses the SAME-person match only — a phone number
-    // must never bleed across families via a name match.
-    const cleanMemMobile = checkMobileNumber(m?.mobile_number).value;
-    if (cleanMemMobile) entry.mobile_number = cleanMemMobile;
-    else {
-      const prevM2ById = prevMemberBenefitById(prev, entry.nid_or_brn);
-      if (prevM2ById && prevM2ById.mobile_number) entry.mobile_number = checkMobileNumber(prevM2ById.mobile_number).value || prevM2ById.mobile_number;
-    }
+    // (No member mobile: the form never renders a mobile input on a
+    // member row — the only mobile on the form is data.mobile on the
+    // head form. v4.9.50.)
     // Health (v4.9.49): keep an explicit pick through rebuilds, same
     // as disability — blank means the injector derives কর্মক্ষম (203)
     // for a non-disabled member.

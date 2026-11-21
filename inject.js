@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v34';
+  const FC_INJECT_VERSION = 'v35';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2673,9 +2673,8 @@
       doc_type: isBRN ? 'BRN' : 'NID',
       nid_or_brn: idVal,
       dob: m.date_of_birth || m.dob || '',
-      // Phone (v4.9.49): the form's mobile number, pulled back to the
-      // panel card. The site keeps English digits only.
-      mobile_number: toEnDigits(String(m.mobile_number || '')).replace(/\D+/g, ''),
+      // (No member mobile: the form never renders a mobile input on a
+      // member row. v4.9.50.)
       name_bn: m.name_bn || '',
       name_en: m.name_en || '',
       father_name_bn: m.father_name_bn || '',
@@ -2813,8 +2812,9 @@
     // Mobile (v4.9.49): a panel phone that differs from the row's means
     // the row needs re-driving — but only when the panel HAS a phone; a
     // member without one must not break the fast path.
-    const panelMobile = toEnDigits(String(m.mobile_number || '')).replace(/\D+/g, '');
-    if (panelMobile && !locked.has('mobile_number') && toEnDigits(String(row.mobile_number || '')).replace(/\D+/g, '') !== panelMobile) return false;
+    // (No member mobile check: the form never renders a mobile input
+    // on a member row — the only mobile on the form is data.mobile on
+    // the head form. v4.9.50.)
     if (n(row.is_member_disabled ?? 0) !== (Number(m.is_disabled) === 1 ? 1 : 0)) return false;
     return true;
   }
@@ -2981,10 +2981,13 @@
             setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
           }
 
-          // Phone (v4.9.49): the head's mobile number, filled when the
-          // head row is not site-locked for it.
-          if (!headLocked.has('mobile_number') && h.mobile_number) {
-            setReactive(vmHead, headTarget, 'mobile_number', toEnDigits(String(h.mobile_number)).replace(/\D+/g, ''));
+          // Phone (v4.9.50): the head's mobile — the form asks for it in
+          // ONE place only, data.mobile on the head form (required,
+          // checkNumberMobile: English digits, 11, starting 01).
+          // Member rows never render a mobile input, so only the head
+          // gets one. Never overwrite a filled number.
+          if (!headLocked.has('mobile_number') && h.mobile_number && isEmptyModelVal(headTarget.mobile)) {
+            setReactive(vmHead, headTarget, 'mobile', toEnDigits(String(h.mobile_number)).replace(/\D+/g, ''));
           }
 
           if (!isVerificationPage) {
@@ -3231,12 +3234,9 @@
             setReactive(vmMembers, row, 'religion_id', memReligionId);
           }
 
-          // Phone (v4.9.49): the panel's mobile number, filled when the
-          // row is not site-locked for it. A locked (verified) member
-          // keeps the site's official number.
-          if (!locked.has('mobile_number') && m.mobile_number) {
-            setReactive(vmMembers, row, 'mobile_number', toEnDigits(String(m.mobile_number)).replace(/\D+/g, ''));
-          }
+          // (No member mobile: the form never renders a mobile input on
+          // a member row — the only mobile on the form is data.mobile
+          // on the head form, filled above. v4.9.50.)
 
           setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
           setReactive(vmMembers, row, 'is_gov_job_holder', 0);
@@ -3644,9 +3644,10 @@
         father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
         mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
         mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || '',
-        // Phone (v4.9.49): the head's mobile number, pulled back to
-        // the panel card.
-        mobile_number: toEnDigits(String(d.mobile_number || (row0IsHead ? row0.mobile_number : '') || '')).replace(/\D+/g, '')
+        // Phone (v4.9.50): the head's mobile number, pulled back to the
+        // panel card — the form's only mobile field is data.mobile on
+        // the head form (the head row's mobile_number is the fallback).
+        mobile_number: toEnDigits(String(d.mobile || (row0IsHead ? row0.mobile_number : '') || '')).replace(/\D+/g, '')
       };
 
       const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
