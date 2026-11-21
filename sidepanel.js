@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.33-live';
+const CURRENT_VERSION_TAG = 'v4.9.34-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1881,7 +1881,7 @@ function setupCameraZoom() {
 async function startPanelCamera() {
   const video = $('cameraVideo');
   const constraints = {
-    video: { facingMode: panelCameraFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+    video: { facingMode: panelCameraFacing, width: { ideal: 1920 }, height: { ideal: 1080 } },
     audio: false,
   };
   if (panelCameraDeviceId) constraints.video.deviceId = { exact: panelCameraDeviceId };
@@ -2469,12 +2469,13 @@ function scanCoverMap(stageW, stageH, videoW, videoH) {
 // --- end document scanner pure functions ---
 
 // --- Freeform crop box + camera frame: pure helpers (no DOM) — tested by tests/sidepanel_freeform_test.js ---
-// Camera frame: 86% of the stage, centred — clamped so the frame always
+// Camera frame: 92% of the stage, centred — clamped so the frame always
 // fits inside the stage even when the dialog squeezes it short
 // (landscape): a 4:3 frame taller than a squished stage used to lose its
-// top and bottom borders.
+// top and bottom borders. Raised from 86% (v4.9.34): a bigger frame
+// captures more of the video, so the clicked photo is sharper.
 function fitFrameRect(sw, sh, portrait) {
-  const S = 0.86;
+  const S = 0.92;
   if (portrait) {
     let h = sh * S, w = h * 3 / 4;
     if (w > sw * S) { w = sw * S; h = w * 4 / 3; }
