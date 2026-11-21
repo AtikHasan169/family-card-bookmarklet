@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.35-live';
+const CURRENT_VERSION_TAG = 'v4.9.37-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -17,15 +17,27 @@ const RELATION_OPTIONS = [
   { value: 'Wife', label: 'Wife (স্ত্রী)', id: 186, gender: 'Female' },
   { value: 'Father', label: 'Father (পিতা)', id: 157, gender: 'Male' },
   { value: 'Mother', label: 'Mother (মাতা)', id: 158, gender: 'Female' },
-  { value: 'Brother', label: 'Brother (ভাই)', id: 162, gender: 'Male' },
-  { value: 'Sister', label: 'Sister (বোন)', id: 163, gender: 'Female' },
-  { value: 'Father-in-law', label: 'Father-in-law (শ্বশুর)', id: 164, gender: 'Male' },
-  { value: 'Mother-in-law', label: 'Mother-in-law (শাশুড়ি)', id: 165, gender: 'Female' },
-  { value: 'Son-in-law', label: 'Son-in-law (জামাতা)', id: 181, gender: 'Male' },
+  // Ids are the site's real type-41 ids (v4.9.37): Brother/Sister used
+  // to be 162/163 and Father-/Mother-in-law 164/165, which are card
+  // ids, not relations — the injector then wrote a wrong id to the
+  // form. Grandfather/Grandmother and Brother-/Sister-in-law were
+  // missing entirely, so a recalculated relation could not be shown.
+  { value: 'Grandfather', label: 'Grandfather (দাদা)', id: 173, gender: 'Male' },
+  { value: 'Grandmother', label: 'Grandmother (দাদী)', id: 174, gender: 'Female' },
+  { value: 'Brother', label: 'Brother (ভাই)', id: 175, gender: 'Male' },
+  { value: 'Sister', label: 'Sister (বোন)', id: 176, gender: 'Female' },
+  { value: 'Father-in-law', label: 'Father-in-law (শ্বশুর)', id: 177, gender: 'Male' },
+  { value: 'Mother-in-law', label: 'Mother-in-law (শাশুড়ি)', id: 178, gender: 'Female' },
+  { value: 'Brother-in-law', label: 'Brother-in-law (দেবর)', id: 179, gender: 'Male' },
+  { value: 'Sister-in-law', label: 'Sister-in-law (ননদ)', id: 180, gender: 'Female' },
+  { value: 'Son-in-law', label: 'Son-in-law (জামাতা)', id: 187, gender: 'Male' },
   { value: 'Daughter-in-law', label: 'Daughter-in-law (পুত্রবধূ)', id: 182, gender: 'Female' },
   { value: 'Grandson', label: 'Grandson (নাতি)', id: 183, gender: 'Male' },
   { value: 'Granddaughter', label: 'Granddaughter (নাতনি)', id: 184, gender: 'Female' },
-  { value: 'Other Relative', label: 'Other Relative (অন্যান্য)', id: 263, gender: null }
+  { value: 'Paid Domestic Worker', label: 'Paid Domestic Worker (বেতনভুক্ত গৃহকর্মী)', id: 262, gender: null },
+  { value: 'Other Relative', label: 'Other Relative (অন্যান্য)', id: 263, gender: null },
+  { value: 'Non-Relative', label: 'Non-Relative (অনাত্মীয়)', id: 264, gender: null },
+  { value: 'Brother/Sister-in-law', label: 'Brother/Sister-in-law (শ্যালক/শ্যালিকা)', id: 265, gender: null }
 ];
 
 const DOC_TYPE_OPTIONS = [
@@ -105,7 +117,12 @@ const HEAD_FIELDS = [
   { key: 'mother_name_en', label: 'Mother (EN)' },
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid', label: 'NID / BRN No' }
+  { key: 'nid', label: 'NID / BRN No' },
+  // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
+  // head is the one the Halnagad check reports on.
+  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
+  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' }
 ];
 
 const MEMBER_FIELDS = [
@@ -118,10 +135,49 @@ const MEMBER_FIELDS = [
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid_or_brn', label: 'NID / BRN No' }
+  { key: 'nid_or_brn', label: 'NID / BRN No' },
+  // Benefit (v4.9.36): whether this member already receives another
+  // programme (SSNP), which card, and whether they got DSS training /
+  // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
+  // detection fills them in automatically for the head.
+  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
+  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' }
+];
+// Government Card types (lookup type 42). 185 (NO Card) is not offered
+// — it means "no card", which is SSNP No.
+const GOV_CARD_OPTIONS = [
+  { id: 162, label: 'Social Welfare Allowance (সমাজকল্যাণ ভাতা)' },
+  { id: 163, label: 'VGF / VGD' },
+  { id: 164, label: 'Ration Card' },
+  { id: 165, label: 'Fertilizer Card' },
+  { id: 166, label: 'TCB Card' },
+  { id: 167, label: 'Muktijoddha Card' },
+  { id: 168, label: 'Scholarship Card' },
+  { id: 169, label: 'Migrant Workers Welfare Card' },
+  { id: 170, label: 'Pension Card' },
+  { id: 171, label: 'Agriculture Card' },
+  { id: 172, label: 'Fishermen Card' }
 ];
 
-const state = { head: [], other: [], pulledImages: [], lastExtracted: null };
+// Cash usage categories (2500 Tk distribution) — the site's lookup
+// type 46, real ids from getApplicationPageData. The "Other" row
+// (274) carries an extra other_detail text.
+const CASH_USAGE_OPTIONS = [
+  { id: 266, label: 'খাদ্য ও পরিবারের ভরণপোষণ (Food and family subsistence)' },
+  { id: 267, label: 'চিকিৎসা (Medical — self or family)' },
+  { id: 268, label: 'সন্তানের শিক্ষা (Children education)' },
+  { id: 269, label: 'বাসস্থান নির্মান/মেরামত (Housing construction/repair)' },
+  { id: 270, label: 'পোশাক/বস্ত্র/কাপড় ক্রয় (Clothing purchase)' },
+  { id: 271, label: 'আয়বর্ধক কর্মসূচি (Income generating activities)' },
+  { id: 272, label: 'সঞ্চয় (Savings)' },
+  { id: 273, label: 'ঋণ পরিশোধ (Loan repayment)' },
+  { id: 274, label: 'অন্যান্য (Other — please specify)', other: true }
+];
+const CASH_USAGE_CAP = 2500;
+const CASH_USAGE_OTHER_ID = 274;
+
+const state = { head: [], other: [], pulledImages: [], lastExtracted: null, halnagad: null };
 let nextId = 1, activeCategory = null, activeCropName = '';
 
 const areaPresets = {
@@ -604,6 +660,10 @@ function handleIncomingMessages(e) {
 
   if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
     setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
+    // Halnagad (v4.9.36): the injector reports the other programme it
+    // found for the head — show it and mirror the benefit onto the
+    // head record.
+    if (e.data.detail && e.data.detail.halnagad) applyHalnagadBenefit(e.data.detail.halnagad);
     // Head corrections (v4.9.33): the injector reports how many it
     // applied. Only clear on a report from an injector that knows
     // about corrections (v25+) — an older injector has no such field,
@@ -645,8 +705,10 @@ function handleIncomingMessages(e) {
       const payloadForNorm = { ...res.payload };
       delete payloadForNorm.images;
       delete payloadForNorm.imagesMissing;
-      state.lastExtracted = normalizeOutput(payloadForNorm, true);
+      state.lastExtracted = normalizeOutput(payloadForNorm, true, state.lastExtracted);
       renderExtractedCards(state.lastExtracted);
+      // Halnagad (v4.9.36): the programme the site found for the head.
+      if (res.payload.halnagad) applyHalnagadBenefit(res.payload.halnagad);
       $('autofillBtn').disabled = false;
       state.pulledImages = pulled;
       renderPulledImages();
@@ -666,6 +728,49 @@ function setStatus(message, mode = 'idle') {
   const banner = $('statusBanner');
   banner.className = `status-banner ${mode}`;
   $('statusText').textContent = message;
+}
+
+// Halnagad / other-programme note (v4.9.36): the programme the site
+// found for the head when their NID was verified, and whether they
+// only applied or already receive it. A beneficiary gets SSNP Yes +
+// the matching card on the head record (and on the form, by the
+// injector); an applicant is NOT counted as receiving.
+function halnagadNoteText(hg) {
+  if (!hg || !hg.program) return '';
+  const cardLabel = hg.cardId ? ` — card ${hg.cardId}` : ' — pick the card below';
+  if (hg.isBeneficiary) return `অন্য প্রোগ্রাম: ${hg.program} (পাচ্ছেন) — SSNP Yes${cardLabel}.`;
+  return `অন্য প্রোগ্রাম: ${hg.program} (শুধু আবেদন করেছেন, এখনো পাননি) — SSNP No.`;
+}
+function renderHalnagadNote() {
+  const el = $('halnagadNote');
+  if (!el) return;
+  const txt = halnagadNoteText(state.halnagad);
+  el.style.display = txt ? '' : 'none';
+  el.textContent = txt;
+}
+function applyHalnagadBenefit(hg) {
+  if (!hg || !hg.program) { state.halnagad = null; renderHalnagadNote(); return; }
+  state.halnagad = hg;
+  renderHalnagadNote();
+  const d = state.lastExtracted;
+  if (d && d.head && hg.isBeneficiary) {
+    d.head.is_ssnp_covered = 1;
+    if (hg.cardId) d.head.facilities_ids = [hg.cardId];
+    saveSessionState();
+    // Update the head card's controls in place (no full re-render).
+    const headCard = document.querySelector('.record-card');
+    if (headCard) {
+      const ssnpSel = headCard.querySelector('[data-field="is_ssnp_covered"]');
+      if (ssnpSel) ssnpSel.value = '1';
+      const facSel = headCard.querySelector('[data-field="facilities_ids"]');
+      if (facSel && hg.cardId) {
+        Array.from(facSel.options).forEach(o => { o.selected = (Number(o.value) === hg.cardId); });
+        const facRow = facSel.closest('.record-row');
+        if (facRow) facRow.style.display = '';
+      }
+    }
+    syncJsonOutput();
+  }
 }
 
 function toEnglishDigits(str) {
@@ -749,7 +854,7 @@ function inferGender(relation, explicitGender, nameEn, nameBn) {
     return 'Female';
   }
   // 2. Male-only name markers (মোঃ, হোসেন, রহমান, উদ্দিন, আলী, মিয়া, চন্দ্র, কুমার, etc.)
-  if (/\b(?:md|mohd|mohammad|muhammad|hossain|husain|hossen|rahman|uddin|ahammad|ali|mia|miah|hasan|hassan|abdul|abul|chandra|kumar)\b|মোঃ|মো:|মুহাম্মদ|মোহাম্মদ|হোসেন|হুসাইন|রহমান|উদ্দিন|আহম্মদ|আলী|মিয়া|মিয়া|হাসান|আব্দুল|আবুল|চন্দ্র|কুমার/i.test(combined)) {
+  if (/\b(?:md|mohd|mohammad|muhammad|hossain|husain|hossen|rahman|uddin|ahammad|ali|mia|miah|hasan|hassan|abdul|abul|chandra|kumar)\b|মোঃ|মো:|মুহাম্মদ|মোহাম্মদ|হোসেন|হুসাইন|রহমান|উদ্দিন|আহম্মদ|আলী|মিয়া|মিয়া|হাসান|আব্দুল|আবদুল|আবুল|চন্দ্র|কুমার/i.test(combined)) {
     return 'Male';
   }
   // 3. Explicit gender fallback from card
@@ -759,13 +864,143 @@ function inferGender(relation, explicitGender, nameEn, nameBn) {
   return 'Male';
 }
 
-// Pure code Religion detection (ignores shared titles like মন্ডল/সরকার/বিশ্বাস)
+// Gender from a name, strict: 'Male' / 'Female' / null. Same markers
+// as inferGender, but NO default — when the name carries no marker
+// it returns null so the panel leaves the gender blank for the user
+// to pick, instead of guessing Male (v4.9.37).
+function detectGenderFromName(nameEn, nameBn) {
+  const combined = `${nameEn || ''} ${nameBn || ''}`;
+  if (/\b(?:mst|mosammat|mosa|mosha|begum|khatun|akter|akhter|bibi|parvin|pervin|sultana|jahan|nahar|yasmin|sharmin|nasrin|fatema|ayesha|khadija|rani|bala|devi|kumari)\b|মোছা|মোসা|বেগম|খাতুন|আক্তার|বিবি|পারভীন|সুলতানা|জাহান|নাহার|ইয়াসমিন|শারমিন|নাসরিন|ফাতেমা|আয়েশা|খাদিজা|রানী|রাণী|বালা|দেবী|কুমারী/i.test(combined)) {
+    return 'Female';
+  }
+  if (/\b(?:md|mohd|mohammad|muhammad|hossain|husain|hossen|rahman|uddin|ahammad|ali|mia|miah|hasan|hassan|abdul|abul|chandra|kumar)\b|মোঃ|মো:|মুহাম্মদ|মোহাম্মদ|হোসেন|হুসাইন|রহমান|উদ্দিন|আহম্মদ|আলী|মিয়া|মিয়া|হাসান|আব্দুল|আবদুল|আবুল|চন্দ্র|কুমার/i.test(combined)) {
+    return 'Male';
+  }
+  return null;
+}
+
+// Head change — relation recalculation (v4.9.37). Every member's
+// relation is stored relative to the head, so a new head means every
+// relation is recomputed. The table is keyed by the NEW head's
+// relation to the OLD head, then by the member's relation to the OLD
+// head. A value is the new relation, a function resolves it from the
+// genders (gM = member, gH = new head, gO = old head), and null (or
+// a missing entry) means "cannot derive — the panel asks the user to
+// pick". Non-kinship roles (Other Relative, Non-Relative, Paid
+// Domestic Worker) carry over unchanged.
+const RELATION_RECALC = {
+  'Wife': {
+    'Self': 'Husband', 'Son': 'Son', 'Daughter': 'Daughter',
+    'Father': 'Father-in-law', 'Mother': 'Mother-in-law',
+    'Father-in-law': 'Father', 'Mother-in-law': 'Mother',
+    'Brother': 'Brother-in-law', 'Sister': 'Sister-in-law',
+    'Daughter-in-law': 'Daughter-in-law',
+    'Grandson': 'Grandson', 'Granddaughter': 'Granddaughter',
+    'Son-in-law': 'Son-in-law',
+    'Brother-in-law': 'Brother', 'Sister-in-law': 'Sister'
+  },
+  'Husband': {
+    'Self': 'Wife', 'Son': 'Son', 'Daughter': 'Daughter',
+    'Father': 'Father-in-law', 'Mother': 'Mother-in-law',
+    'Father-in-law': 'Father', 'Mother-in-law': 'Mother',
+    'Brother': 'Brother-in-law', 'Sister': 'Sister-in-law',
+    'Daughter-in-law': 'Daughter-in-law',
+    'Grandson': 'Grandson', 'Granddaughter': 'Granddaughter',
+    'Son-in-law': 'Son-in-law',
+    'Brother-in-law': 'Brother', 'Sister-in-law': 'Sister'
+  },
+  'Son': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Mother' : 'Father'),
+    'Husband': 'Father', 'Wife': 'Mother',
+    'Son': 'Brother', 'Daughter': 'Sister',
+    'Father': 'Grandfather', 'Mother': 'Grandmother',
+    'Father-in-law': 'Grandfather', 'Mother-in-law': 'Grandmother',
+    'Son-in-law': 'Brother-in-law'
+  },
+  'Daughter': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Mother' : 'Father'),
+    'Husband': 'Father', 'Wife': 'Mother',
+    'Son': 'Brother', 'Daughter': 'Sister',
+    'Father': 'Grandfather', 'Mother': 'Grandmother',
+    'Father-in-law': 'Grandfather', 'Mother-in-law': 'Grandmother',
+    'Son-in-law': 'Brother-in-law'
+  },
+  'Father': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Daughter' : 'Son'),
+    'Husband': 'Son-in-law', 'Wife': 'Daughter-in-law',
+    'Son': 'Grandson', 'Daughter': 'Granddaughter',
+    'Mother': 'Wife',
+    'Brother': 'Son', 'Sister': 'Daughter',
+    'Son-in-law': 'Son-in-law'
+  },
+  'Mother': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Daughter' : 'Son'),
+    'Husband': 'Son-in-law', 'Wife': 'Daughter-in-law',
+    'Son': 'Grandson', 'Daughter': 'Granddaughter',
+    'Father': 'Husband',
+    'Brother': 'Son', 'Sister': 'Daughter',
+    'Son-in-law': 'Son-in-law'
+  },
+  // The user's example: head was the son's wife (ছেলের বউ), the new
+  // head is the mother-in-law (শাশুড়ি). Old head -> Daughter-in-law
+  // (182), son -> Son, grandchildren -> Grandson/Granddaughter,
+  // father-in-law -> Husband.
+  'Mother-in-law': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Daughter-in-law' : 'Son-in-law'),
+    'Husband': 'Son',
+    'Son': 'Grandson', 'Daughter': 'Granddaughter',
+    'Father-in-law': 'Husband',
+    'Brother-in-law': 'Son', 'Sister-in-law': 'Daughter'
+  },
+  'Father-in-law': {
+    'Self': (gM, gH, gO) => (gO === 'Female' ? 'Daughter-in-law' : 'Son-in-law'),
+    'Husband': 'Son',
+    'Wife': 'Daughter-in-law',
+    'Son': 'Grandson', 'Daughter': 'Granddaughter',
+    'Mother-in-law': 'Wife',
+    'Brother-in-law': 'Son', 'Sister-in-law': 'Daughter'
+  }
+};
+
+function deriveRelationToNewHead(memberOldRel, memberGender, newHeadOldRel, newHeadGender, oldHeadGender) {
+  if (!memberOldRel || !newHeadOldRel) return null;
+  // Non-kinship roles describe the person's place, not a kinship to
+  // the head — they carry over unchanged.
+  if (memberOldRel === 'Other Relative' || memberOldRel === 'Non-Relative' || memberOldRel === 'Paid Domestic Worker') {
+    return memberOldRel;
+  }
+  const row = RELATION_RECALC[newHeadOldRel];
+  if (!row) return null;
+  const v = row[memberOldRel];
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'function') return v(memberGender, newHeadGender, oldHeadGender) || null;
+  return v;
+}
+
+// For a head change: returns the old head's new relation and, for
+// every other member (by original index), the derived new relation
+// (null = cannot derive, the panel asks the user). The member at
+// newHeadIdx becomes the head and is not in relsByIdx.
+function recalculateRelationsForNewHead(oldHead, members, newHeadIdx) {
+  const newHead = members[newHeadIdx];
+  if (!newHead) return null;
+  const newHeadOldRel = newHead.relation || null;
+  const gH = newHead.gender || null;
+  const gO = oldHead.gender || null;
+  const oldHeadNewRel = deriveRelationToNewHead('Self', gO, newHeadOldRel, gH, gO);
+  const relsByIdx = {};
+  members.forEach((m, i) => {
+    if (i === newHeadIdx) return;
+    relsByIdx[i] = deriveRelationToNewHead(m.relation, m.gender, newHeadOldRel, gH, gO);
+  });
+  return { oldHeadNewRel, relsByIdx };
+}
 function inferHouseholdReligion(peopleList) {
   const allNames = peopleList.map(p =>
     `${p?.name_bn || ''} ${p?.name_en || ''} ${p?.father_name_bn || ''} ${p?.father_name_en || ''} ${p?.mother_name_bn || ''} ${p?.mother_name_en || ''}`
   ).join(' ');
 
-  const muslimRegex = /\b(?:md|mohd|mohammad|muhammad|mst|mosammat|mosa|mosha|khatun|begum|hossain|husain|hossen|islam|rahman|rahim|karim|uddin|ahmed|ahammad|ali|mia|miah|akter|akhter|sheikh|kazi|khandaker|sultana|parvin|bibi|hasan|hassan|abdul|abul|molla|mollah|fatema|ayesha|khadija|jahan|nahar)\b|মোঃ|মো:|মোছাঃ|মোসাঃ|মোছা|মোসা|খাতুন|হোসেন|হুসাইন|ইসলাম|বেগম|আক্তার|রহমান|রহিম|করিম|উদ্দিন|আহমেদ|আহম্মদ|আলী|মিয়া|মিয়া|শেখ|কাজী|খন্দকার|সুলতানা|পারভীন|বিবি|হাসান|আব্দুল|আবুল|মোল্লা|মুহাম্মদ|মোহাম্মদ|ফাতেমা|আয়েশা|খাদিজা|জাহান|নাহার/i;
+  const muslimRegex = /\b(?:md|mohd|mohammad|muhammad|mst|mosammat|mosa|mosha|khatun|begum|hossain|husain|hossen|islam|rahman|rahim|karim|uddin|ahmed|ahammad|ali|mia|miah|akter|akhter|sheikh|kazi|khandaker|sultana|parvin|bibi|hasan|hassan|abdul|abul|molla|mollah|fatema|ayesha|khadija|jahan|nahar)\b|মোঃ|মো:|মোছাঃ|মোসাঃ|মোছা|মোসা|খাতুন|হোসেন|হুসাইন|ইসলাম|বেগম|আক্তার|রহমান|রহিম|করিম|উদ্দিন|আহমেদ|আহম্মদ|আলী|মিয়া|মিয়া|শেখ|কাজী|খন্দকার|সুলতানা|পারভীন|বিবি|হাসান|আব্দুল|আবদুল|আবুল|মোল্লা|মুহাম্মদ|মোহাম্মদ|ফাতেমা|আয়েশা|খাদিজা|জাহান|নাহার/i;
 
   if (muslimRegex.test(allNames)) return 'Islam';
 
@@ -801,12 +1036,24 @@ function recalculateHouseholdSummary(data) {
   if (!data) return;
   const allPeople = [];
   if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
+    // Gender from the name (v4.9.37): typing মোঃ / মোছাঃ fills the
+    // gender live, the same way the religion already fills. Only when
+    // the gender is blank — a gender the user picked by hand is never
+    // overwritten, and a name with no marker leaves it blank.
+    if ((!data.head.gender || !GENDER_ID_MAP[data.head.gender]) && (data.head.name_bn || data.head.name_en)) {
+      const dg = detectGenderFromName(data.head.name_en, data.head.name_bn);
+      if (dg) data.head.gender = dg;
+    }
     data.head.age = calculateAgeYears(data.head.dob);
     data.head.gender_id = GENDER_ID_MAP[data.head.gender] || 2;
     allPeople.push(data.head);
   }
   if (Array.isArray(data.family_members)) {
     data.family_members.forEach((m) => {
+      if ((!m.gender || !GENDER_ID_MAP[m.gender]) && (m.name_bn || m.name_en)) {
+        const dg = detectGenderFromName(m.name_en, m.name_bn);
+        if (dg) m.gender = dg;
+      }
       m.age = calculateAgeYears(m.dob);
       m.is_child_under_18 = m.age !== null && m.age < 18;
       m.gender_id = GENDER_ID_MAP[m.gender] || 1;
@@ -825,9 +1072,14 @@ function recalculateHouseholdSummary(data) {
   });
 
   const totalMembers = allPeople.length || 1;
-  const maleCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'male' || Number(p.gender_id) === 1).length;
-  const femaleCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'female' || Number(p.gender_id) === 2).length;
-  const otherGenderCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'other' || Number(p.gender_id) === 3).length;
+  // Count by the gender string only (v4.9.37): a member whose gender
+  // is still blank (a hand-added member with no marker in the name)
+  // must not be counted as Male just because gender_id defaults to 1.
+  // AI-extracted and pulled members always carry a gender string, so
+  // their counts are unchanged.
+  const maleCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'male').length;
+  const femaleCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'female').length;
+  const otherGenderCount = allPeople.filter(p => (p.gender || '').toLowerCase() === 'other').length;
   const childrenUnder18 = allPeople.filter((p) => {
     const a = calculateAgeYears(p.dob);
     return a !== null && a >= 0 && a < 18;
@@ -1053,6 +1305,65 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
     });
+  } else if (f.type === 'card_multi') {
+    // Government cards (multi-select, v4.9.36). Only meaningful when
+    // SSNP is Yes; the injector ignores cards when SSNP is No.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'facilities_ids');
+    inputEl.multiple = true;
+    inputEl.size = 3;
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    GOV_CARD_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    const curIds = Array.isArray(targetObj.facilities_ids) ? targetObj.facilities_ids.map(v => String(v)) : [];
+    Array.from(inputEl.options).forEach(o => { o.selected = curIds.includes(o.value); });
+    inputEl.addEventListener('change', () => {
+      targetObj.facilities_ids = Array.from(inputEl.selectedOptions).map(o => Number(o.value));
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+    });
+  } else if (f.type === 'yesno_select') {
+    // Yes / No (v4.9.36): SSNP and DSS. Blank means "not set" — the
+    // injector then uses its default (No).
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', f.key);
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    [['1', 'Yes (হ্যাঁ)'], ['0', 'No (না)']].forEach(([v, l]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = l;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = (targetObj[f.key] === 0 || targetObj[f.key] === 1 || targetObj[f.key] === '0' || targetObj[f.key] === '1') ? String(targetObj[f.key]) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v === '') { delete targetObj[f.key]; }
+      else { targetObj[f.key] = Number(v); }
+      // SSNP No clears the cards and hides the card row; SSNP Yes
+      // shows it again.
+      if (f.key === 'is_ssnp_covered' && cardContainer) {
+        const facSel = cardContainer.querySelector('[data-field="facilities_ids"]');
+        const facRow = facSel ? facSel.closest('.record-row') : null;
+        if (v === '0') {
+          targetObj.facilities_ids = [];
+          if (facSel) Array.from(facSel.options).forEach(o => { o.selected = false; });
+          if (facRow) facRow.style.display = 'none';
+        } else if (v === '1' && facRow) {
+          facRow.style.display = '';
+        }
+      }
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange(f.key, v === '' ? null : Number(v));
+    });
   } else if (f.type === 'edu_select') {
     // Head education (v4.9.33): the field the user most often has to
     // correct after a fill. A change here is a head correction — the
@@ -1161,6 +1472,18 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       }
       toggleWarning(inputEl);
       syncJsonOutput();
+      // Name typing (v4.9.37): the gender/religion are auto-detected
+      // from the name in recalculateHouseholdSummary (above), but the
+      // card's selects only refresh on a re-render. Update them here
+      // so the user sees মোঃ -> Male / মোছাঃ -> Female immediately,
+      // and refresh the header (it shows the gender).
+      if ((f.key === 'name_bn' || f.key === 'name_en') && cardContainer) {
+        const gSel = cardContainer.querySelector('select[data-field="gender"]');
+        if (gSel && targetObj.gender) { gSel.value = targetObj.gender; toggleWarning(gSel); }
+        const rSel = cardContainer.querySelector('select[data-field="religion"]');
+        if (rSel && targetObj.religion) { rSel.value = targetObj.religion; toggleWarning(rSel); }
+        if (onUpdateMeta) onUpdateMeta();
+      }
     });
   }
   toggleWarning(inputEl);
@@ -1215,6 +1538,10 @@ function setupImageViewerModal() {
 function showImageViewer(item) {
   const modal = $('fcViewerModal');
   if (!modal) return;
+  // A pulled-photo preview hides the Crop button (it is not a panel
+  // photo) — put it back for a real photo (v4.9.37).
+  const cropBtn0 = modal.querySelector('#fcCropImgBtn');
+  if (cropBtn0) cropBtn0.style.display = '';
   setPanelWide(true); // bigger view on tablet/desktop while inspecting
   modal.querySelector('#fcCropImgBtn').onclick = () => openCropForImage(item);
   // Undo a crop: bring back the original photo (only shown when the
@@ -1411,6 +1738,27 @@ function renderPreviews(category) {
 // Draft photos pulled from the website (applicant photo, signature, house
 // photo...). They are display-only: they never enter the NID/BRN upload
 // lists, so the AI never tries to read an ID card from a house photo.
+// Pulled draft photo (v4.9.37): tap a pulled thumbnail to see it
+// big. This is a plain preview — no crop / edit, because the photo
+// lives on the form, not in the panel's photo records.
+function showPulledPhoto(item) {
+  const modal = $('fcViewerModal');
+  if (!modal || !item || !item.dataUrl) return;
+  setPanelWide(true);
+  const cropBtn = modal.querySelector('#fcCropImgBtn');
+  if (cropBtn) cropBtn.style.display = 'none';
+  const restoreBtn = modal.querySelector('#fcRestoreOrigBtn');
+  if (restoreBtn) restoreBtn.style.display = 'none';
+  viewerZoom = 1;
+  $('fcViewerImg').src = item.dataUrl;
+  $('fcViewerImg').style.transform = 'scale(1)';
+  $('fcZoomResetBtn').textContent = '100%';
+  $('fcViewerTitle').textContent = item.name || 'Draft photo';
+  const metaBox = $('fcViewerMeta');
+  metaBox.innerHTML = '<div style="color:#a1a1aa; text-align:center; padding:10px;">Pulled from the form — this is the photo the site has on file.</div>';
+  modal.style.display = 'flex';
+}
+
 function renderPulledImages() {
   const card = $('pulledCard');
   const grid = $('pulledPreviews');
@@ -1425,7 +1773,9 @@ function renderPulledImages() {
     wrap.className = 'thumb-item';
     const img = document.createElement('img');
     img.src = item.dataUrl;
-    img.title = item.name || 'Draft photo';
+    img.title = `${item.name || 'Draft photo'} — tap to view`;
+    img.style.cursor = 'pointer';
+    img.addEventListener('click', () => showPulledPhoto(item));
     wrap.appendChild(img);
     const bar = document.createElement('div');
     bar.className = 'thumb-bar';
@@ -3135,7 +3485,7 @@ JSON SCHEMA:
 }`;
 }
 
-function normalizeOutput(raw, preserveOrder = false) {
+function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
   const cleanHeadId = toEnglishDigits(s(h.nid)).replace(/\s+/g, '');
@@ -3165,6 +3515,16 @@ function normalizeOutput(raw, preserveOrder = false) {
   // and the popup asks again.
   if (h.education_status_id !== undefined && h.education_status_id !== null && String(h.education_status_id).trim() !== '') {
     head.education_status_id = Number(h.education_status_id);
+  }
+  // Benefit (v4.9.36): the head's SSNP / card / DSS, same as a member.
+  if (h.is_ssnp_covered === 0 || h.is_ssnp_covered === 1 || h.is_ssnp_covered === '0' || h.is_ssnp_covered === '1') {
+    head.is_ssnp_covered = Number(h.is_ssnp_covered);
+  }
+  if (Array.isArray(h.facilities_ids) && h.facilities_ids.length) {
+    head.facilities_ids = h.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
+  }
+  if (h.is_dss_training_or_financial_benefit === 0 || h.is_dss_training_or_financial_benefit === 1 || h.is_dss_training_or_financial_benefit === '0' || h.is_dss_training_or_financial_benefit === '1') {
+    head.is_dss_training_or_financial_benefit = Number(h.is_dss_training_or_financial_benefit);
   }
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
@@ -3221,6 +3581,18 @@ function normalizeOutput(raw, preserveOrder = false) {
     if (m?.education_status_id !== undefined && m?.education_status_id !== null && String(m.education_status_id).trim() !== '') {
       entry.education_status_id = Number(m.education_status_id);
     }
+    // Benefit (v4.9.36): keep the SSNP / card / DSS values the form
+    // (Pull) or the user set, through rebuilds — they are what the
+    // injector reads on Auto-Fill.
+    if (m?.is_ssnp_covered === 0 || m?.is_ssnp_covered === 1 || m?.is_ssnp_covered === '0' || m?.is_ssnp_covered === '1') {
+      entry.is_ssnp_covered = Number(m.is_ssnp_covered);
+    }
+    if (Array.isArray(m?.facilities_ids) && m.facilities_ids.length) {
+      entry.facilities_ids = m.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
+    }
+    if (m?.is_dss_training_or_financial_benefit === 0 || m?.is_dss_training_or_financial_benefit === 1 || m?.is_dss_training_or_financial_benefit === '0' || m?.is_dss_training_or_financial_benefit === '1') {
+      entry.is_dss_training_or_financial_benefit = Number(m.is_dss_training_or_financial_benefit);
+    }
 
     if (preserveOrder) {
       deduped.push(entry);
@@ -3274,6 +3646,21 @@ function normalizeOutput(raw, preserveOrder = false) {
     form_defaults: {}
   };
 
+  // Cash usage (v4.9.37): keep the 2500 Tk distribution (and the cap
+  // the site sent) across a re-normalize, or the panel's amounts
+  // would vanish on the next AI extract / Pull. The form's own values
+  // (raw) win when present; otherwise the previous record's (prev)
+  // values carry over.
+  if (Array.isArray(raw?.cash_usages) && raw.cash_usages.length) {
+    result.cash_usages = raw.cash_usages
+      .filter((u) => u && Number(u.lookup_id || u.id || 0) > 0 && Number(u.amount || 0) > 0)
+      .map((u) => ({ lookup_id: Number(u.lookup_id || u.id), amount: Number(u.amount), other_detail: u.other_detail || null }));
+  } else if (prev && Array.isArray(prev.cash_usages) && prev.cash_usages.length) {
+    result.cash_usages = prev.cash_usages;
+  }
+  if (raw && Number(raw.cash_usage_cap || 0) > 0) result.cash_usage_cap = Number(raw.cash_usage_cap);
+  else if (prev && Number(prev.cash_usage_cap || 0) > 0) result.cash_usage_cap = Number(prev.cash_usage_cap);
+
   recalculateHouseholdSummary(result);
 
   if (raw && raw.full_form_dump && typeof raw.full_form_dump === 'object') {
@@ -3288,6 +3675,17 @@ function normalizeOutput(raw, preserveOrder = false) {
 // bracketed month and copies the clean 15/01/1990, the format the site
 // reads first. An ISO value (1990-01-15) is reordered, not just slashed.
 function copyValueForField(f, targetObj) {
+  // Benefit fields (v4.9.36): cards copy as "162, 163"; Yes/No as words.
+  if (f.key === 'facilities_ids') {
+    const ids = Array.isArray(targetObj.facilities_ids) ? targetObj.facilities_ids : [];
+    return ids.join(', ');
+  }
+  if (f.key === 'is_ssnp_covered' || f.key === 'is_dss_training_or_financial_benefit') {
+    const v = targetObj[f.key];
+    if (v === 1 || v === '1') return 'Yes';
+    if (v === 0 || v === '0') return 'No';
+    return '';
+  }
   const v = targetObj[f.key] || '';
   if (f.key !== 'dob') return v;
   const s = String(v).replace(/\[.*?\]/g, '').trim();
@@ -3535,6 +3933,172 @@ function recordHeadCorrection(key, value) {
   saveSessionState();
 }
 
+// Head change (v4.9.37): make the member at memberIdx the head. The
+// old head becomes a member at the same position, every other
+// member's relation is recomputed for the new head (null = could not
+// derive, set to Other Relative for the user to pick), and the
+// summary is recalculated. The injector re-detects the Halnagad
+// programme for the new head on the next fill, so the old detection
+// is cleared; head corrections recorded for the old head are cleared
+// too (they belong to that person, not the new head).
+function makeMemberHead(memberIdx) {
+  const data = state.lastExtracted;
+  if (!data || !Array.isArray(data.family_members) || !data.family_members[memberIdx]) return;
+  const oldHead = data.head;
+  const newHead = data.family_members[memberIdx];
+  const recalc = recalculateRelationsForNewHead(oldHead, data.family_members, memberIdx);
+  if (!recalc) return;
+  const headRec = { ...newHead, relation: 'Head/Self', relationship_id: 260 };
+  const oldHeadRel = recalc.oldHeadNewRel || 'Other Relative';
+  const oldHeadRec = { ...oldHead, relation: oldHeadRel, relationship_id: RELATION_ID_MAP[oldHeadRel] || 263 };
+  const members = data.family_members.map((m, i) => {
+    if (i === memberIdx) return oldHeadRec;
+    const nr = recalc.relsByIdx[i];
+    if (nr) return { ...m, relation: nr, relationship_id: RELATION_ID_MAP[nr] || 263 };
+    return { ...m, relation: 'Other Relative', relationship_id: 263 };
+  });
+  data.head = headRec;
+  data.family_members = members;
+  state.halnagad = null;
+  renderHalnagadNote();
+  if (data.corrections) delete data.corrections;
+  renderExtractedCards(data);
+  const unknown = Object.values(recalc.relsByIdx).filter((r) => !r).length + (recalc.oldHeadNewRel ? 0 : 1);
+  setStatus(`Head is now ${headRec.name_bn || headRec.name_en || 'the selected member'} — relations recalculated.${unknown ? ` ${unknown} relation(s) could not be worked out and are set to Other Relative — please pick them.` : ' Please check the relations, then Auto-Fill.'}`, 'ok');
+}
+
+// Manual entry (v4.9.37): add a blank member card the user fills by
+// hand (no photo, no AI, no internet). The summary recounts
+// automatically on every change.
+function addManualMember() {
+  const data = state.lastExtracted;
+  if (!data) return;
+  if (!Array.isArray(data.family_members)) data.family_members = [];
+  data.family_members.push({
+    relation: 'Auto', relationship_id: null,
+    gender: '', gender_id: null,
+    religion: '', religion_id: null,
+    name_bn: '', name_en: '',
+    father_name_bn: '', father_name_en: '',
+    mother_name_bn: '', mother_name_en: '',
+    doc_type: 'NID', dob: '', nid: '', nid_or_brn: '',
+    is_disabled: 0, is_currently_student: 0,
+    source_images: []
+  });
+  renderExtractedCards(data);
+  setStatus('Blank member added — type the details by hand. Gender and religion fill themselves from the name (মোঃ / মোছাঃ).', 'ok');
+}
+
+// Remove a member card from the panel (not from the form — a re-pull
+// brings it back). The head cannot be removed here; use Make Head
+// on another member first.
+function removeMember(memberIdx) {
+  const data = state.lastExtracted;
+  if (!data || !Array.isArray(data.family_members) || !data.family_members[memberIdx]) return;
+  const m = data.family_members[memberIdx];
+  data.family_members.splice(memberIdx, 1);
+  renderExtractedCards(data);
+  setStatus(`Removed ${m.name_bn || m.name_en || 'member'} from the panel.`, 'ok');
+}
+
+// Cash usage — the 2500 Tk distribution (v4.9.37). One amount per
+// type-46 category; the total must not pass the cap (2500, or the
+// cap the site sent on Pull). Amounts live in data.cash_usages
+// (sent to the injector, which writes the form's cashUsageRows).
+function buildCashUsageCard(data) {
+  const card = document.createElement('div');
+  card.className = 'record-card';
+  const cap = Number(data.cash_usage_cap || CASH_USAGE_CAP) || CASH_USAGE_CAP;
+
+  const headEl = document.createElement('div');
+  headEl.className = 'record-head';
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = '২৫০০ টাকা বিতরণ (Cash Usage)';
+  const tagSpan = document.createElement('span');
+  tagSpan.className = 'record-tag';
+  headEl.append(titleSpan, tagSpan);
+  card.appendChild(headEl);
+
+  const body = document.createElement('div');
+  body.className = 'record-rows';
+  const inputs = new Map();
+
+  const refreshTotal = () => {
+    const usages = Array.isArray(data.cash_usages) ? data.cash_usages : [];
+    const total = usages.reduce((s, u) => s + (Number(u.amount || 0) > 0 ? Number(u.amount) : 0), 0);
+    tagSpan.textContent = `মোট ${total} / ${cap} টাকা`;
+    tagSpan.style.color = total > cap ? '#dc2626' : '';
+    return total;
+  };
+
+  const setUsage = (lookupId, amount, otherDetail) => {
+    if (!Array.isArray(data.cash_usages)) data.cash_usages = [];
+    let entry = data.cash_usages.find((u) => Number(u.lookup_id) === lookupId);
+    if (!entry) { entry = { lookup_id: lookupId, amount: 0, other_detail: null }; data.cash_usages.push(entry); }
+    entry.amount = amount;
+    if (otherDetail !== undefined) entry.other_detail = otherDetail || null;
+    // Drop empty rows so the payload only carries what the user set.
+    data.cash_usages = data.cash_usages.filter((u) => Number(u.amount || 0) > 0 || (u.other_detail || '').trim() !== '');
+  };
+
+  CASH_USAGE_OPTIONS.forEach((opt) => {
+    const r = document.createElement('div');
+    r.className = 'record-row';
+    r.style.gridTemplateColumns = '1fr 110px';
+    const kEl = document.createElement('span');
+    kEl.className = 'row-key';
+    kEl.textContent = opt.label;
+    kEl.style.whiteSpace = 'normal';
+    const amt = document.createElement('input');
+    amt.type = 'number';
+    amt.min = '0';
+    amt.step = '1';
+    amt.placeholder = 'টাকা';
+    amt.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; width:100%;';
+    const cur = Array.isArray(data.cash_usages) ? data.cash_usages.find((u) => Number(u.lookup_id) === opt.id) : null;
+    amt.value = cur && Number(cur.amount || 0) > 0 ? String(cur.amount) : '';
+    amt.addEventListener('input', () => {
+      let v = Math.max(0, Math.floor(Number(amt.value || 0) || 0));
+      // Cap: this row cannot take more than the cap minus the other
+      // rows' amounts — the number simply stops at what is left.
+      const others = (Array.isArray(data.cash_usages) ? data.cash_usages : [])
+        .filter((u) => Number(u.lookup_id) !== opt.id)
+        .reduce((s, u) => s + (Number(u.amount || 0) > 0 ? Number(u.amount) : 0), 0);
+      const maxHere = Math.max(0, cap - others);
+      if (v > maxHere) { v = maxHere; amt.value = v ? String(v) : ''; }
+      setUsage(opt.id, v);
+      refreshTotal();
+      syncJsonOutput();
+    });
+    inputs.set(opt.id, amt);
+    r.append(kEl, amt);
+    body.appendChild(r);
+
+    if (opt.other) {
+      const or = document.createElement('div');
+      or.className = 'record-row';
+      or.style.gridTemplateColumns = '1fr';
+      const oIn = document.createElement('input');
+      oIn.type = 'text';
+      oIn.placeholder = 'অন্যান্য হলে এখানে লিখুন (specify)';
+      oIn.style.cssText = 'padding:4px 8px; font-size:12.5px; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; width:100%;';
+      const curO = Array.isArray(data.cash_usages) ? data.cash_usages.find((u) => Number(u.lookup_id) === opt.id) : null;
+      oIn.value = (curO && curO.other_detail) || '';
+      oIn.addEventListener('input', () => {
+        const amtV = Number((inputs.get(opt.id) || {}).value || 0) || 0;
+        setUsage(opt.id, amtV, oIn.value);
+        syncJsonOutput();
+      });
+      or.appendChild(oIn);
+      body.appendChild(or);
+    }
+  });
+
+  card.appendChild(body);
+  refreshTotal();
+  return card;
+}
+
 function renderExtractedCards(data) {
   const container = $('visualCards');
   container.replaceChildren();
@@ -3570,6 +4134,29 @@ function renderExtractedCards(data) {
     refreshHeader();
 
     headEl.append(titleSpan, tagSpan);
+    // Head change + remove (v4.9.37): member cards get a "Make Head"
+    // button (swap this member to head, relations recalculated) and a
+    // Remove button. The head card has neither.
+    if (isMember) {
+      const btnWrap = document.createElement('span');
+      btnWrap.style.cssText = 'display:inline-flex; gap:4px; margin-left:auto;';
+      const headBtn = document.createElement('button');
+      headBtn.type = 'button';
+      headBtn.className = 'btn btn-xs';
+      headBtn.textContent = 'প্রধান করুন';
+      headBtn.title = 'Make this member the family head — relations are recalculated for the new head';
+      headBtn.style.cssText = 'padding:2px 7px; font-size:10px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent);';
+      headBtn.addEventListener('click', () => makeMemberHead(memberIdx));
+      const rmBtn = document.createElement('button');
+      rmBtn.type = 'button';
+      rmBtn.className = 'btn btn-xs';
+      rmBtn.textContent = 'মুছুন';
+      rmBtn.title = 'Remove this member from the panel (a re-pull brings it back)';
+      rmBtn.style.cssText = 'padding:2px 7px; font-size:10px; color:#dc2626; border:1px solid #fecaca;';
+      rmBtn.addEventListener('click', () => removeMember(memberIdx));
+      btnWrap.append(headBtn, rmBtn);
+      headEl.appendChild(btnWrap);
+    }
     card.appendChild(headEl);
 
     const body = document.createElement('div');
@@ -3604,6 +4191,10 @@ function renderExtractedCards(data) {
 
       r.append(kEl, inputEl, copyBtn);
       body.appendChild(r);
+      // Benefit (v4.9.36): the card row only shows when SSNP is Yes.
+      if (f.key === 'facilities_ids' && targetObj.is_ssnp_covered !== 1 && targetObj.is_ssnp_covered !== '1') {
+        r.style.display = 'none';
+      }
     });
 
     card.appendChild(body);
@@ -3612,6 +4203,18 @@ function renderExtractedCards(data) {
 
   if (data.head) container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
   if (Array.isArray(data.family_members)) data.family_members.forEach((m, i) => container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i)));
+
+  // Manual entry (v4.9.37): add as many blank member cards as needed.
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn';
+  addBtn.textContent = '+ সদস্য যোগ করুন (Add Member)';
+  addBtn.style.cssText = 'width:100%; margin:6px 0 2px; padding:8px; font-weight:700;';
+  addBtn.addEventListener('click', addManualMember);
+  container.appendChild(addBtn);
+
+  // Cash usage — the 2500 Tk distribution (v4.9.37).
+  container.appendChild(buildCashUsageCard(data));
 
   if (data.full_form_dump) {
     renderFullWebsiteTabs(container, data.full_form_dump);
@@ -3977,7 +4580,7 @@ async function runExtraction() {
       }
     }
 
-    const normalized = normalizeOutput(parsed);
+    const normalized = normalizeOutput(parsed, false, state.lastExtracted);
     state.lastExtracted = normalized;
 
     renderExtractedCards(normalized);

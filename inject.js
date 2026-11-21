@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v25';
+  const FC_INJECT_VERSION = 'v27';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1416,6 +1416,97 @@
     return { headKeys, rowKeys, pmtQids, count };
   }
 
+  // --- Halnagad / other-programme benefit + locked personal fields (v26) ---
+  // When an NID is verified, the site checks whether the person is already
+  // under another programme (POST family-card-halnagad/eligibility). The
+  // form component then carries halnagadCurrentProgram (the programme
+  // name) and halnagadMigrateSource ('application' = only applied,
+  // 'beneficiary' = already receiving). Only a beneficiary counts as
+  // covered (SSNP Yes); an applicant is NOT covered yet.
+  // Programme name -> Government Card (lookup type 42). Unknown names
+  // map to 0 — the card is left for the user to pick.
+  const HALNAGAD_CARD_KEYWORDS = [
+    [/বয়স্ক|বিধবা|প্রতিবন্ধী|গর্ভবতী|মাতৃত্ব|old age|widow|disabilit|maternity/i, 162],
+    [/ভিজিডি|ভিজিএফ|\bvgd\b|\bvgf\b/i, 163],
+    [/রেশন|ration/i, 164],
+    [/সার|fertilizer/i, 165],
+    [/টিসিবি|\btcb\b/i, 166],
+    [/মুক্তিযোদ্ধা|muktijoddha|freedom fighter/i, 167],
+    [/উপবৃত্তি|শিক্ষা|scholarship|stipend|education/i, 168],
+    [/প্রবাসী|migrant/i, 169],
+    [/পেনশন|pension/i, 170],
+    [/কৃষি|agricultur/i, 171],
+    [/মৎস্য|মৎস্যজীবী|fisher/i, 172],
+  ];
+  function halnagadCardId(programName) {
+    const s = String(programName || '');
+    if (!s.trim()) return 0;
+    for (const [re, id] of HALNAGAD_CARD_KEYWORDS) {
+      if (re.test(s)) return id;
+    }
+    return 0;
+  }
+  // The site's locked personal fields (Fi in app.js). Once the site fills
+  // one of these from verification/migration, it locks it
+  // (isMemberFieldLocked) and the panel must not overwrite it. The lock
+  // only ever applies to the self/head member row.
+  const LOCKED_PERSONAL_FIELDS = ['name_en', 'name_bn', 'father_name_bn', 'mother_name_bn', 'gender_id', 'maritial_status_id', 'religion_id', 'dob', 'mobile_number', 'verification_type', 'nid', 'brn_id'];
+  function lockedFieldSet(row) {
+    if (!row || !row.is_self || !Array.isArray(row._lockedFields)) return new Set();
+    return new Set(row._lockedFields.filter(f => LOCKED_PERSONAL_FIELDS.includes(f)));
+  }
+  function isLockedField(row, field) {
+    return !!row && !!row.is_self && Array.isArray(row._lockedFields) && row._lockedFields.includes(field);
+  }
+  // Resolve each member's benefit (SSNP / cards / DSS) from, in order:
+  // the panel member's own fields, the Halnagad migration state (head
+  // only, beneficiary), the global member_options override, then the
+  // default (SSNP No, DSS No, no cards). `provided` marks an explicit
+  // value (panel / Halnagad / override) — only those force past the
+  // empty-only guard, so a plain default never clobbers a hand-set Yes.
+  // Picking cards implies covered (SSNP Yes) unless SSNP was explicitly
+  // set to No; SSNP No always clears the cards.
+  function resolveMemberBenefits(vmMembers, targetMemberList, defs) {
+    const over = (defs && defs.member_options) || {};
+    const halnagadProgram = (vmMembers && typeof vmMembers.halnagadCurrentProgram === 'string') ? vmMembers.halnagadCurrentProgram : '';
+    const halnagadSource = (vmMembers && typeof vmMembers.halnagadMigrateSource === 'string') ? vmMembers.halnagadMigrateSource : '';
+    const halnagadIsBeneficiary = halnagadSource === 'beneficiary' && !!halnagadProgram.trim();
+    const halnagadCard = halnagadIsBeneficiary ? halnagadCardId(halnagadProgram) : 0;
+    const halnagad = { program: halnagadProgram, source: halnagadSource, isBeneficiary: halnagadIsBeneficiary, cardId: halnagadCard };
+    const headIdx = targetMemberList.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
+    const headRowIdx = headIdx >= 0 ? headIdx : 0;
+    const byIdx = targetMemberList.map((m, idx) => {
+      const b = { ssnp: 0, ssnpProvided: false, facilities: [], facilitiesProvided: false, dss: 0, dssProvided: false };
+      const isHead = idx === headRowIdx;
+      // Halnagad (head only, beneficiary): SSNP Yes + the mapped card.
+      if (isHead && halnagadIsBeneficiary) {
+        b.ssnp = 1; b.ssnpProvided = true;
+        if (halnagadCard) { b.facilities = [halnagadCard]; b.facilitiesProvided = true; }
+      }
+      // Panel member fields win over Halnagad (the user can correct it).
+      if (m) {
+        const ss = (m.is_ssnp_covered === 0 || m.is_ssnp_covered === 1 || m.is_ssnp_covered === '0' || m.is_ssnp_covered === '1') ? Number(m.is_ssnp_covered) : null;
+        if (ss !== null) { b.ssnp = ss; b.ssnpProvided = true; }
+        if (Array.isArray(m.facilities_ids) && m.facilities_ids.length) { b.facilities = m.facilities_ids.slice(); b.facilitiesProvided = true; }
+        const ddRaw = (m.is_dss_training_or_financial_benefit !== undefined && m.is_dss_training_or_financial_benefit !== null) ? m.is_dss_training_or_financial_benefit : m.is_dss_training;
+        const dd = (ddRaw === 0 || ddRaw === 1 || ddRaw === '0' || ddRaw === '1') ? Number(ddRaw) : null;
+        if (dd !== null) { b.dss = dd; b.dssProvided = true; }
+      }
+      // Global member_options override (fills what is still unprovided).
+      if (!b.ssnpProvided && over.is_ssnp_covered !== undefined && over.is_ssnp_covered !== null) { b.ssnp = Number(over.is_ssnp_covered); b.ssnpProvided = true; }
+      if (!b.facilitiesProvided && Array.isArray(over.facilities_ids) && over.facilities_ids.length) { b.facilities = over.facilities_ids.slice(); b.facilitiesProvided = true; }
+      if (!b.dssProvided && over.is_dss_training_or_financial_benefit !== undefined && over.is_dss_training_or_financial_benefit !== null) { b.dss = Number(over.is_dss_training_or_financial_benefit); b.dssProvided = true; }
+      // Picking cards implies covered — unless SSNP was explicitly No.
+      if (!b.ssnpProvided && b.facilities.length) { b.ssnp = 1; b.ssnpProvided = true; }
+      // SSNP No means no cards.
+      if (b.ssnp === 0) { b.facilities = []; b.facilitiesProvided = false; }
+      return b;
+    });
+    const anyDss = byIdx.some(b => b.dss === 1);
+    const providedCount = byIdx.reduce((n, b) => n + ((b.ssnpProvided || b.facilitiesProvided || b.dssProvided) ? 1 : 0), 0);
+    return { byIdx, halnagad, anyDss, providedCount };
+  }
+
   // Fill every option control the old injector skipped. `memberRows` are the
   // live Vue row objects (same order as targetMemberList). `headMember` is
   // the payload head (for age/gender/relation-aware head defaults).
@@ -1428,6 +1519,10 @@
     const headRowIdx = targetMemberList.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
     const memberOverrides = (defs && defs.member_options) || {};
     const headOverrides = (defs && defs.head_options) || {};
+    // Per-member benefit (v26): Halnagad / panel member fields /
+    // member_options override. Read fresh each pass so a late NID
+    // verification that reveals a programme still lands.
+    const benefits = resolveMemberBenefits(vmMembers, targetMemberList, defs);
 
     const controls = collectOptionControls();
     await waitForOptionItems(controls);
@@ -1542,8 +1637,16 @@
         const row = memberRows[idx];
         if (!row) continue;
         const overrideVal = memberOverrides[field.key];
-        const val = (overrideVal === undefined || overrideVal === null) ? field.valueOf(m) : Number(overrideVal);
-        if (onlyEmpty && !isEmptyModelVal(row[field.key])) continue;
+        // A provided benefit (panel / Halnagad / override) forces the
+        // radio even when the row already has a value — the user changed
+        // the benefit, or the site just revealed it. A plain default
+        // stays empty-only so it never clobbers a hand-set Yes.
+        const ben = benefits.byIdx[idx] || null;
+        let val, forceIt = false;
+        if (field.key === 'is_ssnp_covered' && ben && ben.ssnpProvided) { val = ben.ssnp; forceIt = true; }
+        else if (field.key === 'is_dss_training_or_financial_benefit' && ben && ben.dssProvided) { val = ben.dss; forceIt = true; }
+        else { val = (overrideVal === undefined || overrideVal === null) ? field.valueOf(m) : Number(overrideVal); }
+        if (onlyEmpty && !forceIt && !isEmptyModelVal(row[field.key])) continue;
         if (String(row[field.key] ?? '') !== String(val)) setReactive(vmMembers, row, field.key, val);
       }
       if (rendered.length === targetMemberList.length) {
@@ -1558,20 +1661,31 @@
 
     // ---- Member facilities (multi-select): only from explicit payload data.
     // String names ("TCB", "রেশন কার্ড") map through the keyword table.
-    const facControl = firstSelectFor('member', 'facilities_ids');
-    if (facControl) {
-      targetMemberList.forEach((m, idx) => {
-        const row = memberRows[idx];
-        const ids = m.facilities_ids || memberOverrides.facilities_ids;
-        if (!row || !Array.isArray(ids) || !ids.length) return;
-        if (onlyEmpty && !isEmptyModelVal(row.facilities_ids)) return;
-        const resolved = ids.map(v => {
-          if (typeof v === 'string' && !/^\d+$/.test(v.trim())) return keywordToId(v, FACILITY_KEYWORDS);
-          return Number(v);
-        }).filter(v => v !== null && !Number.isNaN(v));
-        if (resolved.length && JSON.stringify(row.facilities_ids || []) !== JSON.stringify(resolved)) setReactive(vmMembers, row, 'facilities_ids', resolved);
-      });
-    }
+    // The model is written even when the control is not rendered yet
+    // (v26): SSNP=1 makes the control appear on the next pass, and the
+    // watcher re-runs this block — but the model must hold the cards
+    // from the first pass, so a re-fill still lands them.
+    targetMemberList.forEach((m, idx) => {
+      const row = memberRows[idx];
+      if (!row) return;
+      const ben = benefits.byIdx[idx] || null;
+      // SSNP No clears any cards the row still holds (explicit No only).
+      if (ben && ben.ssnpProvided && ben.ssnp === 0 && Array.isArray(row.facilities_ids) && row.facilities_ids.length) {
+        setReactive(vmMembers, row, 'facilities_ids', []);
+        return;
+      }
+      const ids = (ben && ben.facilities.length) ? ben.facilities : (m.facilities_ids || memberOverrides.facilities_ids);
+      if (!Array.isArray(ids) || !ids.length) return;
+      // A provided benefit forces the cards even when the row already
+      // has some (the user changed the card); otherwise empty-only.
+      const forceIt = !!(ben && ben.facilitiesProvided);
+      if (onlyEmpty && !forceIt && !isEmptyModelVal(row.facilities_ids)) return;
+      const resolved = ids.map(v => {
+        if (typeof v === 'string' && !/^\d+$/.test(v.trim())) return keywordToId(v, FACILITY_KEYWORDS);
+        return Number(v);
+      }).filter(v => v !== null && !Number.isNaN(v));
+      if (resolved.length && JSON.stringify(row.facilities_ids || []) !== JSON.stringify(resolved)) setReactive(vmMembers, row, 'facilities_ids', resolved);
+    });
 
     // ---- Head selects (data.* / form.*): drive the single rendered control.
     if (headTarget && headMember) {
@@ -1715,7 +1829,8 @@
    *   12 head age band <- head DOB; 14 head education band <-
    *   head education_status; 18 spouse education band (or 604 N/A);
    *   29 remittance = No (no member abroad).
-   *   Program 75/77/142 male/female/hijra counts; 96 DSS = No;
+   *   Program 75/77/142 male/female/hijra counts; 96 DSS = Yes (650) if
+   *   any member got the DSS benefit, else No (651);
    *   139/140/141 abroad counts = 0.
    * Everything else (house materials, water, fuel, land, rooms,
    * assets, MFS provider, ...) is FACTUAL household data the
@@ -1863,6 +1978,56 @@
     return { values, fields };
   }
 
+  // Cash usage — the 2500 Tk distribution (v27). The form component
+  // holds cashUsageRows (one row per type-46 category: lookup_id,
+  // amount, other_detail, value_bn/value_en, keyword). The panel sends
+  // payload.cash_usages = [{lookup_id, amount, other_detail}]; the
+  // site's own buildCashUsagesPayload reads the rows back on submit,
+  // so writing the rows IS the fill. A panel-provided amount is a
+  // deliberate user choice, so it overwrites the row (like a provided
+  // benefit), it does not wait for the row to be empty. The panel
+  // already caps the total at the site's cash_usage_cap (2500).
+  function syncCashUsage(vmHead, allVms, payload) {
+    if (!payload || !Array.isArray(payload.cash_usages) || !payload.cash_usages.length) return { filled: 0, total: 0 };
+    const wants = new Map();
+    for (const u of payload.cash_usages) {
+      const lid = Number(u.lookup_id || u.id || 0);
+      const amt = Number(u.amount || 0);
+      if (lid && amt > 0) wants.set(lid, { amount: amt, other_detail: (u.other_detail || '').toString().trim() || null });
+    }
+    if (!wants.size) return { filled: 0, total: 0 };
+    const owner = (allVms || []).find((v) => v && Array.isArray(v.cashUsageRows)) || vmHead;
+    if (!owner) return { filled: 0, total: 0 };
+    if ((!Array.isArray(owner.cashUsageRows) || !owner.cashUsageRows.length) && typeof owner.ensureCashUsageRows === 'function') {
+      try { owner.ensureCashUsageRows(); } catch (_) {}
+    }
+    const rows = Array.isArray(owner.cashUsageRows) ? owner.cashUsageRows : [];
+    let filled = 0;
+    let total = 0;
+    for (const row of rows) {
+      const lid = Number(row.lookup_id || 0);
+      const w = wants.get(lid);
+      if (!w) continue;
+      if (Number(row.amount || 0) !== w.amount) setReactive(owner, row, 'amount', w.amount);
+      if (w.other_detail !== null && String(row.other_detail || '') !== w.other_detail) setReactive(owner, row, 'other_detail', w.other_detail);
+      filled++;
+      total += w.amount;
+    }
+    return { filled, total };
+  }
+
+  // Read the cash usage rows back for Pull Draft, so the panel can
+  // show (and correct) amounts already on the form (v27).
+  function readCashUsages(vmHead, allVms) {
+    const owner = (allVms || []).find((v) => v && Array.isArray(v.cashUsageRows)) || vmHead;
+    if (!owner || !Array.isArray(owner.cashUsageRows)) return { usages: [], cap: 2500 };
+    const cap = Number(owner.cashUsageCapOverride || owner.cash_usage_cap || 2500) || 2500;
+    const usages = owner.cashUsageRows
+      .filter((r) => r && Number(r.amount || 0) > 0)
+      .map((r) => ({ lookup_id: Number(r.lookup_id || 0), amount: Number(r.amount || 0), other_detail: r.other_detail || null }));
+    return { usages, cap };
+  }
+
   async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty, forcePmt) {
     const unfilled = [];
     const gridNotes = [];
@@ -1918,7 +2083,12 @@
     derivedProg.set(75, { number: counts.maleCount });
     derivedProg.set(77, { number: counts.femaleCount });
     derivedProg.set(142, { number: counts.otherGenderCount || 0 });
-    derivedProg.set(96, 651); // DSS training: No
+    // DSS training (96): Yes (650) if ANY member got the DSS benefit,
+    // else No (651). Read from the live rows (already benefit-filled by
+    // the row loop / radio sync above) and the panel list as a backup.
+    const anyDssMember = memberRows.some(r => r && Number(r.is_dss_training_or_financial_benefit) === 1)
+      || targetMemberList.some(m => m && Number(m.is_dss_training_or_financial_benefit) === 1);
+    derivedProg.set(96, anyDssMember ? 650 : 651);
     derivedProg.set(139, { number: 0 });
     derivedProg.set(140, { number: 0 });
     derivedProg.set(141, { number: 0 });
@@ -2079,7 +2249,11 @@
       const allFids = new Set([...derivedProg.keys(), ...Object.keys(progOverrides).map(Number)]);
       for (const fid of allFids) {
         const entry = progValues.find(e => e && Number(e.allowance_program_additional_field_id) === Number(fid));
-        if (!entry || !isEmptyModelVal(entry.allowance_program_additional_field_values_id)) continue;
+        if (!entry) continue;
+        // A forced question (v26: program 96 DSS, re-derived from the
+        // members) overwrites even when already filled — same rule as
+        // the PMT pass above. Everything else stays empty-only.
+        if (!isEmptyModelVal(entry.allowance_program_additional_field_values_id) && !(forcePmt && forcePmt.qids && forcePmt.qids.has(fid))) continue;
         const field = progFields.find(f => Number(f.id) === Number(fid));
         if (!field || !Array.isArray(field.additional_field_value) || !field.additional_field_value.length) continue;
         const fakeVInst = { items: field.additional_field_value, itemValue: 'id', returnObject: false };
@@ -2407,7 +2581,15 @@
       father_name_en: m.father_name_en || '',
       mother_name_bn: m.mother_name_bn || '',
       mother_name_en: m.mother_name_en || '',
-      is_disabled: Number(m.is_member_disabled) === 1 ? 1 : 0
+      is_disabled: Number(m.is_member_disabled) === 1 ? 1 : 0,
+      // Benefit (v26): what the form itself holds for this member.
+      is_ssnp_covered: (m.is_ssnp_covered === 0 || m.is_ssnp_covered === 1) ? Number(m.is_ssnp_covered) : null,
+      facilities_ids: Array.isArray(m.facilities_ids) ? m.facilities_ids.slice() : [],
+      is_dss_training_or_financial_benefit: (m.is_dss_training_or_financial_benefit === 0 || m.is_dss_training_or_financial_benefit === 1) ? Number(m.is_dss_training_or_financial_benefit) : null,
+      // Locked official fields (v26): the site's _lockedFields for this
+      // row — the panel must take the pulled values for these, never its
+      // own AI reading.
+      _lockedFields: Array.isArray(m._lockedFields) ? m._lockedFields.filter(f => LOCKED_PERSONAL_FIELDS.includes(f)) : []
     };
   }
 
@@ -2514,13 +2696,58 @@
     const rowId = s(row.verification_number || row.nid || row.brn_id).replace(/\s+/g, '');
     if (!rowId || rowId !== ctx.cleanId) return false;
     if (n(row.verification_type) !== (ctx.isNID ? 1 : 2)) return false;
-    if (s(row.dob || row.date_of_birth) !== ctx.memModelDob) return false;
-    if (s(row.name_bn) !== s(m.name_bn) || s(row.name_en) !== s(m.name_en)) return false;
-    if (s(row.father_name_bn) !== s(m.father_name_bn) || s(row.mother_name_bn) !== s(m.mother_name_bn)) return false;
+    // A difference in a site-locked field (Fi) is NOT a mismatch — the
+    // site's official value wins and the panel must not overwrite it
+    // (v26). The NID/BRN above stays the anchor: a different id is a
+    // different person, locked or not.
+    const locked = lockedFieldSet(row);
+    if (!locked.has('dob') && s(row.dob || row.date_of_birth) !== ctx.memModelDob) return false;
+    if (!locked.has('name_bn') && s(row.name_bn) !== s(m.name_bn)) return false;
+    if (!locked.has('name_en') && s(row.name_en) !== s(m.name_en)) return false;
+    if (!locked.has('father_name_bn') && s(row.father_name_bn) !== s(m.father_name_bn)) return false;
+    if (!locked.has('mother_name_bn') && s(row.mother_name_bn) !== s(m.mother_name_bn)) return false;
     if (n(row.relationship_id) !== ctx.relId || s(row.relation) !== ctx.relName) return false;
-    if (n(row.gender_id ?? row.gender ?? row.sex) !== ctx.genderId) return false;
-    if (n(row.religion_id ?? row.religion) !== ctx.memReligionId) return false;
+    if (!locked.has('gender_id') && n(row.gender_id ?? row.gender ?? row.sex) !== ctx.genderId) return false;
+    if (!locked.has('religion_id') && n(row.religion_id ?? row.religion) !== ctx.memReligionId) return false;
     if (n(row.is_member_disabled ?? 0) !== (Number(m.is_disabled) === 1 ? 1 : 0)) return false;
+    return true;
+  }
+
+  // Head change (v27): when the panel swaps the head, the target list
+  // order no longer matches the rows already on the form (the old head
+  // sits in row 0, the new head in a member row). Every pass pairs
+  // target[i] with row[i], so writing by index would overwrite the
+  // wrong people — and a locked row would keep the old NID while
+  // taking the new head's other fields. Instead, reorder the live
+  // familyMembers array (same reference, Vue tracks splice) so each
+  // row holds the target member with its NID. Moving the row objects
+  // preserves their locked fields; the passes then only update the
+  // relationship and the head form. A fresh form (blank rows) is
+  // already in order, so this is a no-op there.
+  function reorderMemberRowsToTarget(vmMembers, targetMemberList) {
+    if (!vmMembers || !Array.isArray(vmMembers.familyMembers) || !Array.isArray(targetMemberList) || !targetMemberList.length) return false;
+    const rows = vmMembers.familyMembers;
+    const clean = (v) => String(v ?? '').replace(/\s+/g, '');
+    const byId = new Map();
+    rows.forEach((r) => {
+      if (!r) return;
+      const id = clean(r.verification_number || r.nid || r.brn_id);
+      if (id && !byId.has(id)) byId.set(id, r);
+    });
+    const used = new Set();
+    const desired = [];
+    for (const m of targetMemberList) {
+      const id = clean(m.nid_or_brn || m.nid || m.brn_id || m.verification_number);
+      let row = (id && byId.get(id)) || null;
+      if (row && used.has(row)) row = null;
+      if (!row) row = rows.find((r) => r && !used.has(r)) || null;
+      if (row) { desired.push(row); used.add(row); }
+    }
+    rows.forEach((r) => { if (r && !used.has(r)) desired.push(r); });
+    let same = desired.length === rows.length;
+    if (same) for (let i = 0; i < rows.length; i++) { if (desired[i] !== rows[i]) { same = false; break; } }
+    if (same) return false;
+    rows.splice(0, rows.length, ...desired);
     return true;
   }
 
@@ -2618,26 +2845,45 @@
         const headModelDob = headDobParts ? headDobParts.iso : String(h.dob || '').replace(/\[.*?\]/g, '').replace(/-/g, '/');
 
         if (headTarget) {
-          setReactive(vmHead, headTarget, 'verification_type', headIsNID ? 1 : 2);
-          setReactive(vmHead, headTarget, 'verification_number', cleanHeadId);
-          setReactive(vmHead, headTarget, 'nid', headIsNID ? cleanHeadId : '');
-          setReactive(vmHead, headTarget, 'brn_id', !headIsNID ? cleanHeadId : '');
-          setReactive(vmHead, headTarget, 'date_of_birth', headModelDob);
-          setReactive(vmHead, headTarget, 'dob', headModelDob);
+          // The head form is the same person as the self/head member row
+          // — its locked fields (verification/migration) are never
+          // overwritten; the site's official value wins (v26).
+          const headRowForLock = (vmMembers && Array.isArray(vmMembers.familyMembers))
+            ? (vmMembers.familyMembers.find(r => r && r.is_self) || vmMembers.familyMembers[0] || null)
+            : null;
+          const headLocked = lockedFieldSet(headRowForLock);
+          if (!headLocked.has('verification_type')) setReactive(vmHead, headTarget, 'verification_type', headIsNID ? 1 : 2);
+          if (!headLocked.has('nid') && !headLocked.has('brn_id')) {
+            setReactive(vmHead, headTarget, 'verification_number', cleanHeadId);
+            setReactive(vmHead, headTarget, 'nid', headIsNID ? cleanHeadId : '');
+            setReactive(vmHead, headTarget, 'brn_id', !headIsNID ? cleanHeadId : '');
+          }
+          if (!headLocked.has('dob')) {
+            setReactive(vmHead, headTarget, 'date_of_birth', headModelDob);
+            setReactive(vmHead, headTarget, 'dob', headModelDob);
+          }
 
-          setReactive(vmHead, headTarget, 'name_bn', h.name_bn);
-          setReactive(vmHead, headTarget, 'name_en', h.name_en);
-          setReactive(vmHead, headTarget, 'father_name_bn', h.father_name_bn);
-          setReactive(vmHead, headTarget, 'father_name_en', h.father_name_en);
-          setReactive(vmHead, headTarget, 'mother_name_bn', h.mother_name_bn);
-          setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
+          if (!headLocked.has('name_bn')) setReactive(vmHead, headTarget, 'name_bn', h.name_bn);
+          if (!headLocked.has('name_en')) setReactive(vmHead, headTarget, 'name_en', h.name_en);
+          if (!headLocked.has('father_name_bn')) {
+            setReactive(vmHead, headTarget, 'father_name_bn', h.father_name_bn);
+            setReactive(vmHead, headTarget, 'father_name_en', h.father_name_en);
+          }
+          if (!headLocked.has('mother_name_bn')) {
+            setReactive(vmHead, headTarget, 'mother_name_bn', h.mother_name_bn);
+            setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
+          }
 
           if (!isVerificationPage) {
-            setReactive(vmHead, headTarget, 'gender', headGenderId);
-            setReactive(vmHead, headTarget, 'gender_id', headGenderId);
-            setReactive(vmHead, headTarget, 'sex', headGenderId);
-            setReactive(vmHead, headTarget, 'religion', headReligionId);
-            setReactive(vmHead, headTarget, 'religion_id', headReligionId);
+            if (!headLocked.has('gender_id')) {
+              setReactive(vmHead, headTarget, 'gender', headGenderId);
+              setReactive(vmHead, headTarget, 'gender_id', headGenderId);
+              setReactive(vmHead, headTarget, 'sex', headGenderId);
+            }
+            if (!headLocked.has('religion_id')) {
+              setReactive(vmHead, headTarget, 'religion', headReligionId);
+              setReactive(vmHead, headTarget, 'religion_id', headReligionId);
+            }
           }
         }
 
@@ -2686,6 +2932,16 @@
       let targetMemberList = [];
       let isRefill = false;
       let allRowsMatched = false;
+      // Benefit (v26): resolved inside the member block below; declared
+      // here so the fast path and the result (outside that block) can
+      // read it too.
+      let benefits = null;
+      let benefitDiffers = false;
+      // Head change (v27): whether the live rows were reordered to the
+      // target order — reported in the result so the panel can say so.
+      let rowsReordered = false;
+      // Cash usage (v27): how many categories were filled + the total.
+      let cashUsage = { filled: 0, total: 0 };
 
       if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
         const row0 = vmMembers.familyMembers[0];
@@ -2737,6 +2993,13 @@
 
         await new Promise((r) => setTimeout(r, 200));
 
+        // Head change (v27): if the panel swapped the head, the rows
+        // already on the form are in the old order. Reorder them (by
+        // NID) to the target order now, so every index-paired pass
+        // below writes each person to the row that already holds them.
+        // A fresh form is already in order, so this is a no-op there.
+        rowsReordered = reorderMemberRowsToTarget(vmMembers, targetMemberList);
+
         // Refill detection: if the form already holds this payload's
         // people (second click on a slow network), later passes must
         // only fill gaps — never re-drive fields the user may have
@@ -2751,6 +3014,22 @@
           return rid && payloadIds.has(rid);
         });
         allRowsMatched = targetMemberList.length > 0;
+
+        // Benefit (v26): resolve each member's SSNP/cards/DSS once for
+        // this fill — the row loop writes it to the model, the radio
+        // sync forces it, and the fast path below skips only when it
+        // already matches the form.
+        benefits = resolveMemberBenefits(vmMembers, targetMemberList, defs);
+        benefitDiffers = false;
+        benefits.byIdx.forEach((ben, bi) => {
+          const r = vmMembers.familyMembers[bi];
+          if (!r) return;
+          const cur = (k) => { const x = Number(r[k]); return Number.isNaN(x) ? null : x; };
+          if (ben.ssnpProvided && cur('is_ssnp_covered') !== ben.ssnp) benefitDiffers = true;
+          if (ben.dssProvided && cur('is_dss_training_or_financial_benefit') !== ben.dss) benefitDiffers = true;
+          if (ben.facilitiesProvided && ben.facilities.length && JSON.stringify(r.facilities_ids || []) !== JSON.stringify(ben.facilities)) benefitDiffers = true;
+          if (ben.ssnpProvided && ben.ssnp === 0 && Array.isArray(r.facilities_ids) && r.facilities_ids.length) benefitDiffers = true;
+        });
 
         for (let idx = 0; idx < targetMemberList.length; idx++) {
           const m = targetMemberList[idx];
@@ -2775,38 +3054,53 @@
           if (rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId })) continue;
           allRowsMatched = false;
 
-          setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
-          if (isNID) {
-            setReactive(vmMembers, row, 'nid', cleanId);
-            setReactive(vmMembers, row, 'brn_id', '');
-            setReactive(vmMembers, row, 'verification_number', cleanId);
-          } else {
-            setReactive(vmMembers, row, 'brn_id', cleanId);
-            setReactive(vmMembers, row, 'nid', '');
-            setReactive(vmMembers, row, 'verification_number', cleanId);
+          // A site-locked personal field (Fi) is never overwritten — the
+          // site's official value (verification/migration) wins (v26).
+          const locked = lockedFieldSet(row);
+          if (!locked.has('verification_type')) setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
+          if (!locked.has('nid') && !locked.has('brn_id')) {
+            if (isNID) {
+              setReactive(vmMembers, row, 'nid', cleanId);
+              setReactive(vmMembers, row, 'brn_id', '');
+              setReactive(vmMembers, row, 'verification_number', cleanId);
+            } else {
+              setReactive(vmMembers, row, 'brn_id', cleanId);
+              setReactive(vmMembers, row, 'nid', '');
+              setReactive(vmMembers, row, 'verification_number', cleanId);
+            }
           }
 
-          setReactive(vmMembers, row, 'dob', memModelDob);
-          setReactive(vmMembers, row, 'date_of_birth', memModelDob);
-          if (memAge !== null && 'age' in row) {
-            setReactive(vmMembers, row, 'age', memAge);
+          if (!locked.has('dob')) {
+            setReactive(vmMembers, row, 'dob', memModelDob);
+            setReactive(vmMembers, row, 'date_of_birth', memModelDob);
+            if (memAge !== null && 'age' in row) {
+              setReactive(vmMembers, row, 'age', memAge);
+            }
           }
 
-          setReactive(vmMembers, row, 'name_bn', m.name_bn);
-          setReactive(vmMembers, row, 'name_en', m.name_en);
-          setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
-          setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
+          if (!locked.has('name_bn')) setReactive(vmMembers, row, 'name_bn', m.name_bn);
+          if (!locked.has('name_en')) setReactive(vmMembers, row, 'name_en', m.name_en);
+          if (!locked.has('father_name_bn')) setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
+          if (!locked.has('mother_name_bn')) setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
 
-          setReactive(vmMembers, row, 'relationship_id', relId);
-          setReactive(vmMembers, row, 'relation_id', relId);
-          setReactive(vmMembers, row, 'relation', relName);
+          // Relationship is locked for the self/head row — but an empty
+          // one still gets filled (filling is not overwriting).
+          if (!row.is_self || isEmptyModelVal(row.relationship_id)) {
+            setReactive(vmMembers, row, 'relationship_id', relId);
+            setReactive(vmMembers, row, 'relation_id', relId);
+            setReactive(vmMembers, row, 'relation', relName);
+          }
 
-          setReactive(vmMembers, row, 'gender', genderId);
-          setReactive(vmMembers, row, 'gender_id', genderId);
-          setReactive(vmMembers, row, 'sex', genderId);
+          if (!locked.has('gender_id')) {
+            setReactive(vmMembers, row, 'gender', genderId);
+            setReactive(vmMembers, row, 'gender_id', genderId);
+            setReactive(vmMembers, row, 'sex', genderId);
+          }
 
-          setReactive(vmMembers, row, 'religion', memReligionId);
-          setReactive(vmMembers, row, 'religion_id', memReligionId);
+          if (!locked.has('religion_id')) {
+            setReactive(vmMembers, row, 'religion', memReligionId);
+            setReactive(vmMembers, row, 'religion_id', memReligionId);
+          }
 
           setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
           setReactive(vmMembers, row, 'is_gov_job_holder', 0);
@@ -2816,8 +3110,17 @@
           const memAgeForStudent = calculateAgeYears(m.dob);
           setReactive(vmMembers, row, 'is_currently_student',
             (memAgeForStudent !== null && memAgeForStudent >= 4 && memAgeForStudent <= 24) ? 1 : 0);
-          setReactive(vmMembers, row, 'is_ssnp_covered', 0);
-          setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', 0);
+          // Benefit (v26): the resolved per-member benefit (Halnad /
+          // panel / override) wins over the old always-0 default. The
+          // radio sync below clicks the matching radio.
+          const ben = (benefits && benefits.byIdx[idx]) || null;
+          setReactive(vmMembers, row, 'is_ssnp_covered', ben ? ben.ssnp : 0);
+          setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', ben ? ben.dss : 0);
+          if (ben && ben.ssnp === 1 && ben.facilities.length) {
+            setReactive(vmMembers, row, 'facilities_ids', ben.facilities.slice());
+          } else if (ben && ben.ssnp === 0 && ben.ssnpProvided && Array.isArray(row.facilities_ids) && row.facilities_ids.length) {
+            setReactive(vmMembers, row, 'facilities_ids', []);
+          }
           if (m.disability_type_id !== undefined && m.disability_type_id !== null && m.disability_type_id !== '') {
             setReactive(vmMembers, row, 'disability_type_id', Number(m.disability_type_id));
           }
@@ -2862,6 +3165,9 @@
         headEduId: (correctionsHead && correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null)
           ? Number(correctionsHead.education_status_id) : null,
       };
+      // Program field 96 (DSS) is derived from the members' DSS radios
+      // (v26) — it always wins over a stale value, so it is always forced.
+      forcePmt.qids.add(96);
       if (correctionSets.count) {
         defs.head_options = defs.head_options || {};
         if (correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null) defs.head_options.education_status = Number(correctionsHead.education_status_id);
@@ -2875,7 +3181,7 @@
       // rebuild that wipes a value is still covered. A correction
       // always runs the passes: the fast path would skip the
       // overwrite the user just asked for.
-      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) && correctionSets.count === 0;
+      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) && correctionSets.count === 0 && !benefitDiffers;
       let optionUnfilled = [];
       const gridCheckNotes = [];
       if (!alreadyFilled) try {
@@ -2897,6 +3203,9 @@
         const dynLate2 = dynLast.unfilled;
         gridCheckNotes.push(...(dynLast.gridNotes || []));
         optionUnfilled = [...new Set([...optionUnfilled, ...dynUnfilled, ...dynLate, ...dynLate2])];
+        // Cash usage (2500 Tk distribution, v27): fill the amounts the
+        // panel sent, after the PMT/program passes.
+        try { cashUsage = syncCashUsage(vmHead, allVms, payload); } catch (_) {}
         // Bank branch: re-apply the single-option pick late, after the
         // site's payment-processors reload has had a chance to null it.
         try { syncSingleBranch(vmHead, headTarget); } catch (_) {}
@@ -2949,14 +3258,24 @@
       const gridNote = gridCheckNotes.length
         ? ` Grid check: ${[...new Set(gridCheckNotes)].join('; ')}.`
         : '';
+      const halnagadNote = (benefits && benefits.halnagad && benefits.halnagad.program)
+        ? (benefits.halnagad.isBeneficiary
+            ? ` Other programme: ${benefits.halnagad.program} (receiving) — SSNP Yes${benefits.halnagad.cardId ? `, card ${benefits.halnagad.cardId}` : ''}.`
+            : ` Other programme: ${benefits.halnagad.program} (applied only, not receiving) — SSNP stays No.`)
+        : '';
+      const reorderNote = rowsReordered ? ' Head changed — member rows reordered to match.' : '';
+      const cashNote = cashUsage.filled ? ` Cash usage: ${cashUsage.total} Tk across ${cashUsage.filled} categor${cashUsage.filled === 1 ? 'y' : 'ies'}.` : '';
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: {
           version: FC_INJECT_VERSION,
           success: true,
           correctionsApplied: correctionSets.count,
+          halnagad: benefits ? benefits.halnagad : null,
+          rowsReordered,
+          cashUsage,
           message: alreadyFilled
-            ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].`
-            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}`
+            ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].${halnagadNote}`
+            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}${halnagadNote}${reorderNote}${cashNote}`
         }
       }));
     } catch (err) {
@@ -3035,6 +3354,53 @@
     return downscaleDataUrl(await blobToDataUrl(blob));
   }
 
+  // The site's own preview helper (getFamilyCardMediaPreviewUrl /
+  // resolveStorageMediaUrl) turns a stored path or a relative URL into
+  // a fetchable preview URL. The site's template calls it on imageUrl /
+  // signUrl itself — the old resolver only called it on the
+  // draftStored*Path fields, so a saved draft whose photo lives in
+  // imageUrl (a relative path) never resolved (v27 fix).
+  async function previewPathToDataUrl(path, mediaVm) {
+    if (typeof path !== 'string' || !path.trim()) return null;
+    const p = path.trim();
+    const helper = mediaVm && (mediaVm.getFamilyCardMediaPreviewUrl || mediaVm.resolveStorageMediaUrl);
+    if (typeof helper === 'function') {
+      try {
+        let previewUrl = helper.call(mediaVm, p);
+        if (previewUrl && typeof previewUrl.then === 'function') previewUrl = await previewUrl;
+        if (typeof previewUrl === 'string' && previewUrl) {
+          // Await (not just return) so a failed fetch is caught here
+          // and falls through to the direct fetch below, instead of
+          // rejecting out of this helper.
+          if (previewUrl.startsWith('data:image')) return await downscaleDataUrl(previewUrl);
+          if (/^https?:\/\//i.test(previewUrl)) return await urlToDataUrl(previewUrl);
+          return await urlToDataUrl(new URL(previewUrl, location.origin).href);
+        }
+      } catch (_) {}
+    }
+    // No helper (or it gave nothing): a relative path is fetchable
+    // against the page origin; an absolute URL fetches directly.
+    try {
+      if (/^https?:\/\//i.test(p)) return await urlToDataUrl(p);
+      return await urlToDataUrl(new URL(p, location.origin).href);
+    } catch (_) { return null; }
+  }
+
+  // True when the form holds any reference to this slot's photo
+  // (file, data URL, preview URL or stored path) — even if loading it
+  // fails. Lets the panel tell "no photo on the form" apart from
+  // "photo exists but could not be loaded" (v27).
+  function hasPhotoReference(slot, mediaVm, d) {
+    const any = (obj, names) => names.some((n) => {
+      const v = obj && obj[n];
+      return v !== undefined && v !== null && v !== '';
+    });
+    return any(d, slot.files) || any(mediaVm, slot.files)
+      || any(d, slot.dataUrls) || any(mediaVm, slot.dataUrls)
+      || any(d, slot.urls) || any(mediaVm, slot.urls)
+      || any(d, slot.paths) || any(mediaVm, slot.paths);
+  }
+
   async function resolvePulledImage(slot, mediaVm, d) {
     // 1. Fresh File/Blob on the form (uploaded, not saved yet).
     const file = pickFirst(d, slot.files) || pickFirst(mediaVm, slot.files);
@@ -3046,26 +3412,23 @@
     if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image')) {
       return downscaleDataUrl(dataUrl);
     }
-    // 3. Preview URL (draft photo already loaded by the site) — fetch it.
+    // 3. Preview URL — a data: URL, an http(s) URL, or a stored path
+    // (relative). The site renders imageUrl/signUrl/houseImageUrl
+    // straight into <img> src, so a relative value is a real photo
+    // that the preview helper (or a plain fetch) can resolve (v27).
     const url = pickFirst(mediaVm, slot.urls) || pickFirst(d, slot.urls);
     if (typeof url === 'string' && url.startsWith('data:image')) {
       return downscaleDataUrl(url);
     }
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-      return urlToDataUrl(url);
+    if (typeof url === 'string' && url) {
+      const got = await previewPathToDataUrl(url, mediaVm);
+      if (got) return got;
     }
     // 4. Server path only — ask the site's own helper for a preview URL.
     const path = pickFirst(mediaVm, slot.paths) || pickFirst(d, slot.paths);
     if (typeof path === 'string' && path) {
-      const helper = mediaVm && (mediaVm.getFamilyCardMediaPreviewUrl || mediaVm.resolveStorageMediaUrl);
-      if (typeof helper === 'function') {
-        try {
-          let previewUrl = helper.call(mediaVm, path);
-          if (previewUrl && typeof previewUrl.then === 'function') previewUrl = await previewUrl;
-          if (typeof previewUrl === 'string' && previewUrl) return urlToDataUrl(previewUrl);
-        } catch (_) {}
-      }
-      if (/^https?:\/\//i.test(path)) return urlToDataUrl(path);
+      const got = await previewPathToDataUrl(path, mediaVm);
+      if (got) return got;
     }
     return null;
   }
@@ -3080,23 +3443,28 @@
 
   async function collectPulledImages(vmHead, allVms, d) {
     const mediaVm = findMediaVm(vmHead, allVms);
-    const images = [];
-    const missing = [];
-    // Never let a slow photo fetch hang the pull: 8s cap, then return
-    // whatever resolved so far. One bad slot never kills the others.
-    const work = (async () => {
-      for (const slot of PULLED_IMAGE_SLOTS) {
-        try {
-          const dataUrl = await resolvePulledImage(slot, mediaVm, d);
-          if (dataUrl) images.push({ slot: slot.key, name: slot.name, dataUrl });
-          else missing.push(slot.name);
-        } catch (_) {
-          missing.push(slot.name);
-        }
+    // Slots resolve in parallel, each with its own 10s cap — one slow
+    // photo no longer eats the whole pull's time (the old code raced
+    // all slots together against a single 8s timer, v27).
+    const results = await Promise.all(PULLED_IMAGE_SLOTS.map(async (slot) => {
+      try {
+        const dataUrl = await Promise.race([
+          resolvePulledImage(slot, mediaVm, d),
+          new Promise((resolve) => setTimeout(() => resolve(null), 10000))
+        ]);
+        if (dataUrl) return { ok: true, slot: slot.key, name: slot.name, dataUrl };
+        const ref = hasPhotoReference(slot, mediaVm, d);
+        return { ok: false, name: slot.name, reason: ref ? 'photo exists but could not be loaded' : 'no photo on the form' };
+      } catch (_) {
+        return { ok: false, name: slot.name, reason: 'could not be loaded' };
       }
-    })();
-    const timeout = new Promise((resolve) => setTimeout(resolve, 8000));
-    await Promise.race([work, timeout]);
+    }));
+    const images = results.filter((r) => r.ok).map((r) => ({ slot: r.slot, name: r.name, dataUrl: r.dataUrl }));
+    // A slot with no photo on the form is listed by name alone (the
+    // normal case — the user never uploaded one). A slot whose photo
+    // EXISTS but could not be loaded carries its reason, because that
+    // is the case the user needs to act on.
+    const missing = results.filter((r) => !r.ok).map((r) => (r.reason === 'no photo on the form' ? r.name : `${r.name} (${r.reason})`));
     return { images, missing };
   }
 
@@ -3166,8 +3534,24 @@
 
       const pulled = await collectPulledImages(vmHead, allVms, d);
 
+      // Cash usage (v27): amounts already on the form, so the panel
+      // can show (and correct) them instead of starting from zero.
+      const pullCash = readCashUsages(vmHead, allVms);
+
+      // Halnagad / other-programme state (v26): the programme the site
+      // found for the head, and whether they only applied or already
+      // receive it. The panel shows it and uses it for SSNP.
+      const pullHalnagadProgram = (vmMembers && typeof vmMembers.halnagadCurrentProgram === 'string') ? vmMembers.halnagadCurrentProgram : '';
+      const pullHalnagadSource = (vmMembers && typeof vmMembers.halnagadMigrateSource === 'string') ? vmMembers.halnagadMigrateSource : '';
+      const pullHalnagad = {
+        program: pullHalnagadProgram,
+        source: pullHalnagadSource,
+        isBeneficiary: pullHalnagadSource === 'beneficiary' && !!pullHalnagadProgram.trim(),
+        cardId: (pullHalnagadSource === 'beneficiary' && pullHalnagadProgram.trim()) ? halnagadCardId(pullHalnagadProgram) : 0
+      };
+
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
-        detail: { version: FC_INJECT_VERSION, success: true, payload: { head, family_members, full_form_dump, images: pulled.images, imagesMissing: pulled.missing } }
+        detail: { version: FC_INJECT_VERSION, success: true, payload: { head, family_members, full_form_dump, images: pulled.images, imagesMissing: pulled.missing, halnagad: pullHalnagad, cash_usages: pullCash.usages, cash_usage_cap: pullCash.cap } }
       }));
     } catch (err) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
