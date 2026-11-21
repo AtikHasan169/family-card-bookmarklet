@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.54-live';
+const CURRENT_VERSION_TAG = 'v4.9.55-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -933,8 +933,9 @@ function normalizeDob(rawDob) {
     // Two-digit year (v4.9.53, fixed v4.9.54): a year typed short —
     // 06, 11 — counts as the 2000s, so 2006 / 2011. (v4.9.53 had it
     // backwards as 19xx — the user corrected it: 06 means 2006.)
-    // Only on blur, never while typing (a 4-digit year passes through
-    // 2 digits mid-typing).
+    // Unambiguous years already expanded live in formatDobInput
+    // (v4.9.55); this is the blur backstop for 19 / 20, which could
+    // still be the start of a 4-digit year while typing.
     const dmy2 = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
     if (dmy2) { dd = dmy2[1]; mm = dmy2[2]; yyyy = '20' + dmy2[3]; }
     else {
@@ -961,6 +962,10 @@ function normalizeDob(rawDob) {
 // everything else. The month name shows up immediately too (v4.9.53):
 // once the month's two digits are typed, 1501 becomes 15-01[Jan]-
 // while typing, not only on blur — only for a real month (01–12).
+// A short year updates immediately too (v4.9.55): 150106 becomes
+// 15-01[Jan]-2006 the moment the 6th digit lands — unless the year
+// is 19 or 20, which could still be the start of a 4-digit year, so
+// those wait for blur.
 // Pure function, so it is easy to test. `deleting` is true when the
 // user just pressed backspace: the trailing hyphen is then left off,
 // so deleting 20- gives 20 instead of getting stuck on the hyphen.
@@ -970,6 +975,19 @@ function formatDobInput(raw, deleting) {
   const mm = digits.length >= 4 ? digits.slice(2, 4) : '';
   const mIndex = parseInt(mm, 10) - 1;
   const monStr = (mm && mIndex >= 0 && mIndex < 12) ? `[${MONTH_NAMES[mIndex]}]` : '';
+  // Two-digit year, immediately (v4.9.55): once the 6th digit lands,
+  // a short year shows as the 2000s at once — 150106 becomes
+  // 15-01[Jan]-2006 while typing, not only on blur. Only when it is
+  // UNAMBIGUOUS: a year part of 19 or 20 could still be the start of
+  // a 4-digit year (1990, 2006), so those wait for blur — 06 or 11
+  // can never start a 4-digit year (06XX / 11XX are not real years),
+  // so they expand at once. Never while deleting.
+  if (digits.length === 6 && !deleting) {
+    const yy = digits.slice(4, 6);
+    if (yy !== '19' && yy !== '20') {
+      return `${digits.slice(0, 2)}-${digits.slice(2, 4)}${monStr}-20${yy}`;
+    }
+  }
   if (digits.length > 4) return `${digits.slice(0, 2)}-${digits.slice(2, 4)}${monStr}-${digits.slice(4)}`;
   if (digits.length === 4) return deleting ? `${digits.slice(0, 2)}-${digits.slice(2, 4)}` : `${digits.slice(0, 2)}-${digits.slice(2, 4)}${monStr}-`;
   if (digits.length > 2) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
@@ -1264,7 +1282,10 @@ function formatEnglishName(rawName) {
   if (!rawName) return '';
   let s = String(rawName).trim().replace(/\s+/g, ' ');
   s = s.replace(/^(?:mosha|mosa|most|mst|mosammat|musammat|মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?\s+/i, 'MST. ');
+  // A bare prefix (v4.9.55): মোসাঃ on its own is MST., not MOSAH.
+  s = s.replace(/^(?:mosha|mosa|most|mst|mosammat|musammat|মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?$/i, 'MST.');
   s = s.replace(/^(?:md|mohd|मोঃ|মোঃ|মো)[:.]?\s+/i, 'MD. ');
+  s = s.replace(/^(?:md|mohd|मोঃ|মোঃ|মো)[:.]?$/i, 'MD.');
   return s.toUpperCase();
 }
 
@@ -1655,9 +1676,11 @@ function transliterateBanglaToEnglish(bn) {
   let s = String(bn).trim().replace(/\s+/g, ' ');
   if (!s) return '';
   // মোঃ / মোছাঃ prefixes become MD. / MST. (same as formatEnglishName).
+  // A bare prefix (v4.9.55): মোসাঃ typed alone — no following name
+  // yet — is MST. too, not the orthographic MOSAH. Same for মোঃ.
   let prefix = '';
-  const mstM = s.match(/^(?:মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?\s+/);
-  const mdM = s.match(/^(?:মোঃ|মো)[:.]?\s+/);
+  const mstM = s.match(/^(?:মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?(?:\s+|$)/);
+  const mdM = s.match(/^(?:মোঃ|মো)[:.]?(?:\s+|$)/);
   if (mstM) { prefix = 'MST. '; s = s.slice(mstM[0].length); }
   else if (mdM) { prefix = 'MD. '; s = s.slice(mdM[0].length); }
   const words = s.split(' ').map((w) => transliterateBanglaWord(w)).filter(Boolean);
@@ -2257,6 +2280,12 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     });
   } else if (f.type === 'doc_select') {
     inputEl = document.createElement('select');
+    // data-field (v4.9.55): the 17-digit flip finds this select with
+    // querySelector('select[data-field="doc_type"]') — without the
+    // tag it found nothing, so the flip updated the record to BRN
+    // but the card kept showing NID (Pull Draft re-renders the whole
+    // card, which is why Pull looked right and typing did not).
+    inputEl.setAttribute('data-field', 'doc_type');
     inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:700; border:1px solid #cbd5e1; background:var(--accent-soft); color:var(--accent); border-radius:5px; cursor:pointer; width:100%;';
     DOC_TYPE_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
@@ -2594,7 +2623,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // digits with the birth year; a wrong-length ID is flagged on
       // the card instead of failing on the form.
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
-        if (convertCardIdNumber(inputEl, targetObj, f.key)) syncJsonOutput();
+        if (convertCardIdNumber(inputEl, targetObj, f.key)) { syncJsonOutput(); if (onUpdateMeta) onUpdateMeta(); }
         toggleIdWarning(inputEl, targetObj, f.key);
       }
       // Mobile (v4.9.49): Bangla digits convert to English on blur;
@@ -2660,7 +2689,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         toggleIdWarning(inputEl, targetObj, f.key);
         // Live 17-digit flip (v4.9.52): the Doc Type becomes BRN the
         // moment the 17th digit lands — automatic, no blur needed.
-        flipDocTypeLive(inputEl, targetObj, f.key);
+        // Refresh the header too (v4.9.55): its tag shows the Doc
+        // Type as well, or it keeps saying NID after the flip.
+        if (flipDocTypeLive(inputEl, targetObj, f.key) && onUpdateMeta) onUpdateMeta();
       }
       if (f.key === 'mobile_number') toggleMobileWarning(inputEl, targetObj);
       syncJsonOutput();
