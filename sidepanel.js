@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.60-live';
+const CURRENT_VERSION_TAG = 'v4.9.61-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -6731,7 +6731,15 @@ function rememberLiveEducation(extracted, live) {
 // --- end education popup pure helpers ---
 
 function sendAutofillPayload() {
-  window.parent.postMessage({ action: 'FILL_VUE_FORM', payload: state.lastExtracted }, '*');
+  // (v4.9.61) The pulled draft photos ride along (from a Pull or an
+  // imported JSON export) so Auto-Fill can upload them to the form —
+  // before this they only ever displayed in the panel. A shallow copy
+  // keeps base64 OUT of lastExtracted (and the Raw JSON view), the way
+  // the pull keeps it out; with no pulled photos the key is absent
+  // and the fill is unchanged.
+  const payload = { ...state.lastExtracted };
+  if (Array.isArray(state.pulledImages) && state.pulledImages.length) payload.images = state.pulledImages;
+  window.parent.postMessage({ action: 'FILL_VUE_FORM', payload }, '*');
   setStatus('Sent auto-fill data (Members, Gender, Religion, Post Code & Area) to form!', 'ok');
 }
 

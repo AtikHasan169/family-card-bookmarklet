@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v40';
+  const FC_INJECT_VERSION = 'v41';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -3574,6 +3574,16 @@
       if (vmHead && typeof vmHead.$forceUpdate === 'function') vmHead.$forceUpdate();
       if (vmMembers && typeof vmMembers.$forceUpdate === 'function') vmMembers.$forceUpdate();
 
+      // (v41) Upload the panel's pulled draft photos (from a Pull or
+      // an imported JSON export) to the form, through the site's own
+      // upload — after the field passes, so the photo tab's component
+      // is mounted. Runs on the already-filled fast path too: the
+      // skip logic then sees the stored paths and uploads nothing.
+      // A photo failure never fails the fill itself.
+      let photoResults = null;
+      try { photoResults = await uploadPulledPhotos(payload, vmHead, allVms); } catch (_) { photoResults = null; }
+      const photoNote = autofillPhotoNote(photoResults);
+
       const unfilledNote = optionUnfilled.length
         ? ` Needs manual selection: ${optionUnfilled.join('; ')}.`
         : '';
@@ -3595,9 +3605,10 @@
           halnagad: benefits ? benefits.halnagad : null,
           rowsReordered,
           cashUsage,
+          photos: photoResults,
           message: alreadyFilled
-            ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].${halnagadNote}`
-            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}${halnagadNote}${reorderNote}${cashNote}`
+            ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].${halnagadNote}${photoNote}`
+            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}${halnagadNote}${reorderNote}${cashNote}${photoNote}`
         }
       }));
     } catch (err) {
@@ -3978,6 +3989,112 @@
     // is the case the user needs to act on.
     const missing = results.filter((r) => !r.ok).map((r) => (r.reason === 'no photo on the form' ? r.name : `${r.name} (${r.reason})`));
     return { images, missing };
+  }
+
+  // --- Autofill photo upload (v41) ---
+  // The panel's pulled draft photos (state.pulledImages — from a Pull
+  // or from an imported JSON export) never reached the form: Auto-Fill
+  // only wrote text/selects, so a new form stayed photo-less even
+  // though the panel showed the photos. The fix drives the SITE's own
+  // upload: fetch the photo bytes, build a File, and call the form
+  // component's uploadMediaField — the same method the form's own
+  // picker uses, so the stored path, the preview URL, the media token
+  // and the upload state all land exactly as if the user had picked
+  // the file on the form, and submit works. Empty-only like every
+  // other fill write: a slot that already has a stored path
+  // (draftStored*Path / stored*Path) or a file the user just picked
+  // on the form is skipped, never re-uploaded. One failed photo never
+  // blocks the others or the text fill.
+  const AUTOFILL_PHOTO_FIELDS = ['image', 'signature', 'house_image', 'nominee_image', 'nominee_signature'];
+
+  function findUploadMediaVm(vmHead, allVms) {
+    try {
+      if (vmHead && typeof vmHead.uploadMediaField === 'function') return vmHead;
+      for (const v of (allVms || [])) {
+        if (v && typeof v.uploadMediaField === 'function') return v;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function mediaSlotHasPhoto(mediaVm, field) {
+    try {
+      if (mediaVm && typeof mediaVm.getStoredMediaPath === 'function') {
+        const p = mediaVm.getStoredMediaPath(field);
+        if (p) return true;
+      }
+      const d = mediaVm && mediaVm.data;
+      if (d && d[field] instanceof File) return true;
+      // The newer form component keeps picked files in *File fields.
+      const fileKey = field === 'image' ? 'imageFile' : field === 'signature' ? 'signatureFile' : field === 'house_image' ? 'houseFile' : null;
+      if (fileKey && mediaVm && mediaVm[fileKey] instanceof File) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  async function pulledPhotoToFile(mediaVm, dataUrl, field) {
+    const name = field + '.jpg';
+    if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+      const res = await fetch(dataUrl);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      if (!blob || !blob.size) throw new Error('Empty photo');
+      return new File([blob], name, { type: blob.type || 'image/jpeg' });
+    }
+    // An https preview URL (a pulled photo whose bytes the pull could
+    // not fetch): the site's own fetcher rewrites the gateway URL and
+    // fetches with credentials:"omit" — a plain fetch() fails there
+    // (v37). Fall back to a plain omit-credentials fetch when the VM
+    // has no fetcher of its own.
+    if (mediaVm && typeof mediaVm.fetchStorageFile === 'function') {
+      const f = await mediaVm.fetchStorageFile(dataUrl, name);
+      if (f) return f;
+      throw new Error('Could not fetch photo');
+    }
+    const res = await fetch(dataUrl, { credentials: 'omit' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    if (!blob || !blob.size) throw new Error('Empty photo');
+    return new File([blob], name, { type: blob.type || 'image/jpeg' });
+  }
+
+  async function uploadPulledPhotos(payload, vmHead, allVms) {
+    const summary = { attempted: 0, uploaded: 0, skipped: 0, failed: [] };
+    const images = payload && Array.isArray(payload.images) ? payload.images : [];
+    if (!images.length) return summary;
+    const mediaVm = findUploadMediaVm(vmHead, allVms);
+    if (!mediaVm) {
+      images.forEach((im) => { if (im && im.slot) summary.failed.push({ slot: im.slot, message: 'Photo upload not available on this form' }); });
+      return summary;
+    }
+    for (const im of images) {
+      const field = im && im.slot;
+      if (!field || !AUTOFILL_PHOTO_FIELDS.includes(field)) continue;
+      if (typeof im.dataUrl !== 'string' || !im.dataUrl) { summary.failed.push({ slot: field, message: 'No photo data' }); continue; }
+      if (mediaSlotHasPhoto(mediaVm, field)) { summary.skipped++; continue; }
+      summary.attempted++;
+      try {
+        const file = await pulledPhotoToFile(mediaVm, im.dataUrl, field);
+        const res = await mediaVm.uploadMediaField(field, file);
+        if (res && res.success) summary.uploaded++;
+        else summary.failed.push({ slot: field, message: (res && res.message) || 'Upload failed' });
+      } catch (e) {
+        summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
+      }
+    }
+    return summary;
+  }
+
+  function autofillPhotoNote(photos) {
+    if (!photos) return '';
+    const failed = Array.isArray(photos.failed) ? photos.failed : [];
+    if (photos.uploaded > 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded.`;
+    if (photos.uploaded > 0 || failed.length) {
+      const names = failed.map((f) => f.slot).join(', ');
+      return ` Photos: ${photos.uploaded} uploaded, ${failed.length} failed${names ? ` (${names})` : ''}.`;
+    }
+    if (photos.skipped > 0) return ' Photos: already on form.';
+    return '';
   }
 
   window.addEventListener('FC_PRO_PULL_REQUEST', async () => {
