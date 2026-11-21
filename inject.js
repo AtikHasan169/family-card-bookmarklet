@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v27';
+  const FC_INJECT_VERSION = 'v28';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1326,14 +1326,14 @@
     if (isLittleChild) { livelihood = OPTION_PATTERNS.livelihoodChild; livelihoodIds = [L.childNA, L.others]; }
     else if (isStudentAge) { livelihood = OPTION_PATTERNS.livelihoodStudent; livelihoodIds = [L.student]; }
     else if (female) { livelihood = OPTION_PATTERNS.livelihoodHousewife; livelihoodIds = [L.homemaker]; }
-    else { livelihood = OPTION_PATTERNS.livelihoodMale; livelihoodIds = [L.dayLabourer, L.agriculture, L.others]; }
+    else { livelihood = OPTION_PATTERNS.livelihoodMale; livelihoodIds = [L.agriculture, L.dayLabourer, L.others]; }
 
     // Head profession uses the DIFFERENT type-34 list.
     let profession = null, professionIds = [];
     if (isLittleChild) { profession = OPTION_PATTERNS.livelihoodChild; professionIds = [P.others]; }
     else if (isStudentAge) { profession = OPTION_PATTERNS.livelihoodStudent; professionIds = [P.student]; }
     else if (female) { profession = OPTION_PATTERNS.professionHousewife; professionIds = [P.housewife]; }
-    else { profession = OPTION_PATTERNS.professionMale; professionIds = [P.dayLabourer, P.farmer, P.labourer, P.others]; }
+    else { profession = OPTION_PATTERNS.professionMale; professionIds = [P.farmer, P.dayLabourer, P.labourer, P.others]; }
 
     let marital = null, maritalIds = [];
     let maritalExcludes = [];

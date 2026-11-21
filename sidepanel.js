@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.37-live';
+const CURRENT_VERSION_TAG = 'v4.9.39-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -84,6 +84,29 @@ const PROFESSION_OPTIONS = [
   { id: 110, label: 'অন্যান্য / Others' }
 ];
 
+// Member livelihood/profession (type-44 list, real ids from the site's
+// lookup — DIFFERENT from the head's type-34 profession list above).
+const LIVELIHOOD_OPTIONS = [
+  { id: 210, label: 'কৃষিকাজ / Agriculture' },
+  { id: 211, label: 'ব্যবসা / Business' },
+  { id: 212, label: 'বেসরকারি চাকরি / Private Job' },
+  { id: 213, label: 'সরকারি চাকরি / Govt Job' },
+  { id: 214, label: 'দিনমজুর / Day Laborer' },
+  { id: 215, label: 'গার্মেন্টস কর্মী / Garment Worker' },
+  { id: 216, label: 'রিকশা/ভ্যানচালক / Rickshaw/Van Driver' },
+  { id: 217, label: 'পরিবহন শ্রমিক / Transport Worker' },
+  { id: 218, label: 'হোটেল/রেস্টুরেন্ট কর্মী / Hotel/Restaurant Worker' },
+  { id: 219, label: 'গৃহকর্মী / Domestic Worker' },
+  { id: 220, label: 'ছাত্র/ছাত্রী / Student' },
+  { id: 221, label: 'শিক্ষানবিশ / Apprentice' },
+  { id: 222, label: 'বেকার / Unemployed' },
+  { id: 223, label: 'অবসরপ্রাপ্ত / Retired' },
+  { id: 224, label: 'বয়স্ক/অক্ষম/অসুস্থ / Elderly/Disabled/Sick' },
+  { id: 225, label: 'গৃহিণী / Homemaker' },
+  { id: 275, label: 'প্রযোজ্য নয় / Not Applicable' },
+  { id: 226, label: 'অন্যান্য / Others' }
+];
+
 // Marital status (type-32 list, real ids from the site's lookup).
 const MARITAL_OPTIONS = [
   { id: 101, label: 'বিবাহিত / Married' },
@@ -104,20 +127,23 @@ const RELIGION_ID_MAP = { Islam: 1, Hinduism: 2, Buddhism: 3, Christianity: 4, O
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const HEAD_FIELDS = [
+  // Order (v4.9.39): identity first, then DOB, then the fields the DOB
+  // derives (education / profession / marital) — so typing the DOB
+  // fills them. DOB stays before NID, as on the BD NID card.
+  { key: 'name_bn', label: 'Name (BN)' },
+  { key: 'name_en', label: 'Name (EN)' },
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
+  { key: 'nid', label: 'NID / BRN No' },
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  { key: 'name_bn', label: 'Name (BN)' },
-  { key: 'name_en', label: 'Name (EN)' },
   { key: 'father_name_bn', label: 'Father (BN)' },
   { key: 'father_name_en', label: 'Father (EN)' },
   { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'mother_name_en', label: 'Mother (EN)' },
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
-  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid', label: 'NID / BRN No' },
   // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
   // head is the one the Halnagad check reports on.
   { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
@@ -127,15 +153,22 @@ const HEAD_FIELDS = [
 
 const MEMBER_FIELDS = [
   { key: 'relation', label: 'Relation', type: 'rel_select' },
-  { key: 'gender', label: 'Gender', type: 'gender_select' },
-  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
-  { key: 'father_name_bn', label: 'Father (BN)' },
-  { key: 'mother_name_bn', label: 'Mother (BN)' },
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'gender', label: 'Gender', type: 'gender_select' },
+  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
   { key: 'nid_or_brn', label: 'NID / BRN No' },
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  // Education / profession / marital (v4.9.39): same three the head card
+  // has, so a member's derived values (e.g. the husband's Agriculture)
+  // are visible and changeable offline. Profession here is the type-44
+  // livelihood list; marital uses the site's typo key maritial_status_id.
+  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
+  { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
+  { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  { key: 'father_name_bn', label: 'Father (BN)' },
+  { key: 'mother_name_bn', label: 'Mother (BN)' },
   // Benefit (v4.9.36): whether this member already receives another
   // programme (SSNP), which card, and whether they got DSS training /
   // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
@@ -1032,6 +1065,201 @@ function saveSessionState() {
   } catch (e) {}
 }
 
+// --- DOB derivation: pure helpers (v4.9.39) ---
+// The same age / gender / relation rules the injector uses on Auto-Fill,
+// run live in the panel when a DOB is typed so the user sees the
+// defaults before filling. A derived value only ever fills a BLANK
+// field — a value the user picked by hand is never overwritten.
+// Education is NOT auto-filled for a 25+ head or spouse: the education
+// popup asks for those on Auto-Fill instead, and a filled value would
+// stop it asking. Other 25+ members get the injector's 190 guess.
+const MARRIED_RELATIONS_PANEL = ['Husband', 'Wife', 'Father', 'Mother', 'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law'];
+
+function educationIdForAge(age) {
+  if (age === null || age === undefined || age < 0) return null;
+  if (age < 3) return 88;      // নিরক্ষর
+  if (age <= 5) return 188;    // Play/Nursery/KG/Pre-Primary
+  if (age === 6) return 189;   // Class 1
+  if (age <= 10) return 190;   // Class 1-4
+  if (age === 11) return 191;  // Class 5/PSC
+  if (age <= 13) return 192;   // Class 6-7
+  if (age === 14) return 89;   // JSC/8th
+  if (age === 15) return 193;  // Class 9
+  if (age < 18) return 90;     // SSC
+  if (age <= 19) return 91;    // HSC
+  if (age <= 22) return 92;    // Graduate
+  if (age <= 24) return 93;    // Post Graduate
+  return 190;                  // 25+ Class 1-4 (the injector's guess)
+}
+
+// Profession for the head (type-34) or livelihood for a member
+// (type-44). Adult male defaults to Farmer / Agriculture (v4.9.39 —
+// the user chose কৃষিকাজ over দিনমজুর for their families).
+function professionIdForAgeGender(age, gender, isHead) {
+  if (age === null || age === undefined || age < 0) return null;
+  if (age < 4) return isHead ? 110 : 275;   // little child: Others / Not Applicable
+  if (age <= 24) return isHead ? 106 : 220; // student age: Student
+  if (gender === 'Female') return isHead ? 181 : 225; // Housewife / Homemaker
+  return isHead ? 151 : 210;                 // adult male: Farmer / Agriculture
+}
+
+function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse) {
+  if (age === null || age === undefined || age < 0) return null;
+  if (age < 18) return 102; // Unmarried
+  if (isHead && !hasSpouse) return gender === 'Female' ? 103 : 276; // Widow / Widower
+  if (MARRIED_RELATIONS_PANEL.includes(relation) || relation === 'Head/Self') return 101; // Married
+  return 102; // Unmarried
+}
+
+// The three derived ids for one person, or null per field.
+function derivedIdsFor(age, gender, relation, isHead, hasSpouse) {
+  if (age === null || age === undefined || age < 0) return { education: null, profession: null, marital: null };
+  const isPopupTarget = isHead || relation === 'Husband' || relation === 'Wife';
+  const education = (isPopupTarget && age >= 25) ? null : educationIdForAge(age);
+  const profession = professionIdForAgeGender(age, gender, isHead);
+  const marital = maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse);
+  return { education, profession, marital };
+}
+
+function isBlankVal(v) {
+  return v === undefined || v === null || String(v).trim() === '';
+}
+
+// Fill a record's blank education / profession / marital from its DOB.
+// isHead: the head uses the type-34 profession list and the
+// `profession` + `marital_status` keys; a member uses the type-44
+// livelihood list and `livelihood_profession_id` + `maritial_status_id`.
+// Returns the keys that were filled, so the caller can refresh the
+// matching selects in place.
+function deriveFromDob(targetObj, isHead, hasSpouse) {
+  const filled = [];
+  if (!targetObj) return filled;
+  const age = calculateAgeYears(targetObj.dob);
+  if (age === null || age < 0) return filled;
+  const ids = derivedIdsFor(age, targetObj.gender, isHead ? 'Head/Self' : (targetObj.relation || ''), isHead, hasSpouse);
+  if (ids.education !== null && isBlankVal(targetObj.education_status_id)) {
+    targetObj.education_status_id = ids.education; filled.push('education_status_id');
+  }
+  if (isHead) {
+    if (ids.profession !== null && isBlankVal(targetObj.profession)) { targetObj.profession = ids.profession; filled.push('profession'); }
+  } else {
+    if (ids.profession !== null && isBlankVal(targetObj.livelihood_profession_id)) { targetObj.livelihood_profession_id = ids.profession; filled.push('livelihood_profession_id'); }
+  }
+  if (ids.marital !== null) {
+    if (isHead) {
+      if (isBlankVal(targetObj.marital_status)) { targetObj.marital_status = ids.marital; targetObj.maritial_status_id = ids.marital; filled.push('marital_status'); }
+    } else {
+      if (isBlankVal(targetObj.maritial_status_id)) { targetObj.maritial_status_id = ids.marital; targetObj.marital_status = ids.marital; filled.push('marital_status'); }
+    }
+  }
+  return filled;
+}
+
+// Apply a re-derivation: for each field, if it is blank or still holds
+// the OLD derivation (it was auto-filled, not hand-picked), set it to
+// the NEW derivation — or clear it when the new age/relation has no
+// derivation (a 25+ head/spouse's education, so the popup asks). A
+// hand-picked value differs from the old derivation and is left alone.
+// Returns the changed keys.
+function applyDerivedChange(targetObj, oldIds, newIds, isHead) {
+  if (!targetObj || !oldIds || !newIds) return [];
+  const changed = [];
+  const maybe = (key, oldVal, newVal) => {
+    const cur = targetObj[key];
+    const blank = isBlankVal(cur);
+    const wasDerived = oldVal !== null && oldVal !== undefined && !blank && Number(cur) === Number(oldVal);
+    if (!blank && !wasDerived) return; // hand-picked — leave alone
+    if (newVal === null || newVal === undefined) {
+      if (wasDerived) { targetObj[key] = undefined; changed.push(key); }
+      return;
+    }
+    if (Number(cur) !== Number(newVal)) { targetObj[key] = Number(newVal); changed.push(key); }
+  };
+  maybe('education_status_id', oldIds.education, newIds.education);
+  if (isHead) maybe('profession', oldIds.profession, newIds.profession);
+  else maybe('livelihood_profession_id', oldIds.profession, newIds.profession);
+  if (isHead) maybe('marital_status', oldIds.marital, newIds.marital);
+  else maybe('maritial_status_id', oldIds.marital, newIds.marital);
+  // Keep the two marital spellings in sync.
+  if (changed.includes('marital_status') && isHead) targetObj.maritial_status_id = targetObj.marital_status;
+  if (changed.includes('maritial_status_id') && !isHead) targetObj.marital_status = targetObj.maritial_status_id;
+  return changed;
+}
+
+// After a DOB change, re-derive the fields that still hold the OLD
+// age's derived value (they were auto-filled, not hand-picked).
+function rederiveFromDobChange(targetObj, oldAge, isHead, hasSpouse) {
+  if (!targetObj) return [];
+  const newAge = calculateAgeYears(targetObj.dob);
+  if (newAge === null || newAge < 0 || oldAge === newAge) return [];
+  const rel = isHead ? 'Head/Self' : (targetObj.relation || '');
+  const oldIds = derivedIdsFor(oldAge, targetObj.gender, rel, isHead, hasSpouse);
+  const newIds = derivedIdsFor(newAge, targetObj.gender, rel, isHead, hasSpouse);
+  return applyDerivedChange(targetObj, oldIds, newIds, isHead);
+}
+
+// After a relation change, re-derive the fields that still hold the
+// derivation for the OLD relation (marital + profession depend on it).
+function rederiveFromRelationChange(targetObj, oldRelation, isHead, hasSpouse) {
+  if (!targetObj) return [];
+  const age = calculateAgeYears(targetObj.dob);
+  if (age === null || age < 0) return [];
+  const newRel = isHead ? 'Head/Self' : (targetObj.relation || '');
+  if (oldRelation === newRel) return [];
+  const oldIds = derivedIdsFor(age, targetObj.gender, oldRelation, isHead, hasSpouse);
+  const newIds = derivedIdsFor(age, targetObj.gender, newRel, isHead, hasSpouse);
+  return applyDerivedChange(targetObj, oldIds, newIds, isHead);
+}
+
+// After a gender change, re-derive the profession (it depends on gender).
+function rederiveFromGenderChange(targetObj, oldGender, isHead, hasSpouse) {
+  if (!targetObj) return [];
+  const age = calculateAgeYears(targetObj.dob);
+  if (age === null || age < 0) return [];
+  if (oldGender === targetObj.gender) return [];
+  const rel = isHead ? 'Head/Self' : (targetObj.relation || '');
+  const oldIds = derivedIdsFor(age, oldGender, rel, isHead, hasSpouse);
+  const newIds = derivedIdsFor(age, targetObj.gender, rel, isHead, hasSpouse);
+  return applyDerivedChange(targetObj, oldIds, newIds, isHead);
+}
+
+// A son/daughter's parents: the mother is the female head (or the Wife
+// member when the head is male); the father is the male head (or the
+// Husband member when the head is female). Names only — no guessing.
+function parentNamesFor(data) {
+  let father = '', mother = '';
+  const head = data && data.head;
+  if (head) {
+    if (head.gender === 'Male' && (head.name_bn || head.name_en)) father = head.name_bn || head.name_en;
+    if (head.gender === 'Female' && (head.name_bn || head.name_en)) mother = head.name_bn || head.name_en;
+  }
+  if (Array.isArray(data && data.family_members)) {
+    for (const m of data.family_members) {
+      if (!father && m.relation === 'Husband' && (m.name_bn || m.name_en)) father = m.name_bn || m.name_en;
+      if (!mother && m.relation === 'Wife' && (m.name_bn || m.name_en)) mother = m.name_bn || m.name_en;
+    }
+  }
+  return { father, mother };
+}
+
+// Fill a son/daughter's blank father/mother names from the parents
+// above. Never overwrites a name the user typed. Returns the member
+// indexes that gained a name, so the caller can refresh those inputs.
+function applyChildParentNames(data) {
+  const changed = [];
+  if (!data || !Array.isArray(data.family_members)) return changed;
+  const parents = parentNamesFor(data);
+  data.family_members.forEach((m, idx) => {
+    if (m.relation !== 'Son' && m.relation !== 'Daughter') return;
+    let did = false;
+    if (parents.father && (!m.father_name_bn || !String(m.father_name_bn).trim())) { m.father_name_bn = parents.father; did = true; }
+    if (parents.mother && (!m.mother_name_bn || !String(m.mother_name_bn).trim())) { m.mother_name_bn = parents.mother; did = true; }
+    if (did) changed.push(idx);
+  });
+  return changed;
+}
+// --- end DOB derivation pure helpers ---
+
 function recalculateHouseholdSummary(data) {
   if (!data) return;
   const allPeople = [];
@@ -1060,6 +1288,21 @@ function recalculateHouseholdSummary(data) {
       allPeople.push(m);
     });
   }
+
+  // DOB derivation (v4.9.39): fill a blank education / profession /
+  // marital from the DOB, using the same rules the injector uses on
+  // Auto-Fill. Runs here so it happens on every change (typing a DOB,
+  // a Pull, an AI extract) and stays in sync. A son/daughter's blank
+  // father/mother names come from the head + spouse. Only blank fields
+  // are filled — a hand-picked value is never overwritten.
+  const hasSpouse = Array.isArray(data.family_members) && data.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife');
+  if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
+    deriveFromDob(data.head, true, hasSpouse);
+  }
+  if (Array.isArray(data.family_members)) {
+    data.family_members.forEach((m) => deriveFromDob(m, false, hasSpouse));
+  }
+  applyChildParentNames(data);
 
   // Propagate detected family religion (e.g., Islam) to every family member if not manually overridden
   const detectedReligion = inferHouseholdReligion(allPeople);
@@ -1224,6 +1467,43 @@ function toggleWarning(el) {
   else el.classList.remove('field-warning');
 }
 
+// Refresh a card's derived selects from its record, in place (no
+// re-render, so the user does not lose focus). Called after a DOB /
+// relation / gender change fills a derived value. Always syncs to the
+// record — including a blank, when a re-derivation cleared the field
+// (a 25+ head/spouse whose education goes back to blank so the popup asks).
+function refreshDerivedSelects(cardContainer, targetObj, isHead) {
+  if (!cardContainer || !targetObj) return;
+  const setSel = (field, val) => {
+    const sel = cardContainer.querySelector(`select[data-field="${field}"]`);
+    if (!sel) return;
+    sel.value = (val === undefined || val === null || String(val).trim() === '') ? '' : String(val);
+    toggleWarning(sel);
+  };
+  setSel('education_status_id', targetObj.education_status_id);
+  if (isHead) setSel('profession', targetObj.profession);
+  else setSel('livelihood_profession_id', targetObj.livelihood_profession_id);
+  setSel('marital_status', targetObj.marital_status !== undefined ? targetObj.marital_status : targetObj.maritial_status_id);
+}
+
+// Refresh every son/daughter card's father/mother name inputs from the
+// current data, in place. Called after a parent's name is typed or a
+// relation changes. Only an input that is currently empty is filled —
+// a name the user typed stays.
+function refreshChildParentInputs() {
+  const data = state.lastExtracted;
+  if (!data || !Array.isArray(data.family_members)) return;
+  data.family_members.forEach((m, idx) => {
+    if (m.relation !== 'Son' && m.relation !== 'Daughter') return;
+    const card = document.querySelector(`.record-card[data-member-idx="${idx}"]`);
+    if (!card) return;
+    const fIn = card.querySelector('input[data-field="father_name_bn"]');
+    if (fIn && !fIn.value.trim() && m.father_name_bn) { fIn.value = m.father_name_bn; toggleWarning(fIn); }
+    const mIn = card.querySelector('input[data-field="mother_name_bn"]');
+    if (mIn && !mIn.value.trim() && m.mother_name_bn) { mIn.value = m.mother_name_bn; toggleWarning(mIn); }
+  });
+}
+
 function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange) {
   const notifyChange = (key, value) => { if (typeof onChange === 'function') onChange(key, value); };
   let inputEl;
@@ -1238,6 +1518,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     });
     inputEl.value = targetObj.relation || 'Son';
     inputEl.addEventListener('change', (e) => {
+      const oldRel = targetObj.relation;
       const newRel = e.target.value;
       targetObj.relation = newRel;
       targetObj.relationship_id = RELATION_ID_MAP[newRel] || 263;
@@ -1251,7 +1532,25 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
+      // A new relation re-derives marital + profession (both depend on
+      // it) for values that were auto-filled under the old relation;
+      // hand-picked values stay. A Son/Daughter gains the parents'
+      // names (the data fill runs in syncJsonOutput below).
+      const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
+      const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
+      rederiveFromRelationChange(targetObj, oldRel, !!isHead, hasSpouse);
       syncJsonOutput();
+      // The data was just re-derived by syncJsonOutput; refresh the
+      // selects and the father/mother inputs in place so the user sees
+      // it now.
+      if (cardContainer) {
+        refreshDerivedSelects(cardContainer, targetObj, !!isHead);
+        const fIn = cardContainer.querySelector('input[data-field="father_name_bn"]');
+        if (fIn && !fIn.value.trim() && targetObj.father_name_bn) { fIn.value = targetObj.father_name_bn; toggleWarning(fIn); }
+        const mIn = cardContainer.querySelector('input[data-field="mother_name_bn"]');
+        if (mIn && !mIn.value.trim() && targetObj.mother_name_bn) { mIn.value = targetObj.mother_name_bn; toggleWarning(mIn); }
+      }
+      refreshChildParentInputs();
     });
   } else if (f.type === 'gender_select') {
     inputEl = document.createElement('select');
@@ -1265,11 +1564,18 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     });
     inputEl.value = targetObj.gender || 'Male';
     inputEl.addEventListener('change', (e) => {
+      const oldGender = targetObj.gender;
       targetObj.gender = e.target.value;
       targetObj.gender_id = GENDER_ID_MAP[e.target.value] || 1;
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
+      // A new gender re-derives the profession (it depends on gender)
+      // for a value that was auto-filled under the old gender.
+      const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
+      const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
+      rederiveFromGenderChange(targetObj, oldGender, !!isHead, hasSpouse);
       syncJsonOutput();
+      if (cardContainer) refreshDerivedSelects(cardContainer, targetObj, !!isHead);
     });
   } else if (f.type === 'religion_select') {
     inputEl = document.createElement('select');
@@ -1413,6 +1719,31 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       syncJsonOutput();
       notifyChange('profession', v === '' ? null : Number(v));
     });
+  } else if (f.type === 'livelihood_select') {
+    // Member livelihood (type-44 list). The injector reads
+    // livelihood_profession_id from the member record on Auto-Fill,
+    // preferring it over its own age/gender derivation.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'livelihood_profession_id');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    LIVELIHOOD_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.livelihood_profession_id !== undefined && targetObj.livelihood_profession_id !== null && String(targetObj.livelihood_profession_id).trim() !== '' ? String(targetObj.livelihood_profession_id) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.livelihood_profession_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('livelihood_profession_id', v === '' ? null : Number(v));
+    });
   } else if (f.type === 'marital_select') {
     // Head marital status (type-32 list). Sets both spellings: the
     // panel's `marital_status` (head form) and the site's typo
@@ -1442,6 +1773,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
   } else {
     inputEl = document.createElement('input');
     inputEl.type = 'text';
+    inputEl.setAttribute('data-field', f.key);
     inputEl.value = targetObj[f.key] || '';
     inputEl.placeholder = f.key === 'dob' ? 'DD-MM-YYYY' : '—';
     inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
@@ -1449,11 +1781,18 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
 
     inputEl.addEventListener('blur', () => {
       if (f.key === 'dob') {
+        const oldAge = calculateAgeYears(targetObj.dob);
         targetObj.dob = normalizeDob(inputEl.value);
         inputEl.value = targetObj.dob;
         targetObj.age = calculateAgeYears(targetObj.dob);
         if (onUpdateMeta) onUpdateMeta();
+        // A changed DOB re-derives the fields that still hold the OLD
+        // age's derived value (auto-filled, not hand-picked).
+        const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
+        const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
+        rederiveFromDobChange(targetObj, oldAge, !!isHead, hasSpouse);
         syncJsonOutput();
+        if (cardContainer) refreshDerivedSelects(cardContainer, targetObj, !!isHead);
       }
       toggleWarning(inputEl);
     });
@@ -1472,6 +1811,12 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       }
       toggleWarning(inputEl);
       syncJsonOutput();
+      // Typing a DOB fills blank derived fields live (the fill runs in
+      // syncJsonOutput above); show them in the selects right away.
+      if (f.key === 'dob' && cardContainer) {
+        const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
+        refreshDerivedSelects(cardContainer, targetObj, !!isHead);
+      }
       // Name typing (v4.9.37): the gender/religion are auto-detected
       // from the name in recalculateHouseholdSummary (above), but the
       // card's selects only refresh on a re-render. Update them here
@@ -1483,6 +1828,10 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         const rSel = cardContainer.querySelector('select[data-field="religion"]');
         if (rSel && targetObj.religion) { rSel.value = targetObj.religion; toggleWarning(rSel); }
         if (onUpdateMeta) onUpdateMeta();
+        // A parent's name just changed: a son/daughter's blank
+        // father/mother names (filled in the data by syncJsonOutput)
+        // show in their cards now.
+        refreshChildParentInputs();
       }
     });
   }
@@ -3485,6 +3834,22 @@ JSON SCHEMA:
 }`;
 }
 
+// Find a previous record's benefit values for a member (by NID, else by
+// name) so a hand-set Yes survives a re-extract that omits these fields.
+function prevMemberBenefit(prev, nidOrBrn, nameBn, nameEn) {
+  if (!prev || !Array.isArray(prev.family_members)) return null;
+  const id = String(nidOrBrn || '').trim();
+  const nb = String(nameBn || '').trim();
+  const ne = String(nameEn || '').trim();
+  const found = prev.family_members.find((p) => {
+    if (id && String(p.nid_or_brn || '').trim() === id) return true;
+    if (nb && String(p.name_bn || '').trim() === nb) return true;
+    if (ne && String(p.name_en || '').trim() === ne) return true;
+    return false;
+  });
+  return found || null;
+}
+
 function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
@@ -3516,15 +3881,46 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   if (h.education_status_id !== undefined && h.education_status_id !== null && String(h.education_status_id).trim() !== '') {
     head.education_status_id = Number(h.education_status_id);
   }
+  // Profession / marital (v4.9.39): keep an explicit pick through
+  // rebuilds (a Pull payload carries neither, so the previous record's
+  // pick is the fallback — otherwise the DOB derivation would refill
+  // the display with the guess and disagree with head_options).
+  if (h.profession !== undefined && h.profession !== null && String(h.profession).trim() !== '') {
+    head.profession = Number(h.profession);
+  } else if (prev && prev.head && prev.head.profession !== undefined && prev.head.profession !== null && String(prev.head.profession).trim() !== '') {
+    head.profession = Number(prev.head.profession);
+  }
+  if (h.marital_status !== undefined && h.marital_status !== null && String(h.marital_status).trim() !== '') {
+    head.marital_status = Number(h.marital_status);
+    head.maritial_status_id = Number(h.marital_status);
+  } else if (prev && prev.head && prev.head.marital_status !== undefined && prev.head.marital_status !== null && String(prev.head.marital_status).trim() !== '') {
+    head.marital_status = Number(prev.head.marital_status);
+    head.maritial_status_id = Number(prev.head.marital_status);
+  } else if (h.maritial_status_id !== undefined && h.maritial_status_id !== null && String(h.maritial_status_id).trim() !== '') {
+    head.marital_status = Number(h.maritial_status_id);
+    head.maritial_status_id = Number(h.maritial_status_id);
+  }
   // Benefit (v4.9.36): the head's SSNP / card / DSS, same as a member.
+  // Default is No (0) unless the form, the AI, or a previous record
+  // says otherwise — the user asked for No as the default. A previous
+  // Yes survives a re-extract (the AI does not return these fields),
+  // and a Halnagad beneficiary is set to Yes after this runs.
   if (h.is_ssnp_covered === 0 || h.is_ssnp_covered === 1 || h.is_ssnp_covered === '0' || h.is_ssnp_covered === '1') {
     head.is_ssnp_covered = Number(h.is_ssnp_covered);
+  } else if (prev && prev.head && (prev.head.is_ssnp_covered === 0 || prev.head.is_ssnp_covered === 1)) {
+    head.is_ssnp_covered = Number(prev.head.is_ssnp_covered);
+  } else {
+    head.is_ssnp_covered = 0;
   }
   if (Array.isArray(h.facilities_ids) && h.facilities_ids.length) {
     head.facilities_ids = h.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
   }
   if (h.is_dss_training_or_financial_benefit === 0 || h.is_dss_training_or_financial_benefit === 1 || h.is_dss_training_or_financial_benefit === '0' || h.is_dss_training_or_financial_benefit === '1') {
     head.is_dss_training_or_financial_benefit = Number(h.is_dss_training_or_financial_benefit);
+  } else if (prev && prev.head && (prev.head.is_dss_training_or_financial_benefit === 0 || prev.head.is_dss_training_or_financial_benefit === 1)) {
+    head.is_dss_training_or_financial_benefit = Number(prev.head.is_dss_training_or_financial_benefit);
+  } else {
+    head.is_dss_training_or_financial_benefit = 0;
   }
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
@@ -3581,17 +3977,52 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     if (m?.education_status_id !== undefined && m?.education_status_id !== null && String(m.education_status_id).trim() !== '') {
       entry.education_status_id = Number(m.education_status_id);
     }
+    // Livelihood / marital (v4.9.39): keep an explicit pick through
+    // rebuilds — a Pull payload carries neither for a member, so the
+    // previous record's pick (matched by NID, else name) is the
+    // fallback. Otherwise the DOB derivation would refill the display
+    // with the guess and disagree with what the user picked.
+    const prevM2 = prevMemberBenefit(prev, entry.nid_or_brn, entry.name_bn, entry.name_en);
+    if (m?.livelihood_profession_id !== undefined && m?.livelihood_profession_id !== null && String(m.livelihood_profession_id).trim() !== '') {
+      entry.livelihood_profession_id = Number(m.livelihood_profession_id);
+    } else if (prevM2 && prevM2.livelihood_profession_id !== undefined && prevM2.livelihood_profession_id !== null && String(prevM2.livelihood_profession_id).trim() !== '') {
+      entry.livelihood_profession_id = Number(prevM2.livelihood_profession_id);
+    }
+    if (m?.maritial_status_id !== undefined && m?.maritial_status_id !== null && String(m.maritial_status_id).trim() !== '') {
+      entry.maritial_status_id = Number(m.maritial_status_id);
+      entry.marital_status = Number(m.maritial_status_id);
+    } else if (m?.marital_status !== undefined && m?.marital_status !== null && String(m.marital_status).trim() !== '') {
+      entry.marital_status = Number(m.marital_status);
+      entry.maritial_status_id = Number(m.marital_status);
+    } else if (prevM2 && prevM2.maritial_status_id !== undefined && prevM2.maritial_status_id !== null && String(prevM2.maritial_status_id).trim() !== '') {
+      entry.maritial_status_id = Number(prevM2.maritial_status_id);
+      entry.marital_status = Number(prevM2.maritial_status_id);
+    } else if (prevM2 && prevM2.marital_status !== undefined && prevM2.marital_status !== null && String(prevM2.marital_status).trim() !== '') {
+      entry.marital_status = Number(prevM2.marital_status);
+      entry.maritial_status_id = Number(prevM2.marital_status);
+    }
     // Benefit (v4.9.36): keep the SSNP / card / DSS values the form
     // (Pull) or the user set, through rebuilds — they are what the
-    // injector reads on Auto-Fill.
+    // injector reads on Auto-Fill. Default is No (0): the user asked
+    // for No as the default. A previous Yes survives a re-extract
+    // (matched by NID, else by name) because the AI omits these fields.
+    const prevM = prevMemberBenefit(prev, entry.nid_or_brn, entry.name_bn, entry.name_en);
     if (m?.is_ssnp_covered === 0 || m?.is_ssnp_covered === 1 || m?.is_ssnp_covered === '0' || m?.is_ssnp_covered === '1') {
       entry.is_ssnp_covered = Number(m.is_ssnp_covered);
+    } else if (prevM && (prevM.is_ssnp_covered === 0 || prevM.is_ssnp_covered === 1)) {
+      entry.is_ssnp_covered = Number(prevM.is_ssnp_covered);
+    } else {
+      entry.is_ssnp_covered = 0;
     }
     if (Array.isArray(m?.facilities_ids) && m.facilities_ids.length) {
       entry.facilities_ids = m.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
     }
     if (m?.is_dss_training_or_financial_benefit === 0 || m?.is_dss_training_or_financial_benefit === 1 || m?.is_dss_training_or_financial_benefit === '0' || m?.is_dss_training_or_financial_benefit === '1') {
       entry.is_dss_training_or_financial_benefit = Number(m.is_dss_training_or_financial_benefit);
+    } else if (prevM && (prevM.is_dss_training_or_financial_benefit === 0 || prevM.is_dss_training_or_financial_benefit === 1)) {
+      entry.is_dss_training_or_financial_benefit = Number(prevM.is_dss_training_or_financial_benefit);
+    } else {
+      entry.is_dss_training_or_financial_benefit = 0;
     }
 
     if (preserveOrder) {
@@ -3951,6 +4382,15 @@ function makeMemberHead(memberIdx) {
   const headRec = { ...newHead, relation: 'Head/Self', relationship_id: 260 };
   const oldHeadRel = recalc.oldHeadNewRel || 'Other Relative';
   const oldHeadRec = { ...oldHead, relation: oldHeadRel, relationship_id: RELATION_ID_MAP[oldHeadRel] || 263 };
+  // Role-specific profession (v4.9.39): the head uses the type-34
+  // `profession`, a member the type-44 `livelihood_profession_id`.
+  // Drop the old role's value on each side — the DOB derivation
+  // (in renderExtractedCards' recalculation) refills the new role's
+  // field from the DOB/gender, so a stale type-44 value never lands on
+  // the head form (or a type-34 value on a member row). Education and
+  // marital use the same keys in both roles, so they carry over.
+  delete headRec.livelihood_profession_id;
+  delete oldHeadRec.profession;
   const members = data.family_members.map((m, i) => {
     if (i === memberIdx) return oldHeadRec;
     const nr = recalc.relsByIdx[i];
@@ -3983,6 +4423,9 @@ function addManualMember() {
     mother_name_bn: '', mother_name_en: '',
     doc_type: 'NID', dob: '', nid: '', nid_or_brn: '',
     is_disabled: 0, is_currently_student: 0,
+    // Benefit defaults are No (0) — the user asked for No as the default.
+    is_ssnp_covered: 0, facilities_ids: [],
+    is_dss_training_or_financial_benefit: 0,
     source_images: []
   });
   renderExtractedCards(data);
@@ -4109,6 +4552,10 @@ function renderExtractedCards(data) {
   const buildEditableCard = (targetObj, fields, isMember = false, memberIdx = 0) => {
     const card = document.createElement('div');
     card.className = 'record-card';
+    // Tag the card so a change on one card (a parent's name, a DOB)
+    // can refresh another card's inputs in place (v4.9.39).
+    if (isMember) card.dataset.memberIdx = String(memberIdx);
+    else card.dataset.head = '1';
 
     const headEl = document.createElement('div');
     headEl.className = 'record-head';
