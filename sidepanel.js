@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.42-live';
+const CURRENT_VERSION_TAG = 'v4.9.44-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -840,26 +840,23 @@ function normalizeDob(rawDob) {
   return `${dd}-${mm}${monStr}-${yyyy}`;
 }
 
-// DOB auto-format (v4.9.42): typing just the digits fills in the
-// hyphens — 15011990 becomes 15-01-1990 as you type, so the hyphen
-// never needs typing. Pure function, so it is easy to test. The
-// panel's format is DD-MM-YYYY, so the digits are read in that
-// order; an 8-digit year-first value (19900115) is recognised and
-// flipped to DD-MM-YYYY instead of being mangled. A pasted date
-// with separators is stripped to digits and reformatted the same way.
-function formatDobInput(raw) {
+// DOB auto-format (v4.9.43): typing just the digits fills in the
+// hyphens — the hyphen appears as soon as two digits are typed, so
+// 20 becomes 20- and 2001 becomes 20-01-, and the hyphen never
+// needs typing. Day-first only: the panel, the NID card and the way
+// dates are typed here are all DD-MM-YYYY, so a year-first value
+// (19900115) is NOT flipped any more — it is read as day-first like
+// everything else. Pure function, so it is easy to test. `deleting`
+// is true when the user just pressed backspace: the trailing hyphen
+// is then left off, so deleting 20- gives 20 instead of getting
+// stuck on the hyphen.
+function formatDobInput(raw, deleting) {
   const digits = toEnglishDigits(String(raw || '')).replace(/\D+/g, '').slice(0, 8);
   if (!digits) return '';
-  if (digits.length === 8) {
-    const y = digits.slice(0, 4), m = digits.slice(4, 6), d = digits.slice(6, 8);
-    const yn = parseInt(y, 10), mn = parseInt(m, 10), dn = parseInt(d, 10);
-    if (yn >= 1900 && yn <= 2099 && mn >= 1 && mn <= 12 && dn >= 1 && dn <= 31) {
-      return `${d}-${m}-${y}`;
-    }
-    return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4, 8)}`;
-  }
   if (digits.length > 4) return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+  if (digits.length === 4) return deleting ? `${digits.slice(0, 2)}-${digits.slice(2, 4)}` : `${digits.slice(0, 2)}-${digits.slice(2, 4)}-`;
   if (digits.length > 2) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  if (digits.length === 2) return deleting ? digits : `${digits}-`;
   return digits;
 }
 
@@ -1136,7 +1133,15 @@ function professionIdForAgeGender(age, gender, isHead) {
 function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse) {
   if (age === null || age === undefined || age < 0) return null;
   if (age < 18) return 102; // Unmarried
-  if (isHead && !hasSpouse) return gender === 'Female' ? 103 : 276; // Widow / Widower
+  // Head: Married / বিবাহিত (101) only once a spouse is listed. With
+  // no spouse listed yet there is no guess — return null so the field
+  // stays blank. A missing spouse is not Widow / Widower (the husband
+  // is usually alive and just not added yet), and it is not Married
+  // either until the spouse is added. A real widow / widower is picked
+  // by hand (a hand-picked value is never overwritten). Adding the
+  // spouse later fills the blank with Married, because derivation
+  // runs again on every change.
+  if (isHead) return hasSpouse ? 101 : null; // Married, or blank
   if (MARRIED_RELATIONS_PANEL.includes(relation) || relation === 'Head/Self') return 101; // Married
   return 102; // Unmarried
 }
@@ -2005,7 +2010,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       toggleWarning(inputEl);
     });
 
-    inputEl.addEventListener('input', () => {
+    inputEl.addEventListener('input', (e) => {
       let val = inputEl.value;
       const oldVal = targetObj[f.key];
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
@@ -2013,13 +2018,16 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       } else if (f.key.endsWith('_en')) {
         val = val.toUpperCase();
       }
-      // DOB (v4.9.42): the hyphens fill themselves in — typing
-      // 15011990 shows 15-01-1990 as you type, so the hyphen never
-      // needs typing. The input is rewritten in place (the cursor
-      // lands at the end, which is where a left-to-right digit entry
-      // is). The [Mon] bracket is added back on blur by normalizeDob.
+      // DOB (v4.9.43): the hyphens fill themselves in — typing 20
+      // shows 20- and 2001 shows 20-01- as you type, so the hyphen
+      // never needs typing. The input is rewritten in place (the
+      // cursor lands at the end, which is where a left-to-right digit
+      // entry is). The [Mon] bracket is added back on blur by
+      // normalizeDob. When the user deletes, the trailing hyphen is
+      // left off, so backspace on 20- gives 20 instead of sticking.
       if (f.key === 'dob') {
-        val = formatDobInput(val);
+        const deleting = (e && e.inputType && String(e.inputType).indexOf('delete') === 0) || String(val).length < String(oldVal || '').length;
+        val = formatDobInput(val, deleting);
         inputEl.value = val;
       }
       targetObj[f.key] = val;

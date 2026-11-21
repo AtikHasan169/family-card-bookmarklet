@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v28';
+  const FC_INJECT_VERSION = 'v29';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1103,7 +1103,7 @@
   const MARRIED_RELATIONS = ['Husband', 'Wife', 'Father', 'Mother', 'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law'];
 
   function matchOptionItem(vInst, patterns, excludes = []) {
-    if (!vInst || !Array.isArray(vInst.items) || !vInst.items.length) return null;
+    if (!vInst || !Array.isArray(vInst.items) || !vInst.items.length || !patterns) return null;
     for (const pat of patterns) {
       const found = vInst.items.find(it => {
         const s = toEnDigits(itemToStr(it));
@@ -1341,9 +1341,11 @@
       marital = OPTION_PATTERNS.maritalUnmarried;
       maritalIds = [LOOKUP_IDS.marital.unmarried];
     } else if (relName === 'Head/Self' && !hasSpouseInHousehold) {
-      // Widow is gendered on the site: বিধবা (103) for women, বিপত্নীক (276) for men.
-      marital = OPTION_PATTERNS.maritalWidow;
-      maritalIds = female ? [LOOKUP_IDS.marital.widow] : [LOOKUP_IDS.marital.widower];
+      // No spouse listed yet: no guess — the field stays blank for the
+      // user to pick. A missing spouse is not Widow / Widower (the
+      // husband is usually alive and just not added yet), and not
+      // Married either until the spouse is added. marital stays null
+      // and maritalIds stays [], so resolveOptionChoice writes nothing.
     } else if (MARRIED_RELATIONS.includes(relName) || relName === 'Head/Self') {
       marital = OPTION_PATTERNS.maritalMarried;
       maritalIds = [LOOKUP_IDS.marital.married];
