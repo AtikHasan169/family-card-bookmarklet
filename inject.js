@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v35';
+  const FC_INJECT_VERSION = 'v36';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2647,6 +2647,14 @@
     }, 1000));
   }
 
+  // Pull helper (v36): a lookup id from the form model — a finite
+  // number above 0, else undefined (JSON drops undefined, so the
+  // panel sees "not on the form" instead of a bogus 0).
+  function pullId(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+
   function parseMemberRow(m) {
     const relId = Number(m.relationship_id || m.relation_id || 0);
     const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
@@ -2682,6 +2690,18 @@
       mother_name_bn: m.mother_name_bn || '',
       mother_name_en: m.mother_name_en || '',
       is_disabled: Number(m.is_member_disabled) === 1 ? 1 : 0,
+      // Dropdown values (v36): the pull never read these, so the
+      // panel showed the DOB guess (or blank) instead of what the
+      // form holds. The panel already keeps all of them from a pull
+      // payload (normalizeOutput) — the injector just never sent
+      // them. (literacy / student / income are NOT sent: the panel
+      // derives them from education + age, it has no card field for
+      // them.)
+      education_status_id: pullId(m.education_status_id),
+      livelihood_profession_id: pullId(m.livelihood_profession_id),
+      maritial_status_id: pullId(m.maritial_status_id),
+      disability_type_id: pullId(m.disability_type_id),
+      health_condition_id: pullId(m.health_condition_id),
       // Benefit (v26): what the form itself holds for this member.
       is_ssnp_covered: (m.is_ssnp_covered === 0 || m.is_ssnp_covered === 1) ? Number(m.is_ssnp_covered) : null,
       facilities_ids: Array.isArray(m.facilities_ids) ? m.facilities_ids.slice() : [],
@@ -3445,7 +3465,19 @@
   function findMediaVm(vmHead, allVms) {
     const hasMediaState = (v) => !!v && (
       v.imageDataUrl !== undefined || v.signatureDataUrl !== undefined ||
-      v.houseDataUrl !== undefined || v.storedImagePath !== undefined ||
+      v.houseDataUrl !== undefined || v.nomineeImageDataUrl !== undefined ||
+      v.nomineeSignatureDataUrl !== undefined ||
+      // A saved draft's photo lives in a *Url (a relative path the
+      // preview helper resolves) — without these the media component
+      // was never found and the photo never resolved (v36). A
+      // non-empty string is required, so a component that merely
+      // declares an empty imageUrl does not count as the media one.
+      (typeof v.imageUrl === 'string' && !!v.imageUrl) ||
+      (typeof v.signUrl === 'string' && !!v.signUrl) ||
+      (typeof v.houseImageUrl === 'string' && !!v.houseImageUrl) ||
+      (typeof v.nomineeImageUrl === 'string' && !!v.nomineeImageUrl) ||
+      (typeof v.nomineeSignUrl === 'string' && !!v.nomineeSignUrl) ||
+      v.storedImagePath !== undefined ||
       v.draftStoredImagePath !== undefined || v.storedSignaturePath !== undefined ||
       v.draftStoredSignaturePath !== undefined
     );
@@ -3630,6 +3662,17 @@
       const headVerType = Number(hSource.verification_type || row0.verification_type || 1);
       const headGenVal = normalizeGenderId(hSource.gender_id || hSource.gender || row0.gender_id || row0.gender || GENDER_FEMALE);
 
+      // MFS (v36): PMT question 138 lives in data.application_pmt
+      // (resolvePmtState / findPmtEntryIn — the same lookup the fill
+      // uses); its answer id is the panel's mfs_provider_id. A
+      // single-select answer is one id; a multi-select is an array.
+      const pullPmt = resolvePmtState(vmHead, allVms, d);
+      const pullMfsEntry = findPmtEntryIn(pullPmt.pmtArray, 138);
+      const pullMfsRaw = pullMfsEntry ? pullMfsEntry.sub_variables : undefined;
+      const pullMfsId = Array.isArray(pullMfsRaw)
+        ? pullMfsRaw.map(Number).find((n) => Number.isFinite(n) && n > 0)
+        : pullId(pullMfsRaw);
+
       const head = {
         doc_type: headVerType === 2 ? 'BRN' : 'NID',
         gender: headGenVal === GENDER_MALE ? 'Male' : (headGenVal === GENDER_OTHER ? 'Other' : 'Female'),
@@ -3644,6 +3687,27 @@
         father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
         mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
         mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || '',
+        // Education / profession / marital (v36): the head form's own
+        // dropdowns (data.education_status / profession /
+        // marital_status) — the pull never read them, so the panel
+        // showed the DOB guess (or blank for 27.5+) instead of what
+        // the form holds. Row 0 is the fallback for education/marital.
+        education_status_id: pullId(d.education_status || d.education_status_id || (row0IsHead ? row0.education_status_id : undefined)),
+        profession: pullId(d.profession),
+        marital_status: pullId(d.marital_status || d.maritial_status_id || (row0IsHead ? row0.maritial_status_id : undefined)),
+        // Disability / health / benefit (v36): the head's ride on the
+        // head member row (row 0) — the head form has no such fields.
+        ...(row0IsHead ? {
+          is_disabled: Number(row0.is_member_disabled) === 1 ? 1 : 0,
+          disability_type_id: pullId(row0.disability_type_id),
+          health_condition_id: pullId(row0.health_condition_id),
+          is_ssnp_covered: (row0.is_ssnp_covered === 0 || row0.is_ssnp_covered === 1) ? Number(row0.is_ssnp_covered) : undefined,
+          facilities_ids: Array.isArray(row0.facilities_ids) ? row0.facilities_ids.map(Number).filter((n) => !Number.isNaN(n)) : [],
+          is_dss_training_or_financial_benefit: (row0.is_dss_training_or_financial_benefit === 0 || row0.is_dss_training_or_financial_benefit === 1) ? Number(row0.is_dss_training_or_financial_benefit) : undefined
+        } : {}),
+        // MFS provider (v36): PMT 138's answer id (679 Bkash … 684 No
+        // Account), or undefined when the question is unanswered.
+        mfs_provider_id: pullMfsId,
         // Phone (v4.9.50): the head's mobile number, pulled back to the
         // panel card — the form's only mobile field is data.mobile on
         // the head form (the head row's mobile_number is the fallback).

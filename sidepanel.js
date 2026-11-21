@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.55-live';
+const CURRENT_VERSION_TAG = 'v4.9.56-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -2610,6 +2610,12 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
             toggleIdWarning(idIn, targetObj, idKey);
           }
         }
+        // Education popup (v4.9.56): the popup used to run only on
+        // Auto-Fill, so a hand-typed DOB never asked — a 27.5+
+        // person's education just stayed blank. Ask here, on the
+        // card only (the edit modal has no .record-card ancestor,
+        // so a DOB typed there never pops this modal).
+        if (cardContainer && cardContainer.closest && cardContainer.closest('.record-card')) maybeAskEducationAfterDob();
       }
       // Script-sensitive fields: the stored value is stripped as you
       // type, but the field itself keeps showing what was typed (so
@@ -6330,6 +6336,19 @@ function educationPopupTargets(extracted) {
   return targets;
 }
 
+// Blur-path targets (v4.9.56): the same rule as Auto-Fill, minus the
+// people the user already skipped asking about while typing. `skipped`
+// is a WeakSet of records (same pattern as manualDocTypePicked) —
+// the Auto-Fill path never consults it, so Auto-Fill still asks
+// about everyone, every run.
+function educationBlurTargets(extracted, skipped) {
+  return educationPopupTargets(extracted).filter((t) => {
+    if (!skipped) return true;
+    const rec = t.key === 'head' ? extracted.head : (extracted.family_members || [])[t.memberIndex];
+    return !skipped.has(rec);
+  });
+}
+
 // Apply the popup picks to the payload, in the exact places inject.js
 // reads: head -> head_options override (+ Head/Self row when present),
 // a member -> that member row. Choices is { head?: id,
@@ -6421,10 +6440,36 @@ function sendAutofillPayload() {
   setStatus('Sent auto-fill data (Members, Gender, Religion, Post Code & Area) to form!', 'ok');
 }
 
-function showEducationPopup(targets) {
+// A skip means "not now" for the typing path: remember the record,
+// or every blur of that DOB field pops the modal again. The
+// Auto-Fill path never consults this set — it asks everyone, every
+// run — so a skip here never silences Auto-Fill.
+const educationPopupSkipped = new WeakSet();
+
+// Typing path (v4.9.56): the popup used to run only on Auto-Fill, so
+// a hand-typed New Form never asked at all — a 27.5+ person's
+// education just stayed blank. Ask when a DOB blur leaves someone
+// 27.5+ with no education. The fill is NOT sent here (onDone is a
+// no-op); the pick lands on the card, and Auto-Fill still asks about
+// everyone when it runs.
+function maybeAskEducationAfterDob() {
+  const modal = $('eduModal');
+  if (modal && modal.classList.contains('open')) return false;
+  if (!state.lastExtracted) return false;
+  const targets = educationBlurTargets(state.lastExtracted, educationPopupSkipped);
+  if (!targets.length) return false;
+  showEducationPopup(targets, () => {});
+  return true;
+}
+
+function showEducationPopup(targets, onDone) {
+  // onDone defaults to the fill (the Auto-Fill path); the typing
+  // path passes a no-op, so answering a DOB question never fills
+  // the form by itself.
+  const done = typeof onDone === 'function' ? onDone : sendAutofillPayload;
   const modal = $('eduModal');
   // Older panel HTML without the modal: never block the fill.
-  if (!modal || !$('eduConfirmBtn') || !$('eduSkipBtn') || !$('closeEduBtn')) { sendAutofillPayload(); return; }
+  if (!modal || !$('eduConfirmBtn') || !$('eduSkipBtn') || !$('closeEduBtn')) { done(); return; }
   const rowsEl = $('eduModalRows');
   if (rowsEl) {
     rowsEl.innerHTML = '';
@@ -6453,8 +6498,17 @@ function showEducationPopup(targets) {
     });
   }
   const close = () => {
+    // A skip is "not now" for the typing path (v4.9.56): remember
+    // every target's record, or the next blur of that DOB field pops
+    // the modal again. Auto-Fill still asks about everyone.
+    if (state.lastExtracted) {
+      targets.forEach((t) => {
+        const rec = t.key === 'head' ? state.lastExtracted.head : (state.lastExtracted.family_members || [])[t.memberIndex];
+        if (rec) educationPopupSkipped.add(rec);
+      });
+    }
     modal.classList.remove('open');
-    sendAutofillPayload(); // Skip = leave it blank (no age guess for 27+).
+    done(); // Skip = leave it blank (no age guess for 27+).
   };
   const confirm = () => {
     const choices = {};
@@ -6467,8 +6521,20 @@ function showEducationPopup(targets) {
     saveSessionState();
     const rawOut = $('rawJsonOutput');
     if (rawOut) rawOut.textContent = JSON.stringify(state.lastExtracted, null, 2);
+    // Show the pick on the card right away (v4.9.56): the record
+    // changed, but the card's Education select only refreshes on a
+    // re-render — and on the typing path there is no re-render.
+    targets.forEach((t) => {
+      const isHead = t.key === 'head';
+      const rec = isHead ? state.lastExtracted.head : (state.lastExtracted.family_members || [])[t.memberIndex];
+      if (!rec) return;
+      const card = isHead
+        ? document.querySelector('.record-card[data-head="1"]')
+        : document.querySelector(`.record-card[data-member-idx="${t.memberIndex}"]`);
+      if (card) refreshDerivedSelects(card, rec, isHead);
+    });
     modal.classList.remove('open');
-    sendAutofillPayload();
+    done();
   };
   $('eduConfirmBtn').onclick = confirm;
   $('eduSkipBtn').onclick = close;
