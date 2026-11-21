@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.46-live';
+const CURRENT_VERSION_TAG = 'v4.9.47-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -818,6 +818,20 @@ function toEnglishDigits(str) {
   return String(str).replace(/[০-৯]/g, (d) => '০১২৩৪৫৬৭৮৯'.indexOf(d));
 }
 
+// The site's name rules (app.js: bangla_character / english): a Bangla
+// name holds only Bangla letters, spaces and . : ( ) - , — no English
+// letters; an English name holds only English letters, dots, spaces,
+// commas, hyphens, parentheses. Strip anything else, so a wrong-script
+// letter typed in a name field never reaches the form.
+function stripLatinLetters(str) {
+  if (!str) return '';
+  return String(str).replace(/[A-Za-z]/g, '').replace(/\s+/g, ' ').trim();
+}
+function stripNonEnglishName(str) {
+  if (!str) return '';
+  return String(str).replace(/[^a-zA-Z. ,()\-]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function normalizeDob(rawDob) {
   let s = toEnglishDigits(rawDob).trim();
   if (!s) return '';
@@ -888,10 +902,82 @@ function calculateAgeYears(rawDob) {
   return age >= 0 && age < 130 ? age : null;
 }
 
+// Exact (fractional) age in years from a DOB — whole years plus the
+// fraction of the current year since the last birthday. Only the
+// education ladder uses it (HSC below 23.5, Graduate below 25.5, PG
+// below 27.5); everything else keeps whole years from
+// calculateAgeYears. Pure function, so it is easy to test.
+function calculateAgeFractional(rawDob) {
+  const whole = calculateAgeYears(rawDob);
+  if (whole === null || whole < 0) return null;
+  const clean = toEnglishDigits(String(rawDob || '')).replace(/\[.*?\]/g, '').trim();
+  if (!clean) return null;
+  let dd, mm, yyyy;
+  const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    dd = parseInt(dmy[1], 10);
+    mm = parseInt(dmy[2], 10);
+    yyyy = parseInt(dmy[3], 10);
+  } else {
+    const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (ymd) {
+      yyyy = parseInt(ymd[1], 10);
+      mm = parseInt(ymd[2], 10);
+      dd = parseInt(ymd[3], 10);
+    } else {
+      return null;
+    }
+  }
+  const today = new Date();
+  let lastBday = new Date(today.getFullYear(), mm - 1, dd);
+  if (lastBday > today) lastBday = new Date(today.getFullYear() - 1, mm - 1, dd);
+  const nextBday = new Date(lastBday.getFullYear() + 1, mm - 1, dd);
+  const span = nextBday - lastBday;
+  if (!span || span <= 0) return whole;
+  const age = whole + (today - lastBday) / span;
+  return age >= 0 && age < 130 ? age : null;
+}
+
 function dobToSortable(dobStr) {
   const clean = String(dobStr || '').replace(/\[.*?\]/g, '');
   const dmy = clean.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   return dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : String(dobStr || '');
+}
+
+// NID/BRN digit checker (v4.9.47): the site's own checkNumber rule —
+// NID: 10 digits not starting with 0, or 17 digits starting 19/20;
+// BRN: 17 digits starting 19/20 only. A 13-digit old NID fails the
+// site rule, so it is converted by prepending the birth year from the
+// person's DOB (13 + 4 = 17 digits, starting 19/20 — which passes).
+// Returns { value, ok, warning } — `value` is the (possibly converted)
+// digits, `warning` is '' when the number is fine, otherwise a short
+// Bangla message for the card. Pure function, so it is easy to test.
+function idBirthYear(rawDob) {
+  const clean = toEnglishDigits(String(rawDob || '')).replace(/\[.*?\]/g, '').trim();
+  if (!clean) return null;
+  let yyyy = null;
+  const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) yyyy = Number(dmy[3]);
+  else {
+    const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (ymd) yyyy = Number(ymd[1]);
+  }
+  return (yyyy !== null && yyyy >= 1900 && yyyy <= 2099) ? String(yyyy) : null;
+}
+
+function checkIdNumber(rawId, rawDob, docType) {
+  const digits = toEnglishDigits(String(rawId || '')).replace(/\s+/g, '');
+  if (!digits) return { value: '', ok: false, warning: '' };
+  const isBrn = String(docType || '').toUpperCase().trim() === 'BRN';
+  if (!isBrn && /^[1-9][0-9]{9}$/.test(digits)) return { value: digits, ok: true, warning: '' };
+  if (/^(19|20)[0-9]{15}$/.test(digits)) return { value: digits, ok: true, warning: '' };
+  if (/^[0-9]{13}$/.test(digits)) {
+    const y = idBirthYear(rawDob);
+    if (y) return { value: y + digits, ok: true, warning: '' };
+    return { value: digits, ok: false, warning: '১৩ সংখ্যার NID — জন্মসাল লাগবে (DOB দিন)' };
+  }
+  if (isBrn) return { value: digits, ok: false, warning: 'BRN ১৭ সংখ্যা হতে হবে (১৯/২০ দিয়ে শুরু)' };
+  return { value: digits, ok: false, warning: 'NID ভুল — ১০ বা ১৭ সংখ্যা হতে হবে' };
 }
 
 function inferDocType(idStr, explicitType) {
@@ -1097,26 +1183,36 @@ function saveSessionState() {
 // run live in the panel when a DOB is typed so the user sees the
 // defaults before filling. A derived value only ever fills a BLANK
 // field — a value the user picked by hand is never overwritten.
-// Education is NOT auto-filled for a 25+ head or spouse: the education
-// popup asks for those on Auto-Fill instead, and a filled value would
-// stop it asking. Other 25+ members get the injector's 190 guess.
+// Education for a 27.5+ person is left blank (no age guess): the
+// education popup asks for those on Auto-Fill instead, and a filled
+// value would stop it asking. Everyone below 27.5 gets the ladder
+// value shown on their card, and the user corrects it by hand from
+// the default via the card dropdown.
 const MARRIED_RELATIONS_PANEL = ['Husband', 'Wife', 'Father', 'Mother', 'Father-in-law', 'Mother-in-law', 'Son-in-law', 'Daughter-in-law'];
 
+// Fractional ladder (v4.9.47): `age` is the EXACT age in years —
+// calculateAgeFractional(dob) — not whole years. The school bands
+// below 18 still use whole years (a 10.7-year-old is still in
+// Class 1-4), but the top bands switch mid-year: HSC below 23.5,
+// Graduate 23.5–25.5 (honours finishes at 24, masters takes 1.2–1.8
+// years in BD), Post Graduate 25.5–27.5, and blank from 27.5 — no
+// Class 1-4 guess, the user picks it.
 function educationIdForAge(age) {
   if (age === null || age === undefined || age < 0) return null;
-  if (age < 3) return 88;      // নিরক্ষর
-  if (age <= 5) return 188;    // Play/Nursery/KG/Pre-Primary
-  if (age === 6) return 189;   // Class 1
-  if (age <= 10) return 190;   // Class 1-4
-  if (age === 11) return 191;  // Class 5/PSC
-  if (age <= 13) return 192;   // Class 6-7
-  if (age === 14) return 89;   // JSC/8th
-  if (age === 15) return 193;  // Class 9
-  if (age < 18) return 90;     // SSC
-  if (age <= 23) return 91;    // HSC (HSC finishes at 19 in BD; honours takes 5 years with the gap and admission delays)
-  if (age <= 24) return 92;    // Graduate (honours finishes at 24)
-  if (age <= 25) return 93;    // Post Graduate
-  return 190;                  // 26+ Class 1-4 (the injector's guess)
+  const whole = Math.floor(age);
+  if (whole < 3) return 88;      // নিরক্ষর
+  if (whole <= 5) return 188;    // Play/Nursery/KG/Pre-Primary
+  if (whole === 6) return 189;   // Class 1
+  if (whole <= 10) return 190;   // Class 1-4
+  if (whole === 11) return 191;  // Class 5/PSC
+  if (whole <= 13) return 192;   // Class 6-7
+  if (whole === 14) return 89;   // JSC/8th
+  if (whole === 15) return 193;  // Class 9
+  if (whole < 18) return 90;     // SSC
+  if (age < 23.5) return 91;     // HSC
+  if (age < 25.5) return 92;     // Graduate
+  if (age < 27.5) return 93;     // Post Graduate
+  return null;                   // 27.5+ blank — no guess, the user picks it
 }
 
 // Profession for the head (type-34) or livelihood for a member
@@ -1130,7 +1226,22 @@ function professionIdForAgeGender(age, gender, isHead) {
   return isHead ? 151 : 210;                 // adult male: Farmer / Agriculture
 }
 
-function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse) {
+// Spouse-presence marital inference (v4.9.47): a Son is married when
+// the household has his wife (a Daughter-in-law), a Daughter when it
+// has her husband (a Son-in-law). Only when there is exactly ONE son
+// / daughter — with several, nobody knows which one is married, so
+// they stay Unmarried and the user picks it by hand. `members` is the
+// panel's family_members list. Returns { son, daughter }.
+function spousePresenceFlags(members) {
+  const list = Array.isArray(members) ? members : [];
+  const count = (rel) => list.filter((m) => m && m.relation === rel).length;
+  return {
+    son: count('Daughter-in-law') > 0 && count('Son') === 1,
+    daughter: count('Son-in-law') > 0 && count('Daughter') === 1
+  };
+}
+
+function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse, flags) {
   if (age === null || age === undefined || age < 0) return null;
   if (age < 18) return 102; // Unmarried
   // Head: Married / বিবাহিত (101) is the default, with or without a
@@ -1143,16 +1254,23 @@ function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse) {
   // overwritten).
   if (isHead) return 101; // Married
   if (MARRIED_RELATIONS_PANEL.includes(relation) || relation === 'Head/Self') return 101; // Married
+  // Spouse-presence (v4.9.47): a Daughter-in-law in the household
+  // proves the (only) Son is married; a Son-in-law proves the (only)
+  // Daughter is. Age alone never makes anyone married.
+  if (flags && flags.son && relation === 'Son') return 101; // Married
+  if (flags && flags.daughter && relation === 'Daughter') return 101; // Married
   return 102; // Unmarried
 }
 
 // The three derived ids for one person, or null per field.
-function derivedIdsFor(age, gender, relation, isHead, hasSpouse) {
+// `ageFrac` is the exact age (calculateAgeFractional) — the education
+// ladder reads it; when it is not given, the whole-year `age` is used
+// (the old whole-year behaviour). `flags` is spousePresenceFlags().
+function derivedIdsFor(age, gender, relation, isHead, hasSpouse, ageFrac, flags) {
   if (age === null || age === undefined || age < 0) return { education: null, profession: null, marital: null };
-  const isPopupTarget = isHead || relation === 'Husband' || relation === 'Wife';
-  const education = (isPopupTarget && age >= 25) ? null : educationIdForAge(age);
+  const education = educationIdForAge(ageFrac !== undefined && ageFrac !== null ? ageFrac : age);
   const profession = professionIdForAgeGender(age, gender, isHead);
-  const marital = maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse);
+  const marital = maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse, flags);
   return { education, profession, marital };
 }
 
@@ -1166,12 +1284,13 @@ function isBlankVal(v) {
 // livelihood list and `livelihood_profession_id` + `maritial_status_id`.
 // Returns the keys that were filled, so the caller can refresh the
 // matching selects in place.
-function deriveFromDob(targetObj, isHead, hasSpouse) {
+function deriveFromDob(targetObj, isHead, hasSpouse, flags) {
   const filled = [];
   if (!targetObj) return filled;
   const age = calculateAgeYears(targetObj.dob);
   if (age === null || age < 0) return filled;
-  const ids = derivedIdsFor(age, targetObj.gender, isHead ? 'Head/Self' : (targetObj.relation || ''), isHead, hasSpouse);
+  const ageFrac = calculateAgeFractional(targetObj.dob);
+  const ids = derivedIdsFor(age, targetObj.gender, isHead ? 'Head/Self' : (targetObj.relation || ''), isHead, hasSpouse, ageFrac, flags);
   if (ids.education !== null && isBlankVal(targetObj.education_status_id)) {
     targetObj.education_status_id = ids.education; filled.push('education_status_id');
   }
@@ -1193,7 +1312,7 @@ function deriveFromDob(targetObj, isHead, hasSpouse) {
 // Apply a re-derivation: for each field, if it is blank or still holds
 // the OLD derivation (it was auto-filled, not hand-picked), set it to
 // the NEW derivation — or clear it when the new age/relation has no
-// derivation (a 25+ head/spouse's education, so the popup asks). A
+// derivation (a 27.5+ person's education, so the popup asks). A
 // hand-picked value differs from the old derivation and is left alone.
 // Returns the changed keys.
 function applyDerivedChange(targetObj, oldIds, newIds, isHead) {
@@ -1223,38 +1342,46 @@ function applyDerivedChange(targetObj, oldIds, newIds, isHead) {
 
 // After a DOB change, re-derive the fields that still hold the OLD
 // age's derived value (they were auto-filled, not hand-picked).
-function rederiveFromDobChange(targetObj, oldAge, isHead, hasSpouse) {
+// `oldAgeFrac` is the exact age before the change — the old education
+// was derived from it, so the comparison must use it too (a whole-year
+// old age would misread a 23.7-year-old's Graduate as hand-picked).
+function rederiveFromDobChange(targetObj, oldAge, isHead, hasSpouse, oldAgeFrac, flags) {
   if (!targetObj) return [];
   const newAge = calculateAgeYears(targetObj.dob);
-  if (newAge === null || newAge < 0 || oldAge === newAge) return [];
+  if (newAge === null || newAge < 0) return [];
+  // No whole-year shortcut here: a DOB change inside one whole year
+  // can still cross a fractional band (23.2 -> 23.7 is HSC -> Graduate).
+  const newAgeFrac = calculateAgeFractional(targetObj.dob);
   const rel = isHead ? 'Head/Self' : (targetObj.relation || '');
-  const oldIds = derivedIdsFor(oldAge, targetObj.gender, rel, isHead, hasSpouse);
-  const newIds = derivedIdsFor(newAge, targetObj.gender, rel, isHead, hasSpouse);
+  const oldIds = derivedIdsFor(oldAge, targetObj.gender, rel, isHead, hasSpouse, oldAgeFrac, flags);
+  const newIds = derivedIdsFor(newAge, targetObj.gender, rel, isHead, hasSpouse, newAgeFrac, flags);
   return applyDerivedChange(targetObj, oldIds, newIds, isHead);
 }
 
 // After a relation change, re-derive the fields that still hold the
 // derivation for the OLD relation (marital + profession depend on it).
-function rederiveFromRelationChange(targetObj, oldRelation, isHead, hasSpouse) {
+function rederiveFromRelationChange(targetObj, oldRelation, isHead, hasSpouse, flags) {
   if (!targetObj) return [];
   const age = calculateAgeYears(targetObj.dob);
   if (age === null || age < 0) return [];
+  const ageFrac = calculateAgeFractional(targetObj.dob);
   const newRel = isHead ? 'Head/Self' : (targetObj.relation || '');
   if (oldRelation === newRel) return [];
-  const oldIds = derivedIdsFor(age, targetObj.gender, oldRelation, isHead, hasSpouse);
-  const newIds = derivedIdsFor(age, targetObj.gender, newRel, isHead, hasSpouse);
+  const oldIds = derivedIdsFor(age, targetObj.gender, oldRelation, isHead, hasSpouse, ageFrac, flags);
+  const newIds = derivedIdsFor(age, targetObj.gender, newRel, isHead, hasSpouse, ageFrac, flags);
   return applyDerivedChange(targetObj, oldIds, newIds, isHead);
 }
 
 // After a gender change, re-derive the profession (it depends on gender).
-function rederiveFromGenderChange(targetObj, oldGender, isHead, hasSpouse) {
+function rederiveFromGenderChange(targetObj, oldGender, isHead, hasSpouse, flags) {
   if (!targetObj) return [];
   const age = calculateAgeYears(targetObj.dob);
   if (age === null || age < 0) return [];
   if (oldGender === targetObj.gender) return [];
+  const ageFrac = calculateAgeFractional(targetObj.dob);
   const rel = isHead ? 'Head/Self' : (targetObj.relation || '');
-  const oldIds = derivedIdsFor(age, oldGender, rel, isHead, hasSpouse);
-  const newIds = derivedIdsFor(age, targetObj.gender, rel, isHead, hasSpouse);
+  const oldIds = derivedIdsFor(age, oldGender, rel, isHead, hasSpouse, ageFrac, flags);
+  const newIds = derivedIdsFor(age, targetObj.gender, rel, isHead, hasSpouse, ageFrac, flags);
   return applyDerivedChange(targetObj, oldIds, newIds, isHead);
 }
 
@@ -1492,11 +1619,12 @@ function recalculateHouseholdSummary(data) {
   // father/mother names come from the head + spouse. Only blank fields
   // are filled — a hand-picked value is never overwritten.
   const hasSpouse = Array.isArray(data.family_members) && data.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife');
+  const flags = spousePresenceFlags(data.family_members);
   if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
-    deriveFromDob(data.head, true, hasSpouse);
+    deriveFromDob(data.head, true, hasSpouse, flags);
   }
   if (Array.isArray(data.family_members)) {
-    data.family_members.forEach((m) => deriveFromDob(m, false, hasSpouse));
+    data.family_members.forEach((m) => deriveFromDob(m, false, hasSpouse, flags));
   }
   applyChildParentNames(data);
 
@@ -1680,11 +1808,41 @@ function toggleWarning(el) {
   else el.classList.remove('field-warning');
 }
 
+// NID/BRN digit warning (v4.9.47): the site rejects a wrong-length
+// ID, so the card flags it — amber + a Bangla reason on hover —
+// instead of failing silently on the form. Runs after toggleWarning,
+// so it wins for an ID field. A 13-digit NID with no DOB yet warns
+// that the birth year is needed; once the DOB is typed the blur
+// handler converts it and the warning clears.
+function toggleIdWarning(el, targetObj, key) {
+  if (!el || !targetObj) return;
+  const chk = checkIdNumber(targetObj[key], targetObj.dob, targetObj.doc_type);
+  el.title = chk.warning || '';
+  if (chk.warning) el.classList.add('field-warning');
+  else if (el.value && el.value.trim() !== '') el.classList.remove('field-warning');
+}
+
+// Convert a 13-digit NID on the card to 17 digits with the birth year
+// (v4.9.47). Returns true when it changed anything — the caller then
+// refreshes the input and the JSON. Only ever runs on blur / after a
+// DOB change, never while typing (a 17-digit number passes through
+// 13 digits mid-typing).
+function convertCardIdNumber(inputEl, targetObj, key) {
+  if (!inputEl || !targetObj) return false;
+  const chk = checkIdNumber(targetObj[key], targetObj.dob, targetObj.doc_type);
+  if (chk.value && chk.value !== targetObj[key]) {
+    targetObj[key] = chk.value;
+    inputEl.value = chk.value;
+    return true;
+  }
+  return false;
+}
+
 // Refresh a card's derived selects from its record, in place (no
 // re-render, so the user does not lose focus). Called after a DOB /
 // relation / gender change fills a derived value. Always syncs to the
 // record — including a blank, when a re-derivation cleared the field
-// (a 25+ head/spouse whose education goes back to blank so the popup asks).
+// (a 27.5+ person whose education goes back to blank so the popup asks).
 function refreshDerivedSelects(cardContainer, targetObj, isHead) {
   if (!cardContainer || !targetObj) return;
   const setSel = (field, val) => {
@@ -1751,7 +1909,8 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // names (the data fill runs in syncJsonOutput below).
       const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
       const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
-      rederiveFromRelationChange(targetObj, oldRel, !!isHead, hasSpouse);
+      const flags = spousePresenceFlags(state.lastExtracted && state.lastExtracted.family_members);
+      rederiveFromRelationChange(targetObj, oldRel, !!isHead, hasSpouse, flags);
       syncJsonOutput();
       // The data was just re-derived by syncJsonOutput; refresh the
       // selects and the father/mother inputs in place so the user sees
@@ -1777,7 +1936,11 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl = document.createElement('select');
     inputEl.setAttribute('data-field', 'gender');
     inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
-    GENDER_OPTIONS.forEach((opt) => {
+    // The head is always a woman (v4.9.47): the head card offers
+    // Female only — a male head is not possible any more.
+    const isHeadCard = state.lastExtracted && state.lastExtracted.head === targetObj;
+    if (isHeadCard && targetObj.gender !== 'Female') { targetObj.gender = 'Female'; targetObj.gender_id = 2; }
+    GENDER_OPTIONS.filter((opt) => !isHeadCard || opt.value === 'Female').forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt.value;
       o.textContent = opt.label;
@@ -1794,7 +1957,8 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // for a value that was auto-filled under the old gender.
       const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
       const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
-      rederiveFromGenderChange(targetObj, oldGender, !!isHead, hasSpouse);
+      const flags = spousePresenceFlags(state.lastExtracted && state.lastExtracted.family_members);
+      rederiveFromGenderChange(targetObj, oldGender, !!isHead, hasSpouse, flags);
       syncJsonOutput();
       if (cardContainer) refreshDerivedSelects(cardContainer, targetObj, !!isHead);
     });
@@ -2003,6 +2167,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.addEventListener('blur', () => {
       if (f.key === 'dob') {
         const oldAge = calculateAgeYears(targetObj.dob);
+        const oldAgeFrac = calculateAgeFractional(targetObj.dob);
         targetObj.dob = normalizeDob(inputEl.value);
         inputEl.value = targetObj.dob;
         targetObj.age = calculateAgeYears(targetObj.dob);
@@ -2011,11 +2176,36 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         // age's derived value (auto-filled, not hand-picked).
         const isHead = state.lastExtracted && state.lastExtracted.head === targetObj;
         const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
-        rederiveFromDobChange(targetObj, oldAge, !!isHead, hasSpouse);
+        const flags = spousePresenceFlags(state.lastExtracted && state.lastExtracted.family_members);
+        rederiveFromDobChange(targetObj, oldAge, !!isHead, hasSpouse, oldAgeFrac, flags);
         syncJsonOutput();
         if (cardContainer) refreshDerivedSelects(cardContainer, targetObj, !!isHead);
+        // A DOB typed after the NID can make a 13-digit NID
+        // convertible — convert the card's NID input now.
+        if (cardContainer) {
+          const idIn = cardContainer.querySelector('input[data-field="nid"], input[data-field="nid_or_brn"]');
+          if (idIn) {
+            const idKey = idIn.getAttribute('data-field');
+            if (convertCardIdNumber(idIn, targetObj, idKey)) syncJsonOutput();
+            toggleIdWarning(idIn, targetObj, idKey);
+          }
+        }
+      }
+      // Script-sensitive fields: the stored value is stripped as you
+      // type, but the field itself keeps showing what was typed (so
+      // Bangla conjunct typing is never disturbed mid-word). On blur,
+      // show the stored value, so the field matches what will fill.
+      if (f.key === 'nid' || f.key === 'nid_or_brn' || f.key.endsWith('_bn') || f.key.endsWith('_en')) {
+        inputEl.value = targetObj[f.key] || '';
       }
       toggleWarning(inputEl);
+      // NID/BRN (v4.9.47): a finished 13-digit NID converts to 17
+      // digits with the birth year; a wrong-length ID is flagged on
+      // the card instead of failing on the form.
+      if (f.key === 'nid' || f.key === 'nid_or_brn') {
+        if (convertCardIdNumber(inputEl, targetObj, f.key)) syncJsonOutput();
+        toggleIdWarning(inputEl, targetObj, f.key);
+      }
     });
 
     inputEl.addEventListener('input', (e) => {
@@ -2024,7 +2214,12 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
         val = toEnglishDigits(val).replace(/\s+/g, '');
       } else if (f.key.endsWith('_en')) {
-        val = val.toUpperCase();
+        // English name: only the site's allowed characters survive
+        // (Latin letters, dots, spaces, commas, hyphens, parentheses).
+        val = stripNonEnglishName(val).toUpperCase();
+      } else if (f.key.endsWith('_bn')) {
+        // Bangla name: no English letters.
+        val = stripLatinLetters(val);
       }
       // DOB (v4.9.43): the hyphens fill themselves in — typing 20
       // shows 20- and 2001 shows 20-01- as you type, so the hyphen
@@ -2044,6 +2239,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         if (onUpdateMeta) onUpdateMeta();
       }
       toggleWarning(inputEl);
+      if (f.key === 'nid' || f.key === 'nid_or_brn') toggleIdWarning(inputEl, targetObj, f.key);
       syncJsonOutput();
       // Typing a DOB fills blank derived fields live (the fill runs in
       // syncJsonOutput above); show them in the selects right away.
@@ -2093,6 +2289,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     });
   }
   toggleWarning(inputEl);
+  if (f.key === 'nid' || f.key === 'nid_or_brn') toggleIdWarning(inputEl, targetObj, f.key);
   return inputEl;
 }
 
@@ -4110,23 +4307,27 @@ function prevMemberBenefit(prev, nidOrBrn, nameBn, nameEn) {
 function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
-  const cleanHeadId = toEnglishDigits(s(h.nid)).replace(/\s+/g, '');
-  const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
   const headDob = normalizeDob(h.dob);
+  // 13-digit old NID -> 17 digits with the birth year (v4.9.47); a
+  // wrong-length ID stays as typed and the card warns about it.
+  const cleanHeadId = checkIdNumber(s(h.nid), headDob, h.doc_type).value;
+  const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
   const headAge = calculateAgeYears(headDob);
 
   const head = {
-    doc_type: inferDocType(cleanHeadId, h.doc_type),
+    // A 13-digit number is always an old NID (a BRN is 17 digits), so
+    // a converted 13-digit ID stays NID even though it is 17 digits now.
+    doc_type: toEnglishDigits(s(h.nid)).replace(/\s+/g, '').length === 13 ? 'NID' : inferDocType(cleanHeadId, h.doc_type),
     gender: headGender,
     gender_id: GENDER_ID_MAP[headGender] || 2,
     religion: s(h.religion) || 'Islam',
     religion_id: RELIGION_ID_MAP[s(h.religion)] || 1,
-    name_bn: s(h.name_bn),
-    name_en: formatEnglishName(h.name_en),
-    father_name_bn: s(h.father_name_bn),
-    father_name_en: formatEnglishName(h.father_name_en),
-    mother_name_bn: s(h.mother_name_bn),
-    mother_name_en: formatEnglishName(h.mother_name_en),
+    name_bn: stripLatinLetters(s(h.name_bn)),
+    name_en: stripNonEnglishName(formatEnglishName(h.name_en)),
+    father_name_bn: stripLatinLetters(s(h.father_name_bn)),
+    father_name_en: stripNonEnglishName(formatEnglishName(h.father_name_en)),
+    mother_name_bn: stripLatinLetters(s(h.mother_name_bn)),
+    mother_name_en: stripNonEnglishName(formatEnglishName(h.mother_name_en)),
     nid: cleanHeadId,
     dob: headDob,
     age: headAge,
@@ -4188,7 +4389,10 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     // Skip empty ghost entries from NID back-side images
     const rawNameBn = s(m?.name_bn);
     const rawNameEn = s(m?.name_en);
-    const cleanMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
+    const rawMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
+    const memDobEarly = normalizeDob(m?.dob);
+    // 13-digit old NID -> 17 digits with the birth year (v4.9.47).
+    const cleanMemId = checkIdNumber(rawMemId, memDobEarly, m?.doc_type).value;
     if (!rawNameBn && !rawNameEn && !cleanMemId) continue;
 
     let rel = s(m?.relation);
@@ -4207,7 +4411,7 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       rel = 'Son';
     }
 
-    const memDob = normalizeDob(m?.dob);
+    const memDob = memDobEarly;
     const memAge = calculateAgeYears(memDob);
 
     const entry = {
@@ -4217,11 +4421,12 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       gender_id: GENDER_ID_MAP[memGender] || 1,
       religion: s(m?.religion) || 'Islam',
       religion_id: RELIGION_ID_MAP[s(m?.religion)] || 1,
-      doc_type: inferDocType(cleanMemId, m?.doc_type),
-      name_bn: rawNameBn,
-      name_en: formatEnglishName(rawNameEn),
-      father_name_bn: s(m?.father_name_bn),
-      mother_name_bn: s(m?.mother_name_bn),
+      // A 13-digit number is always an old NID (a BRN is 17 digits).
+      doc_type: rawMemId.length === 13 ? 'NID' : inferDocType(cleanMemId, m?.doc_type),
+      name_bn: stripLatinLetters(rawNameBn),
+      name_en: stripNonEnglishName(formatEnglishName(rawNameEn)),
+      father_name_bn: stripLatinLetters(s(m?.father_name_bn)),
+      mother_name_bn: stripLatinLetters(s(m?.mother_name_bn)),
       nid_or_brn: cleanMemId,
       dob: memDob,
       age: memAge,
@@ -4665,11 +4870,26 @@ function recordHeadCorrection(key, value) {
 // programme for the new head on the next fill, so the old detection
 // is cleared; head corrections recorded for the old head are cleared
 // too (they belong to that person, not the new head).
+// The head is always a woman (v4.9.47): a male member cannot be made
+// head. Gender comes from the record, falling back to the relation
+// (Son / Husband / ... are male). Pure function, so it is easy to test.
+function canMakeHead(member) {
+  if (!member) return false;
+  const g = (member.gender && GENDER_ID_MAP[member.gender])
+    ? member.gender
+    : (RELATION_GENDER_MAP[member.relation] || '');
+  return g !== 'Male';
+}
+
 function makeMemberHead(memberIdx) {
   const data = state.lastExtracted;
   if (!data || !Array.isArray(data.family_members) || !data.family_members[memberIdx]) return;
   const oldHead = data.head;
   const newHead = data.family_members[memberIdx];
+  if (!canMakeHead(newHead)) {
+    setStatus('প্রধান সবসময় নারী — পুরুষ সদস্যকে প্রধান করা যাবে না।', 'err');
+    return;
+  }
   const recalc = recalculateRelationsForNewHead(oldHead, data.family_members, memberIdx);
   if (!recalc) return;
   const headRec = { ...newHead, relation: 'Head/Self', relationship_id: 260 };
@@ -5367,7 +5587,6 @@ const EDUCATION_OPTIONS = [
   { id: 92, label: 'স্নাতক / Graduate' },
   { id: 93, label: 'স্নাতকোত্তর / Post Graduate' }
 ];
-const EDUCATION_GUESS_ID = 190;
 
 function eduAgeYears(rawDob) {
   const clean = String(rawDob || '').replace(/\[.*?\]/g, '').trim();
@@ -5386,6 +5605,43 @@ function eduAgeYears(rawDob) {
   return age;
 }
 
+// Exact (fractional) age for the popup threshold — same parsing as
+// eduAgeYears, but whole years plus the fraction of the current year
+// since the last birthday. The popup asks from 27.5, so the fraction
+// matters (a 27.4-year-old still gets the PG guess, a 27.6-year-old
+// is asked). Self-contained (no calculateAgeFractional dependency)
+// so this block stays extractable on its own.
+function eduAgeFractional(rawDob) {
+  const clean = String(rawDob || '').replace(/\[.*?\]/g, '').trim();
+  if (!clean) return null;
+  let dd, mm, yyyy;
+  const dmy = clean.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) { dd = +dmy[1]; mm = +dmy[2]; yyyy = +dmy[3]; }
+  else {
+    const ymd = clean.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (!ymd) return null;
+    yyyy = +ymd[1]; mm = +ymd[2]; dd = +ymd[3];
+  }
+  const today = new Date();
+  let whole = today.getFullYear() - yyyy;
+  if (today.getMonth() + 1 < mm || (today.getMonth() + 1 === mm && today.getDate() < dd)) whole--;
+  if (whole < 0 || whole >= 130) return null;
+  let lastBday = new Date(today.getFullYear(), mm - 1, dd);
+  if (lastBday > today) lastBday = new Date(today.getFullYear() - 1, mm - 1, dd);
+  const nextBday = new Date(lastBday.getFullYear() + 1, mm - 1, dd);
+  const span = nextBday - lastBday;
+  if (!span || span <= 0) return whole;
+  return whole + (today - lastBday) / span;
+}
+
+// NID/BRN digits, normalised for matching: Bangla digits -> English,
+// whitespace stripped. Local to this block so the extracted helpers
+// stay self-contained (no toEnglishDigits dependency).
+function eduNormId(v) {
+  const bn = '০১২৩৪৫৬৭৮৯';
+  return String(v || '').replace(/[০-৯]/g, (d) => String(bn.indexOf(d))).replace(/\s+/g, '');
+}
+
 function eduPersonName(p, fallback) {
   const n = (p && (p.name_en || p.name_bn) || '').trim();
   return n || fallback;
@@ -5395,8 +5651,12 @@ function eduHasExplicitId(v) {
   return v !== undefined && v !== null && String(v).trim() !== '';
 }
 
-// Who needs asking: head and/or spouse, 25+, with no explicit education
-// anywhere the injector would read it. Returns [] when nothing to ask.
+// Who needs asking: EVERYONE 27.5+ (head, spouse, all members) with
+// no explicit education anywhere the injector would read it. Below
+// 27.5 the ladder gives a real band, shown on the card — no popup.
+// Returns [] when nothing to ask. A target's `age` is whole years
+// (for display); the 27.5 test uses the fractional age. Keys are
+// 'head' for the head and 'member:<idx>' for members.
 function educationPopupTargets(extracted) {
   if (!extracted || !extracted.head) return [];
   const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
@@ -5404,27 +5664,28 @@ function educationPopupTargets(extracted) {
   const headRowIdx = members.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
   const headRow = headRowIdx >= 0 ? members[headRowIdx] : null;
   const targets = [];
-  const headAge = eduAgeYears(extracted.head.dob);
+  const headAgeFrac = eduAgeFractional(extracted.head.dob);
   const headExplicit = eduHasExplicitId(headOpts.education_status)
     || eduHasExplicitId(extracted.head.education_status_id)
     || (headRow && eduHasExplicitId(headRow.education_status_id));
-  if (headAge !== null && headAge >= 25 && !headExplicit) {
-    targets.push({ key: 'head', memberIndex: headRowIdx, name: eduPersonName(extracted.head, 'প্রধান (Head)'), age: headAge });
+  if (headAgeFrac !== null && headAgeFrac >= 27.5 && !headExplicit) {
+    targets.push({ key: 'head', memberIndex: headRowIdx, name: eduPersonName(extracted.head, 'প্রধান (Head)'), age: eduAgeYears(extracted.head.dob), role: 'প্রধান / Head', relation: 'Head/Self', nid: eduNormId(extracted.head.nid) });
   }
-  const spouseIdx = members.findIndex(m => m && (m.relation === 'Husband' || m.relation === 'Wife'));
-  if (spouseIdx >= 0) {
-    const spouse = members[spouseIdx];
-    const spouseAge = eduAgeYears(spouse.dob);
-    if (spouseAge !== null && spouseAge >= 25 && !eduHasExplicitId(spouse.education_status_id)) {
-      targets.push({ key: 'spouse', memberIndex: spouseIdx, name: eduPersonName(spouse, spouse.relation || 'স্বামী/স্ত্রী (Spouse)'), age: spouseAge });
-    }
-  }
+  members.forEach((m, idx) => {
+    if (!m) return;
+    if (m.relation === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260) return; // head row — already covered above
+    const ageFrac = eduAgeFractional(m.dob);
+    if (ageFrac === null || ageFrac < 27.5) return;
+    if (eduHasExplicitId(m.education_status_id)) return;
+    targets.push({ key: 'member:' + idx, memberIndex: idx, name: eduPersonName(m, m.relation || 'সদস্য (Member)'), age: eduAgeYears(m.dob), role: m.relation || 'সদস্য (Member)', relation: m.relation || '', nid: eduNormId(m.nid_or_brn || m.nid) });
+  });
   return targets;
 }
 
 // Apply the popup picks to the payload, in the exact places inject.js
 // reads: head -> head_options override (+ Head/Self row when present),
-// spouse -> that member row. Choices is { head?: id, spouse?: id }.
+// a member -> that member row. Choices is { head?: id,
+// 'member:<idx>'?: id } (the old 'spouse' key still works).
 // The head pick ALSO goes on the head record itself
 // (head.education_status_id): the panel's family_members has no
 // Head/Self row (the injector adds the head as row 0 at fill time), so
@@ -5435,30 +5696,47 @@ function educationPopupTargets(extracted) {
 function applyEducationChoices(extracted, choices) {
   if (!extracted || !choices) return extracted;
   const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
-  if (choices.head !== undefined && choices.head !== null && String(choices.head) !== '') {
+  if (choices.head !== undefined && choices.head !== null && Number(choices.head) > 0) {
     extracted.form_defaults = extracted.form_defaults || {};
     extracted.form_defaults.head_options = Object.assign({}, extracted.form_defaults.head_options, { education_status: Number(choices.head) });
     if (extracted.head) extracted.head.education_status_id = Number(choices.head);
     const headRowIdx = members.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
     if (headRowIdx >= 0) members[headRowIdx].education_status_id = Number(choices.head);
   }
-  if (choices.spouse !== undefined && choices.spouse !== null && String(choices.spouse) !== '') {
+  if (choices.spouse !== undefined && choices.spouse !== null && Number(choices.spouse) > 0) {
     const spouseIdx = members.findIndex(m => m && (m.relation === 'Husband' || m.relation === 'Wife'));
     if (spouseIdx >= 0) members[spouseIdx].education_status_id = Number(choices.spouse);
   }
+  Object.keys(choices).forEach((k) => {
+    if (!k || k.indexOf('member:') !== 0) return;
+    const idx = Number(k.slice('member:'.length));
+    const v = choices[k];
+    if (Number.isNaN(idx) || idx < 0 || idx >= members.length) return;
+    if (v !== undefined && v !== null && Number(v) > 0) members[idx].education_status_id = Number(v);
+  });
   return extracted;
 }
 
 // Drop popup targets whose education is already on the live form
 // (hand-filled, or filled by an earlier run). live is
-// { head?: id|null, spouse?: id|null } from the injector, or null when
-// the injector never answered — then nothing is dropped, so the fill
-// is never blocked by the check.
+// { head?: id|null, spouse?: id|null, members?: [{ nid, education }] }
+// from the injector, or null when the injector never answered — then
+// nothing is dropped, so the fill is never blocked by the check.
 function filterEducationTargetsByLive(targets, live) {
   if (!live || !Array.isArray(targets)) return targets;
+  const byNid = {};
+  if (Array.isArray(live.members)) {
+    live.members.forEach((e) => {
+      if (e && eduHasExplicitId(e.education)) byNid[eduNormId(e.nid)] = Number(e.education);
+    });
+  }
   return targets.filter((t) => {
-    const liveId = t.key === 'head' ? live.head : (t.key === 'spouse' ? live.spouse : null);
-    return !eduHasExplicitId(liveId);
+    if (t.key === 'head') return !eduHasExplicitId(live.head);
+    if (t.nid && byNid[t.nid]) return false;
+    // Old injector (no per-member list): a spouse's live value still
+    // drops the spouse target.
+    if ((t.relation === 'Husband' || t.relation === 'Wife') && eduHasExplicitId(live.spouse)) return false;
+    return true;
   });
 }
 
@@ -5470,9 +5748,23 @@ function rememberLiveEducation(extracted, live) {
   const choices = {};
   if (eduHasExplicitId(live.head)) choices.head = Number(live.head);
   if (eduHasExplicitId(live.spouse)) choices.spouse = Number(live.spouse);
-  if (!Object.keys(choices).length) return false;
+  if (!Object.keys(choices).length && !Array.isArray(live.members)) return false;
   applyEducationChoices(extracted, choices);
-  return true;
+  let stored = Object.keys(choices).length > 0;
+  if (Array.isArray(live.members)) {
+    const members = Array.isArray(extracted.family_members) ? extracted.family_members : [];
+    live.members.forEach((e) => {
+      if (!e || !eduHasExplicitId(e.education)) return;
+      const nid = eduNormId(e.nid);
+      if (!nid) return;
+      const idx = members.findIndex((m) => m && eduNormId(m.nid_or_brn || m.nid) === nid);
+      if (idx >= 0 && !eduHasExplicitId(members[idx].education_status_id)) {
+        members[idx].education_status_id = Number(e.education);
+        stored = true;
+      }
+    });
+  }
+  return stored;
 }
 // --- end education popup pure helpers ---
 
@@ -5492,14 +5784,19 @@ function showEducationPopup(targets) {
       const wrap = document.createElement('div');
       const label = document.createElement('label');
       label.style.cssText = 'display:block; font-size:13px; font-weight:600; margin-bottom:6px;';
-      label.textContent = `${t.name} — ${t.age} বছর (${t.key === 'head' ? 'প্রধান / Head' : 'স্বামী/স্ত্রী / Spouse'})`;
+      label.textContent = `${t.name} — ${t.age} বছর (${t.role || (t.key === 'head' ? 'প্রধান / Head' : 'স্বামী/স্ত্রী / Spouse')})`;
       const sel = document.createElement('select');
       sel.dataset.eduKey = t.key;
+      // No pre-selected guess: 27+ has no age guess at all (blank is
+      // better than a wrong Class 1-4), so the dropdown starts blank
+      // and the user picks. Confirm skips a blank choice.
+      const blank = document.createElement('option');
+      blank.value = ''; blank.textContent = '—'; blank.selected = true;
+      sel.appendChild(blank);
       EDUCATION_OPTIONS.forEach((opt) => {
         const o = document.createElement('option');
         o.value = String(opt.id);
         o.textContent = opt.label;
-        if (opt.id === EDUCATION_GUESS_ID) o.selected = true;
         sel.appendChild(o);
       });
       wrap.appendChild(label);
@@ -5509,12 +5806,12 @@ function showEducationPopup(targets) {
   }
   const close = () => {
     modal.classList.remove('open');
-    sendAutofillPayload(); // Skip = the age guess, exactly as before.
+    sendAutofillPayload(); // Skip = leave it blank (no age guess for 27+).
   };
   const confirm = () => {
     const choices = {};
     (rowsEl ? rowsEl.querySelectorAll('select[data-edu-key]') : []).forEach((sel) => {
-      choices[sel.dataset.eduKey] = Number(sel.value);
+      if (sel.value !== '') choices[sel.dataset.eduKey] = Number(sel.value);
     });
     applyEducationChoices(state.lastExtracted, choices);
     // Persist the pick now, or a panel reload loses it and the popup
@@ -5557,8 +5854,24 @@ function requestLiveEducation(timeoutMs = 1000) {
 async function triggerFormAutofill() {
   if (!state.lastExtracted) return;
   handleAreaPresetChange();
-  // The popup asks only when the 25+ age guess (Class 1-4) would be used
-  // for the head or the spouse — and only for this run.
+  // NID/BRN check (v4.9.47): warn about a wrong-length ID before
+  // filling — the card already flags it, but name it here too so a
+  // bad ID is never missed. The fill still goes ahead (the site
+  // rejects only the bad field, and the user may fix it on the form).
+  {
+    const bad = [];
+    const headChk = checkIdNumber(state.lastExtracted.head && state.lastExtracted.head.nid, state.lastExtracted.head && state.lastExtracted.head.dob, state.lastExtracted.head && state.lastExtracted.head.doc_type);
+    if (state.lastExtracted.head && state.lastExtracted.head.nid && headChk.warning) bad.push('প্রধান (Head)');
+    (Array.isArray(state.lastExtracted.family_members) ? state.lastExtracted.family_members : []).forEach((m) => {
+      if (!m || !m.nid_or_brn) return;
+      const chk = checkIdNumber(m.nid_or_brn, m.dob, m.doc_type);
+      if (chk.warning) bad.push(m.name_bn || m.name_en || m.relation || 'সদস্য');
+    });
+    if (bad.length) setStatus(`সতর্কতা — NID/BRN ঠিক নয়: ${bad.join(', ')}। ঠিক করে নিন, নাহলে ফর্মে ভুল দেখাবে।`, 'err');
+  }
+  // The popup asks for everyone 27.5+ with no explicit education —
+  // and only for this run. (27.5+ has no age guess at all, so
+  // skipping leaves it blank instead of filling Class 1-4.)
   let targets = educationPopupTargets(state.lastExtracted);
   if (targets.length) {
     // Ask the form first: a hand-filled education (or one from an

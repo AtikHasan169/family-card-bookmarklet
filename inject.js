@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v31';
+  const FC_INJECT_VERSION = 'v32';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -72,6 +72,54 @@
 
   const toBnDigits = (str) => String(str ?? '').replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[d]);
   const toEnDigits = (str) => String(str ?? '').replace(/[০-৯]/g, d => '০১২৩৪৫৬৭৮৯'.indexOf(d));
+
+  // The site's name rules (app.js: bangla_character / english): a Bangla
+  // name holds only Bangla letters, spaces and . : ( ) - , — no English
+  // letters; an English name holds only English letters, dots, spaces,
+  // commas, hyphens, parentheses. Strip anything else.
+  const stripLatinLetters = (str) => String(str ?? '').replace(/[A-Za-z]/g, '').replace(/\s+/g, ' ').trim();
+  const stripNonEnglishName = (str) => String(str ?? '').replace(/[^a-zA-Z. ,()\-]/g, '').replace(/\s+/g, ' ').trim();
+
+  // v32: normalize script-sensitive fields once, up front, so every
+  // downstream use (row matching, refill check, writing) sees the same
+  // clean values. The site only accepts English digits in NID/BRN
+  // (checkNumber tests the raw value against ^[1-9][0-9]{9}$ /
+  // ^(19|20)[0-9]{15}$) and only its allowed characters in names, so a
+  // Bangla-digit NID and wrong-script letters in a name are stripped
+  // here instead of failing validation on the form. Mutates the
+  // handler's copy of the payload only (postMessage structured-clones
+  // it, so the panel's record is untouched).
+  function normalizePayloadScripts(payload) {
+    if (!payload) return payload;
+    const cleanPerson = (p) => {
+      if (!p) return;
+      ['nid', 'nid_or_brn', 'brn_id', 'verification_number'].forEach((k) => {
+        if (p[k] !== undefined && p[k] !== null) p[k] = toEnDigits(String(p[k])).replace(/\s+/g, '');
+      });
+      // 13-digit old NID -> 17 digits with the birth year (v4.9.47):
+      // the site only accepts 10 or 17 digits, so a 13-digit NID
+      // would fail validation on the form. Without a DOB there is no
+      // birth year to prepend, so it stays 13 digits (the panel
+      // already warned about it on the card).
+      ['nid', 'nid_or_brn', 'brn_id', 'verification_number'].forEach((k) => {
+        const v = p[k];
+        if (typeof v === 'string' && /^[0-9]{13}$/.test(v)) {
+          const parts = parseDobParts(p.dob);
+          const y = parts ? Number(parts.yyyy) : NaN;
+          if (y >= 1900 && y <= 2099) p[k] = String(y) + v;
+        }
+      });
+      ['name_bn', 'father_name_bn', 'mother_name_bn'].forEach((k) => {
+        if (p[k] !== undefined && p[k] !== null) p[k] = stripLatinLetters(p[k]);
+      });
+      ['name_en', 'father_name_en', 'mother_name_en'].forEach((k) => {
+        if (p[k] !== undefined && p[k] !== null) p[k] = stripNonEnglishName(p[k]);
+      });
+    };
+    cleanPerson(payload.head);
+    (Array.isArray(payload.family_members) ? payload.family_members : []).forEach(cleanPerson);
+    return payload;
+  }
 
   function resolveGenderId(memberObj) {
     if (!memberObj) return GENDER_MALE;
@@ -214,6 +262,27 @@
     const mDiff = (today.getMonth() + 1) - mm;
     if (mDiff < 0 || (mDiff === 0 && today.getDate() < dd)) age--;
     return age;
+  }
+
+  // Exact (fractional) age in years — whole years plus the fraction of
+  // the current year since the last birthday. Only the education
+  // ladder uses it (HSC below 23.5, Graduate below 25.5, PG below
+  // 27.5); everything else keeps whole years from calculateAgeYears.
+  function calculateAgeFractional(rawDob) {
+    const whole = calculateAgeYears(rawDob);
+    if (whole === null || whole < 0) return null;
+    const parts = parseDobParts(rawDob);
+    if (!parts) return whole;
+    const mm = parseInt(parts.mm, 10);
+    const dd = parseInt(parts.dd, 10);
+    const today = new Date();
+    let lastBday = new Date(today.getFullYear(), mm - 1, dd);
+    if (lastBday > today) lastBday = new Date(today.getFullYear() - 1, mm - 1, dd);
+    const nextBday = new Date(lastBday.getFullYear() + 1, mm - 1, dd);
+    const span = nextBday - lastBday;
+    if (!span || span <= 0) return whole;
+    const age = whole + (today - lastBday) / span;
+    return age >= 0 && age < 130 ? age : null;
   }
 
   function findAllVueComponents(rootVm, filterFn, visited = new Set()) {
@@ -1279,7 +1348,7 @@
     return clicked;
   }
 
-  function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold) {
+  function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold, spousePresence) {
     const relName = m.relation || '';
     const isChild = age !== null && age < 18;
     const isLittleChild = age !== null && age < 4;
@@ -1290,16 +1359,17 @@
     const female = isFemaleGenderId(genderId);
     const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
-    // Education by age band, using the real type-8 ids. Student ages
-    // 18-24 follow the study ladder (HSC 18-23 -> Graduate 24 -> Post
-    // Graduate 25); HSC finishes at 19 in BD, and honours takes 5
-    // years with the gap and admission delays, so 18-23 are still
-    // students with HSC as their highest finished level. A 25-year-old
-    // gets Post Graduate (93) — not a student any more, but masters is
-    // done by then. Age 26+ defaults to Class 1-4 (190) — override via
+    // Education by age band, using the real type-8 ids. The school
+    // bands below 18 use whole years, but the top bands switch
+    // mid-year on the EXACT age (fractional): HSC below 23.5,
+    // Graduate 23.5–25.5 (honours finishes at 24, masters takes
+    // 1.2–1.8 years in BD), Post Graduate 25.5–27.5. Age 27.5+ has no
+    // guess at all (blank, never Class 1-4) — override via
     // form_defaults if the real level is known.
     let education = null, educationIds = [];
     if (age !== null) {
+      const ageFrac = calculateAgeFractional(m.dob);
+      const frac = (ageFrac !== null && ageFrac !== undefined) ? ageFrac : age;
       if (age < 3) { education = OPTION_PATTERNS.educationNone; educationIds = [E.none]; }
       else if (age <= 5) { education = OPTION_PATTERNS.educationPrePrimary; educationIds = [E.prePrimary, E.none]; }
       else if (age === 6) { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1, E.class1to4]; }
@@ -1309,10 +1379,10 @@
       else if (age === 14) { education = OPTION_PATTERNS.educationJsc; educationIds = [E.jsc, E.class6to7]; }
       else if (age === 15) { education = OPTION_PATTERNS.educationClass9; educationIds = [E.class9, E.jsc]; }
       else if (age < 18) { education = OPTION_PATTERNS.educationSsc; educationIds = [E.ssc, E.class9]; }
-      else if (age <= 23) { education = OPTION_PATTERNS.educationHsc; educationIds = [E.hsc, E.ssc]; }
-      else if (age <= 24) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
-      else if (age <= 25) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
-      else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
+      else if (frac < 23.5) { education = OPTION_PATTERNS.educationHsc; educationIds = [E.hsc, E.ssc]; }
+      else if (frac < 25.5) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
+      else if (frac < 27.5) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
+      else { education = null; educationIds = []; } // 27.5+ blank — no Class 1-4 guess
     }
 
     // Literacy follows education in three levels: নিরক্ষর (88) cannot
@@ -1341,6 +1411,13 @@
 
     let marital = null, maritalIds = [];
     let maritalExcludes = [];
+    const marriedIds = () => {
+      marital = OPTION_PATTERNS.maritalMarried;
+      maritalIds = [LOOKUP_IDS.marital.married];
+      // "বিবাহিত" is a substring of "অবিবাহিত" — exclude the unmarried
+      // option when we actually want Married.
+      maritalExcludes = [/অবিবাহিত|unmarried/i];
+    };
     if (isChild) {
       marital = OPTION_PATTERNS.maritalUnmarried;
       maritalIds = [LOOKUP_IDS.marital.unmarried];
@@ -1351,11 +1428,15 @@
       // tried in v29 and reverted: with a blank marital the site hides
       // the spouse-name field and the spouse-name fill below is skipped,
       // so nothing got added when Husband was selected.)
-      marital = OPTION_PATTERNS.maritalMarried;
-      maritalIds = [LOOKUP_IDS.marital.married];
-      // "বিবাহিত" is a substring of "অবিবাহিত" — exclude the unmarried
-      // option when we actually want Married.
-      maritalExcludes = [/অবিবাহিত|unmarried/i];
+      marriedIds();
+    } else if (spousePresence && spousePresence.son && relName === 'Son') {
+      // Spouse-presence (v4.9.47): a Daughter-in-law in the household
+      // proves the (only) Son is married. Age alone never makes
+      // anyone married.
+      marriedIds();
+    } else if (spousePresence && spousePresence.daughter && relName === 'Daughter') {
+      // A Son-in-law in the household proves the (only) Daughter is married.
+      marriedIds();
     } else {
       marital = OPTION_PATTERNS.maritalUnmarried;
       maritalIds = [LOOKUP_IDS.marital.unmarried];
@@ -1550,6 +1631,17 @@
 
     const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
 
+    // Spouse-presence marital inference (v4.9.47): a Daughter-in-law
+    // proves the Son is married, a Son-in-law proves the Daughter is
+    // — but only when there is exactly ONE son / daughter. With
+    // several, nobody knows which one is married, so they stay
+    // Unmarried and the user picks it by hand.
+    const countRel = (rel) => targetMemberList.filter((mm) => mm && mm.relation === rel).length;
+    const spousePresence = {
+      son: countRel('Daughter-in-law') > 0 && countRel('Son') === 1,
+      daughter: countRel('Son-in-law') > 0 && countRel('Daughter') === 1
+    };
+
     // ---- Member selects: resolve the id once per field, write into each row.
     const memberSelectFields = [
       { key: 'literacy_id', patternsOf: (p) => p.literacy, excludesOf: () => [], idsOf: (p) => p.literacyIds },
@@ -1575,7 +1667,7 @@
         if (onlyEmpty && !isForcedRowField && !isEmptyModelVal(row[field.key])) continue;
         const age = calculateAgeYears(m.dob);
         const genderId = resolveGenderId(m);
-        const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
+        const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold, spousePresence);
         const patterns = field.patternsOf(pats) || [];
         let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
         // Literacy follows the education: নিরক্ষর (88) -> "cannot read
@@ -1698,7 +1790,7 @@
       const headAge = calculateAgeYears(headMember.dob);
       const headGenderId = resolveGenderId({ ...headMember, relation: 'Head/Self' });
       const headPats = memberOptionPatterns(
-        { ...headMember, relation: 'Head/Self' }, headAge, headGenderId, hasSpouseInHousehold
+        { ...headMember, relation: 'Head/Self' }, headAge, headGenderId, hasSpouseInHousehold, spousePresence
       );
       const headFields = [
         { keys: ['education_status'], patternsOf: (p) => p.education, excludesOf: () => [], idsOf: (p) => p.educationIds },
@@ -2762,6 +2854,7 @@
   window.addEventListener('FC_PRO_AUTOFILL', async (event) => {
     const payload = event.detail;
     if (!payload) return;
+    normalizePayloadScripts(payload); // v32: Bangla-digit NID -> English, wrong-script name letters stripped
 
     if (autofillInFlight) {
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
@@ -3592,7 +3685,15 @@
       // The spouse row: Husband (159) or Wife (186).
       const spouseRow = rows.find((r) => r && (Number(r.relationship_id) === 159 || Number(r.relationship_id) === 186));
       const spouseEdu = spouseRow ? (Number(spouseRow.education_status_id || 0) || null) : null;
-      reply({ version: FC_INJECT_VERSION, success: true, head: headEdu, spouse: spouseEdu });
+      // Every row's education, keyed by NID/BRN (v4.9.47): the popup
+      // now asks all 27.5+ members, not just the head and spouse, so
+      // the panel needs each member's live value to skip the ones
+      // already filled on the form.
+      const membersEdu = rows.map((r) => ({
+        nid: String(r.verification_number || r.nid || r.brn_id || '').trim(),
+        education: Number(r.education_status_id || 0) || null
+      })).filter((e) => e.nid);
+      reply({ version: FC_INJECT_VERSION, success: true, head: headEdu, spouse: spouseEdu, members: membersEdu });
     } catch (err) {
       reply({ version: FC_INJECT_VERSION, success: false, message: String(err && err.message || err) });
     }
