@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.41-live';
+const CURRENT_VERSION_TAG = 'v4.9.42-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -140,8 +140,10 @@ const HEAD_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid', label: 'NID / BRN No' },
+  // Doc Type above the number (v4.9.42): the type says what the
+  // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'nid', label: 'NID / BRN No' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
@@ -163,8 +165,10 @@ const MEMBER_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid_or_brn', label: 'NID / BRN No' },
+  // Doc Type above the number (v4.9.42): the type says what the
+  // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'nid_or_brn', label: 'NID / BRN No' },
   // Education / profession / marital (v4.9.39): same three the head card
   // has, so a member's derived values (e.g. the husband's Agriculture)
   // are visible and changeable offline. Profession here is the type-44
@@ -834,6 +838,29 @@ function normalizeDob(rawDob) {
   const monStr = (mIndex >= 0 && mIndex < 12) ? `[${MONTH_NAMES[mIndex]}]` : '';
 
   return `${dd}-${mm}${monStr}-${yyyy}`;
+}
+
+// DOB auto-format (v4.9.42): typing just the digits fills in the
+// hyphens — 15011990 becomes 15-01-1990 as you type, so the hyphen
+// never needs typing. Pure function, so it is easy to test. The
+// panel's format is DD-MM-YYYY, so the digits are read in that
+// order; an 8-digit year-first value (19900115) is recognised and
+// flipped to DD-MM-YYYY instead of being mangled. A pasted date
+// with separators is stripped to digits and reformatted the same way.
+function formatDobInput(raw) {
+  const digits = toEnglishDigits(String(raw || '')).replace(/\D+/g, '').slice(0, 8);
+  if (!digits) return '';
+  if (digits.length === 8) {
+    const y = digits.slice(0, 4), m = digits.slice(4, 6), d = digits.slice(6, 8);
+    const yn = parseInt(y, 10), mn = parseInt(m, 10), dn = parseInt(d, 10);
+    if (yn >= 1900 && yn <= 2099 && mn >= 1 && mn <= 12 && dn >= 1 && dn <= 31) {
+      return `${d}-${m}-${y}`;
+    }
+    return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4, 8)}`;
+  }
+  if (digits.length > 4) return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+  if (digits.length > 2) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  return digits;
 }
 
 function calculateAgeYears(rawDob) {
@@ -1956,7 +1983,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.type = 'text';
     inputEl.setAttribute('data-field', f.key);
     inputEl.value = targetObj[f.key] || '';
-    inputEl.placeholder = f.key === 'dob' ? 'DD-MM-YYYY' : '—';
+    inputEl.placeholder = f.key === 'dob' ? 'e.g. 15011990' : '—';
     inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
     if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
 
@@ -1985,6 +2012,15 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         val = toEnglishDigits(val).replace(/\s+/g, '');
       } else if (f.key.endsWith('_en')) {
         val = val.toUpperCase();
+      }
+      // DOB (v4.9.42): the hyphens fill themselves in — typing
+      // 15011990 shows 15-01-1990 as you type, so the hyphen never
+      // needs typing. The input is rewritten in place (the cursor
+      // lands at the end, which is where a left-to-right digit entry
+      // is). The [Mon] bracket is added back on blur by normalizeDob.
+      if (f.key === 'dob') {
+        val = formatDobInput(val);
+        inputEl.value = val;
       }
       targetObj[f.key] = val;
       if (f.key === 'dob') {
