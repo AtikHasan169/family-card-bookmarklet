@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.52-live';
+const CURRENT_VERSION_TAG = 'v4.9.54-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -140,10 +140,11 @@ const HEAD_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  // Doc Type above the number (v4.9.42): the type says what the
-  // number is (NID or BRN), so it comes first, then the number.
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid', label: 'NID / BRN No' },
+  // Doc Type under the number (v4.9.54): the number is typed first
+  // and the type follows it — 17 digits flip it to BRN live — so the
+  // user never has to pick the type before typing the number.
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   // Phone + MFS (v4.9.49, v4.9.50): the head's mobile number fills the
   // form's ONE mobile field, data.mobile (the form never asks for a
   // mobile anywhere else); the MFS pick fills PMT field 138
@@ -178,10 +179,11 @@ const MEMBER_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  // Doc Type above the number (v4.9.42): the type says what the
-  // number is (NID or BRN), so it comes first, then the number.
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid_or_brn', label: 'NID / BRN No' },
+  // Doc Type under the number (v4.9.54): the number is typed first
+  // and the type follows it — 17 digits flip it to BRN live — so the
+  // user never has to pick the type before typing the number.
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   // (No member Mobile: the form asks for a mobile number in ONE place
   // only — data.mobile on the head form. Member rows never render a
   // mobile input, so the member card has no Mobile field. v4.9.50.)
@@ -928,9 +930,18 @@ function normalizeDob(rawDob) {
   const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
   if (dmy) { dd = dmy[1]; mm = dmy[2]; yyyy = dmy[3]; }
   else {
-    const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-    if (ymd) { yyyy = ymd[1]; mm = ymd[2]; dd = ymd[3]; }
-    else return s;
+    // Two-digit year (v4.9.53, fixed v4.9.54): a year typed short —
+    // 06, 11 — counts as the 2000s, so 2006 / 2011. (v4.9.53 had it
+    // backwards as 19xx — the user corrected it: 06 means 2006.)
+    // Only on blur, never while typing (a 4-digit year passes through
+    // 2 digits mid-typing).
+    const dmy2 = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+    if (dmy2) { dd = dmy2[1]; mm = dmy2[2]; yyyy = '20' + dmy2[3]; }
+    else {
+      const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+      if (ymd) { yyyy = ymd[1]; mm = ymd[2]; dd = ymd[3]; }
+      else return s;
+    }
   }
 
   dd = dd.padStart(2, '0');
@@ -941,21 +952,26 @@ function normalizeDob(rawDob) {
   return `${dd}-${mm}${monStr}-${yyyy}`;
 }
 
-// DOB auto-format (v4.9.43): typing just the digits fills in the
-// hyphens — the hyphen appears as soon as two digits are typed, so
+// DOB auto-format (v4.9.43, v4.9.53): typing just the digits fills in
+// the hyphens — the hyphen appears as soon as two digits are typed, so
 // 20 becomes 20- and 2001 becomes 20-01-, and the hyphen never
 // needs typing. Day-first only: the panel, the NID card and the way
 // dates are typed here are all DD-MM-YYYY, so a year-first value
 // (19900115) is NOT flipped any more — it is read as day-first like
-// everything else. Pure function, so it is easy to test. `deleting`
-// is true when the user just pressed backspace: the trailing hyphen
-// is then left off, so deleting 20- gives 20 instead of getting
-// stuck on the hyphen.
+// everything else. The month name shows up immediately too (v4.9.53):
+// once the month's two digits are typed, 1501 becomes 15-01[Jan]-
+// while typing, not only on blur — only for a real month (01–12).
+// Pure function, so it is easy to test. `deleting` is true when the
+// user just pressed backspace: the trailing hyphen is then left off,
+// so deleting 20- gives 20 instead of getting stuck on the hyphen.
 function formatDobInput(raw, deleting) {
   const digits = toEnglishDigits(String(raw || '')).replace(/\D+/g, '').slice(0, 8);
   if (!digits) return '';
-  if (digits.length > 4) return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
-  if (digits.length === 4) return deleting ? `${digits.slice(0, 2)}-${digits.slice(2, 4)}` : `${digits.slice(0, 2)}-${digits.slice(2, 4)}-`;
+  const mm = digits.length >= 4 ? digits.slice(2, 4) : '';
+  const mIndex = parseInt(mm, 10) - 1;
+  const monStr = (mm && mIndex >= 0 && mIndex < 12) ? `[${MONTH_NAMES[mIndex]}]` : '';
+  if (digits.length > 4) return `${digits.slice(0, 2)}-${digits.slice(2, 4)}${monStr}-${digits.slice(4)}`;
+  if (digits.length === 4) return deleting ? `${digits.slice(0, 2)}-${digits.slice(2, 4)}` : `${digits.slice(0, 2)}-${digits.slice(2, 4)}${monStr}-`;
   if (digits.length > 2) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
   if (digits.length === 2) return deleting ? digits : `${digits}-`;
   return digits;
@@ -1735,10 +1751,19 @@ function recalculateHouseholdSummary(data) {
   const hasSpouse = Array.isArray(data.family_members) && data.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife');
   const flags = spousePresenceFlags(data.family_members);
   if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
-    deriveFromDob(data.head, true, hasSpouse, flags);
+    // Remember the age the fields were derived from (v4.9.54): a
+    // wrong year fills wrong values, and only this age identifies
+    // that derivation when the year is corrected later.
+    if (deriveFromDob(data.head, true, hasSpouse, flags).length) {
+      dobDerivedAge.set(data.head, { age: calculateAgeYears(data.head.dob), ageFrac: calculateAgeFractional(data.head.dob) });
+    }
   }
   if (Array.isArray(data.family_members)) {
-    data.family_members.forEach((m) => deriveFromDob(m, false, hasSpouse, flags));
+    data.family_members.forEach((m) => {
+      if (deriveFromDob(m, false, hasSpouse, flags).length) {
+        dobDerivedAge.set(m, { age: calculateAgeYears(m.dob), ageFrac: calculateAgeFractional(m.dob) });
+      }
+    });
   }
   applyChildParentNames(data);
 
@@ -1985,6 +2010,14 @@ const manualDocTypePicked = new WeakSet();
 // the birth year was prepended, so they are NIDs, not BRNs. A Set of
 // digit strings — it survives rebuilds, unlike a record flag.
 const converted13NidValues = new Set();
+
+// The age a record's derived fields were last based on (v4.9.54):
+// deriveFromDob fills blank fields from the DOB as soon as it parses,
+// so a wrong year leaves wrong values behind — correcting the year
+// must re-derive them, and the only age that identifies the wrong
+// derivation is the one it was filled from. WeakMap — it never enters
+// the JSON.
+const dobDerivedAge = new WeakMap();
 
 // Convert a 13-digit NID on the card to 17 digits with the birth year
 // (v4.9.47). Returns true when it changed anything — the caller then
@@ -2517,8 +2550,13 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
 
     inputEl.addEventListener('blur', () => {
       if (f.key === 'dob') {
-        const oldAge = calculateAgeYears(targetObj.dob);
-        const oldAgeFrac = calculateAgeFractional(targetObj.dob);
+        // The OLD age comes from dobDerivedAge when the fields were
+        // derived (v4.9.54) — targetObj.dob is already the new value
+        // by blur time, so computing oldAge from it would equal
+        // newAge and the re-derivation would change nothing.
+        const stored = dobDerivedAge.get(targetObj);
+        const oldAge = stored ? stored.age : calculateAgeYears(targetObj.dob);
+        const oldAgeFrac = stored ? stored.ageFrac : calculateAgeFractional(targetObj.dob);
         targetObj.dob = normalizeDob(inputEl.value);
         inputEl.value = targetObj.dob;
         targetObj.age = calculateAgeYears(targetObj.dob);
@@ -2529,6 +2567,8 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         const hasSpouse = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
         const flags = spousePresenceFlags(state.lastExtracted && state.lastExtracted.family_members);
         rederiveFromDobChange(targetObj, oldAge, !!isHead, hasSpouse, oldAgeFrac, flags);
+        const fixedAge = calculateAgeYears(targetObj.dob);
+        if (fixedAge !== null && fixedAge >= 0) dobDerivedAge.set(targetObj, { age: fixedAge, ageFrac: calculateAgeFractional(targetObj.dob) });
         syncJsonOutput();
         if (cardContainer) refreshDerivedSelects(cardContainer, targetObj, !!isHead);
         // A DOB typed after the NID can make a 13-digit NID
@@ -2598,6 +2638,22 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       if (f.key === 'dob') {
         targetObj.age = calculateAgeYears(val);
         if (onUpdateMeta) onUpdateMeta();
+        // A corrected year re-derives live (v4.9.54): the fields were
+        // filled from the age stored when they were derived — a wrong
+        // year leaves wrong values behind, and the blur handler alone
+        // cannot fix them, because targetObj.dob is already the new
+        // value by blur time, so oldAge would equal newAge and the
+        // re-derivation would be a no-op. The stored age is the only
+        // record of the wrong derivation.
+        const stored = dobDerivedAge.get(targetObj);
+        const newAgeLive = calculateAgeYears(val);
+        if (stored && newAgeLive !== null && newAgeLive >= 0 && stored.age !== newAgeLive) {
+          const isHeadLive = state.lastExtracted && state.lastExtracted.head === targetObj;
+          const hasSpouseLive = !!(state.lastExtracted && Array.isArray(state.lastExtracted.family_members) && state.lastExtracted.family_members.some((m) => m.relation === 'Husband' || m.relation === 'Wife'));
+          const flagsLive = spousePresenceFlags(state.lastExtracted && state.lastExtracted.family_members);
+          rederiveFromDobChange(targetObj, stored.age, !!isHeadLive, hasSpouseLive, stored.ageFrac, flagsLive);
+          dobDerivedAge.set(targetObj, { age: newAgeLive, ageFrac: calculateAgeFractional(val) });
+        }
       }
       toggleWarning(inputEl);
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
