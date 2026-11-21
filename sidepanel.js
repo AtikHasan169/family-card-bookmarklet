@@ -1072,9 +1072,7 @@ function inferDocType(idStr, explicitType) {
   if (up === 'NID' || up === 'BRN') return up;
   const clean = String(idStr || '').replace(/\s+/g, '');
   if (clean.length === 10 || clean.length === 13) return 'NID';
-  // Over 13 digits (v4.9.52): a number longer than a 13-digit old NID
-  // is a birth certificate (BRN) — the user asked for it.
-  if (clean.length > 13) return 'BRN';
+  if (clean.length === 17) return 'BRN';
   return 'NID';
 }
 
@@ -1980,8 +1978,8 @@ function toggleMobileWarning(el, targetObj) {
 }
 
 // Records whose Doc Type the user picked by hand (v4.9.49): a hand
-// pick wins over the over-13-digit rule below, so a genuine 17-digit
-// NID stays NID. WeakSet — it never enters the JSON.
+// pick wins over the 17-digit rule below, so a genuine 17-digit NID
+// stays NID. WeakSet — it never enters the JSON.
 const manualDocTypePicked = new WeakSet();
 // 17-digit values that started life as a 13-digit NID (v4.9.49):
 // the birth year was prepended, so they are NIDs, not BRNs. A Set of
@@ -2008,14 +2006,13 @@ function convertCardIdNumber(inputEl, targetObj, key) {
     changed = true;
     if (was13) converted13NidValues.add(chk.value);
   }
-  // Manual over-13-digit (v4.9.49, v4.9.52): a number longer than 13
-  // digits typed by hand is mainly a birth certificate (BRN) — few
-  // have a 17-digit NID. The AI already gets this right, so this only
-  // fires on the card: when the number is over 13 digits and it did
-  // NOT come from a 13-digit NID, flip the Doc Type to BRN. A
-  // hand-picked NID stays NID.
+  // Manual 17-digit (v4.9.49): a 17-digit number typed by hand is
+  // mainly a birth certificate (BRN) — few have a 17-digit NID. The
+  // AI already gets this right, so this only fires on the card: when
+  // the number is 17 digits and it did NOT come from a 13-digit NID,
+  // flip the Doc Type to BRN. A hand-picked NID stays NID.
   const nowDigits = toEnglishDigits(String(targetObj[key] || '')).replace(/\s+/g, '');
-  if (nowDigits.length > 13 && !was13 && !converted13NidValues.has(nowDigits)
+  if (nowDigits.length === 17 && !was13 && !converted13NidValues.has(nowDigits)
       && (targetObj.doc_type === 'NID' || !targetObj.doc_type)
       && !manualDocTypePicked.has(targetObj)) {
     targetObj.doc_type = 'BRN';
@@ -2025,6 +2022,26 @@ function convertCardIdNumber(inputEl, targetObj, key) {
     changed = true;
   }
   return changed;
+}
+
+// Live 17-digit flip (v4.9.52): while typing, the moment the number
+// reaches 17 digits the Doc Type becomes BRN automatically — the user
+// does not have to leave the field first. Same guards as the blur
+// flip: not a converted 13-digit NID, and a hand-picked NID stays
+// NID — if the user personally selected NID for this 17-digit
+// number, that is it, and the flip never overrides it.
+function flipDocTypeLive(inputEl, targetObj, key) {
+  if (!inputEl || !targetObj) return false;
+  const digits = toEnglishDigits(String(targetObj[key] || '')).replace(/\s+/g, '');
+  if (digits.length !== 17) return false;
+  if (converted13NidValues.has(digits)) return false;
+  if (manualDocTypePicked.has(targetObj)) return false;
+  if (!(targetObj.doc_type === 'NID' || !targetObj.doc_type)) return false;
+  targetObj.doc_type = 'BRN';
+  const card = inputEl.closest ? inputEl.closest('.record-card') : null;
+  const docSel = card ? card.querySelector('select[data-field="doc_type"]') : null;
+  if (docSel) docSel.value = 'BRN';
+  return true;
 }
 
 // Refresh a card's derived selects from its record, in place (no
@@ -2217,9 +2234,8 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.value = targetObj.doc_type || 'NID';
     inputEl.addEventListener('change', (e) => {
       targetObj.doc_type = e.target.value;
-      // A hand pick wins over the over-13-digit rule (v4.9.49,
-      // v4.9.52): if the user says this long number is an NID, it
-      // stays an NID.
+      // A hand pick wins over the 17-digit rule (v4.9.49): if the user
+      // says this 17-digit number is an NID, it stays an NID.
       manualDocTypePicked.add(targetObj);
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
@@ -2584,7 +2600,12 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         if (onUpdateMeta) onUpdateMeta();
       }
       toggleWarning(inputEl);
-      if (f.key === 'nid' || f.key === 'nid_or_brn') toggleIdWarning(inputEl, targetObj, f.key);
+      if (f.key === 'nid' || f.key === 'nid_or_brn') {
+        toggleIdWarning(inputEl, targetObj, f.key);
+        // Live 17-digit flip (v4.9.52): the Doc Type becomes BRN the
+        // moment the 17th digit lands — automatic, no blur needed.
+        flipDocTypeLive(inputEl, targetObj, f.key);
+      }
       if (f.key === 'mobile_number') toggleMobileWarning(inputEl, targetObj);
       syncJsonOutput();
       // Typing a DOB fills blank derived fields live (the fill runs in
