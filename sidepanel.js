@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.34-live';
+const CURRENT_VERSION_TAG = 'v4.9.35-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1881,7 +1881,14 @@ function setupCameraZoom() {
 async function startPanelCamera() {
   const video = $('cameraVideo');
   const constraints = {
-    video: { facingMode: panelCameraFacing, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    // Ask for the best the camera has (4K ideal, v4.9.35): 'ideal' is a
+    // preference, not a demand — the browser never fails to start and just
+    // gives the highest resolution the camera can do. If the tablet maxes
+    // at 1080p, this gives exactly 1080p. The saved photo stays capped at
+    // 1500px, so the file stays small; it just gets sharper, which also
+    // helps the AI read the card. The panel never uploads photos to the
+    // site, so the site's 200 KB photo limit does not apply here.
+    video: { facingMode: panelCameraFacing, width: { ideal: 3840 }, height: { ideal: 2160 } },
     audio: false,
   };
   if (panelCameraDeviceId) constraints.video.deviceId = { exact: panelCameraDeviceId };
