@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v36';
+  const FC_INJECT_VERSION = 'v37';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -3462,6 +3462,34 @@
     return null;
   }
 
+  // (v37) The payment section's MFS dropdown (data.mfs_name) is fed
+  // by the server's mfss list — its ids are NOT the PMT 138 ids.
+  // Resolve the provider's name from any VM carrying mfss, then map
+  // the name to the PMT 138 id the panel's MFS dropdown uses
+  // (679 Bkash … 684 No Account — the panel's MFS_PROVIDER_OPTIONS).
+  const MFS_NAME_TO_PMT_ID = { bkash: 679, nagad: 680, rocket: 681, upay: 682, mcash: 683 };
+  function mfsNameKey(name) {
+    const s = String(name || '').toLowerCase();
+    if (s.includes('বিকাশ') || s.includes('bkash')) return 'bkash';
+    if (s.includes('নগদ') || s.includes('nagad')) return 'nagad';
+    if (s.includes('রকেট') || s.includes('rocket')) return 'rocket';
+    if (s.includes('উপায়') || s.includes('upay')) return 'upay';
+    if (s.includes('এমক্যাশ') || s.includes('mcash') || s.includes('m-cash')) return 'mcash';
+    return null;
+  }
+  function findMfsProviderName(vms, id) {
+    for (const vm of (vms || [])) {
+      if (!vm || !Array.isArray(vm.mfss)) continue;
+      const entry = vm.mfss.find((e) => e && Number(e.id) === Number(id));
+      if (entry) {
+        const name = entry.value_en || entry.value_bn || entry.name_en || entry.name_bn || entry.name || entry.label || '';
+        const key = mfsNameKey(name);
+        if (key) return key;
+      }
+    }
+    return null;
+  }
+
   function findMediaVm(vmHead, allVms) {
     const hasMediaState = (v) => !!v && (
       v.imageDataUrl !== undefined || v.signatureDataUrl !== undefined ||
@@ -3535,27 +3563,58 @@
   async function previewPathToDataUrl(path, mediaVm) {
     if (typeof path !== 'string' || !path.trim()) return null;
     const p = path.trim();
+    // (v37) The site's own preview URL for a stored photo path: its
+    // getFamilyCardMediaPreviewUrl / resolveStorageMediaUrl turns a
+    // storage key into https://gateway.bhata.gov.bd/cloud/<key>
+    // (app.ea9222ad: u() builds `${base}/cloud/${key}` unless the key
+    // already starts with cloud/ or storage/; the base is the gateway
+    // host). A plain fetch() to that host fails — the gateway does not
+    // serve the bytes to a cross-origin fetch (no CORS / no session
+    // cookies) — while the site's own <img> loads the same URL fine.
+    // So when the byte fetch fails, hand the URL itself back: the
+    // panel shows it with a plain <img>, exactly like the site's
+    // template does. Only absolute http(s) URLs are ever returned as
+    // a display fallback — a relative path would resolve against the
+    // panel's own origin and break. (Inlined here so the function
+    // stays self-contained for the photo tests' extraction.)
+    const gatewayUrl = (u) => {
+      if (!u || typeof u !== 'string') return null;
+      const s = u.trim();
+      if (!s) return null;
+      if (s.startsWith('data:')) return s;
+      if (/^https?:\/\//i.test(s)) return s;
+      const rel = s.replace(/^\/+/, '');
+      return (rel.startsWith('cloud/') || rel.startsWith('storage/'))
+        ? `https://gateway.bhata.gov.bd/${rel}`
+        : `https://gateway.bhata.gov.bd/cloud/${rel}`;
+    };
     const helper = mediaVm && (mediaVm.getFamilyCardMediaPreviewUrl || mediaVm.resolveStorageMediaUrl);
+    let previewUrl = null;
     if (typeof helper === 'function') {
       try {
-        let previewUrl = helper.call(mediaVm, p);
-        if (previewUrl && typeof previewUrl.then === 'function') previewUrl = await previewUrl;
-        if (typeof previewUrl === 'string' && previewUrl) {
-          // Await (not just return) so a failed fetch is caught here
-          // and falls through to the direct fetch below, instead of
-          // rejecting out of this helper.
-          if (previewUrl.startsWith('data:image')) return await downscaleDataUrl(previewUrl);
-          if (/^https?:\/\//i.test(previewUrl)) return await urlToDataUrl(previewUrl);
-          return await urlToDataUrl(new URL(previewUrl, location.origin).href);
-        }
+        let u = helper.call(mediaVm, p);
+        if (u && typeof u.then === 'function') u = await u;
+        if (typeof u === 'string' && u) previewUrl = u;
       } catch (_) {}
     }
-    // No helper (or it gave nothing): a relative path is fetchable
-    // against the page origin; an absolute URL fetches directly.
-    try {
-      if (/^https?:\/\//i.test(p)) return await urlToDataUrl(p);
-      return await urlToDataUrl(new URL(p, location.origin).href);
-    } catch (_) { return null; }
+    // No helper (or it gave nothing): build the preview URL the way
+    // the site's own resolver does.
+    if (!previewUrl) previewUrl = gatewayUrl(p);
+    if (typeof previewUrl === 'string' && previewUrl) {
+      if (previewUrl.startsWith('data:image')) {
+        try { return await downscaleDataUrl(previewUrl); } catch (_) { return previewUrl; }
+      }
+      const abs = /^https?:\/\//i.test(previewUrl) ? previewUrl : gatewayUrl(previewUrl);
+      if (abs) {
+        try { return await urlToDataUrl(abs); } catch (_) {
+          // (v37) Bytes unreachable, but the preview URL itself is
+          // what the site's template puts in an <img> — return it so
+          // the panel can still show the photo.
+          return /^https?:\/\//i.test(abs) ? abs : null;
+        }
+      }
+    }
+    return null;
   }
 
   // True when the form holds any reference to this slot's photo
@@ -3641,7 +3700,7 @@
   }
 
   window.addEventListener('FC_PRO_PULL_REQUEST', async () => {
-    const { vmHead, vmMembers, allVms } = getVueNodes();
+    let { vmHead, vmMembers, allVms } = getVueNodes();
     if (!vmHead && !vmMembers && (!allVms || !allVms.length)) {
       window.dispatchEvent(new CustomEvent('FC_PRO_PULL_RESULT', {
         detail: { version: FC_INJECT_VERSION, success: false, message: 'No active Vue form instance found on this page.' }
@@ -3650,6 +3709,23 @@
     }
 
     try {
+      // (v37) Mount every tab first — the pull used to read only the
+      // tabs already open, so anything on an unopened tab (the PMT
+      // tab's MFS answer, the photo tab's media component) never
+      // reached the panel. Auto-Fill opens them all the same way
+      // (panel = [0..7] + waitForFormReady); the pull does it now
+      // too, then re-reads the Vue nodes — components re-mount while
+      // loading.
+      if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      await waitForFormReady(vmHead, vmMembers);
+      const fresh = getVueNodes();
+      if (fresh.vmHead) vmHead = fresh.vmHead;
+      if (fresh.vmMembers) vmMembers = fresh.vmMembers;
+      if (fresh.allVms && fresh.allVms.length) allVms = fresh.allVms;
+      if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+      if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
+
       const d = getHeadTargetObj(vmHead) || {};
       const rawMembers = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
 
@@ -3669,9 +3745,22 @@
       const pullPmt = resolvePmtState(vmHead, allVms, d);
       const pullMfsEntry = findPmtEntryIn(pullPmt.pmtArray, 138);
       const pullMfsRaw = pullMfsEntry ? pullMfsEntry.sub_variables : undefined;
-      const pullMfsId = Array.isArray(pullMfsRaw)
+      let pullMfsId = Array.isArray(pullMfsRaw)
         ? pullMfsRaw.map(Number).find((n) => Number.isFinite(n) && n > 0)
         : pullId(pullMfsRaw);
+      // (v37) Fallback — the payment section's data.mfs_name: it
+      // holds an id from the server's mfss list, so resolve its name
+      // and map it to the PMT 138 id (679 Bkash … 684 No Account).
+      // Only when PMT 138 itself is unanswered — the PMT answer wins
+      // when both are set.
+      if (pullMfsId === undefined) {
+        const mfsFormId = pullId(d.mfs_name);
+        if (mfsFormId !== undefined) {
+          const mfsKey = findMfsProviderName([vmHead, ...(allVms || [])], mfsFormId);
+          const mapped = mfsKey ? MFS_NAME_TO_PMT_ID[mfsKey] : undefined;
+          if (mapped) pullMfsId = mapped;
+        }
+      }
 
       const head = {
         doc_type: headVerType === 2 ? 'BRN' : 'NID',

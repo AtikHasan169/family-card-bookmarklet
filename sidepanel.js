@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.56-live';
+const CURRENT_VERSION_TAG = 'v4.9.57-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -828,8 +828,12 @@ function handleIncomingMessages(e) {
     if (res.success && res.payload) {
       // Photos ride separately from the text data: keep base64 out of
       // lastExtracted (and the Raw JSON view) — they live in state.
+      // (v4.9.57) A pulled photo's dataUrl is a data: URL when the
+      // bytes were fetched, or the site's own https preview URL
+      // (gateway) when the byte fetch failed — both display in a
+      // plain <img>, so keep both; anything else is dropped.
       const pulled = Array.isArray(res.payload.images)
-        ? res.payload.images.filter((im) => im && typeof im.dataUrl === 'string' && im.dataUrl.startsWith('data:image'))
+        ? res.payload.images.filter((im) => im && typeof im.dataUrl === 'string' && (im.dataUrl.startsWith('data:image') || /^https?:\/\//i.test(im.dataUrl)))
         : [];
       const payloadForNorm = { ...res.payload };
       delete payloadForNorm.images;
