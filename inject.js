@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v44';
+  const FC_INJECT_VERSION = 'v46';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -904,13 +904,63 @@
   // overwrites a value the user picked.
   // "তথ্য সংগ্রহের ঠিকানা একই হলে ক্লিক করুন" — checking it runs the
   // site's copySameAsPermanent(), copying addressForm.permanent_* into
-  // the collection address fields. It is a checkbox, not an option
-  // field: click it AT MOST ONCE per autofill run, and only when it is
-  // unchecked, the collection address is empty, and the permanent
-  // address has something to copy — never overwrites an entered
-  // (different) collection address. Clicking the real input fires the
-  // site's own change handler, including its cascade reloads.
+  // the collection address fields, AND it sets the sameAsPermanent
+  // flag the submit sends as same_as_permanent (1/0). It is a
+  // checkbox, not an option field: click it AT MOST ONCE per autofill
+  // run, and only when it is unchecked. Two cases, both mirroring
+  // the site's own rules (app.ea9222ad):
+  //   (A) The collection address is empty and the permanent address
+  //       has something to copy — click to copy permanent ->
+  //       collection. Never overwrites an entered (different)
+  //       collection address.
+  //   (B) BOTH sides are complete and identical — the site's own
+  //       draft load checks the box in exactly this case
+  //       (sameAsPermanent = addressSideIsComplete("permanent_") &&
+  //       addressSideIsComplete("") && addressSidesMatch()). The
+  //       copy is then a no-op, but the FLAG is what matters: after
+  //       Auto-Fill fills both sides with the same address, the box
+  //       otherwise stays unchecked and the submit records
+  //       same_as_permanent: 0 even though the addresses match.
+  //       The match gate means a different permanent address is
+  //       never copied over the collection address.
+  // Clicking the real input fires the site's own change handler,
+  // including its cascade reloads.
   let sameAsPermanentClickedThisRun = false;
+  // The site's addressSidesMatch() pairs, in its order.
+  const ADDRESS_SIDE_PAIRS = [
+    ['permanent_division_id', 'division_id'],
+    ['permanent_district_id', 'district_id'],
+    ['permanent_location_type', 'location_type'],
+    ['permanent_sub_location_type', 'sub_location_type'],
+    ['permanent_thana_id', 'thana_id'],
+    ['permanent_union_id', 'union_id'],
+    ['permanent_pouro_id', 'pouro_id'],
+    ['permanent_city_id', 'city_id'],
+    ['permanent_city_thana_id', 'city_thana_id'],
+    ['permanent_district_pouro_id', 'district_pouro_id'],
+    ['permanent_ward_id_city', 'ward_id_city'],
+    ['permanent_ward_id_union', 'ward_id_union'],
+    ['permanent_ward_id_pouro', 'ward_id_pouro'],
+    ['permanent_ward_id_dist', 'ward_id_dist'],
+    ['permanent_post_code', 'post_code'],
+    ['permanent_address', 'address'],
+  ];
+  // The site's addressSideIsComplete(prefix): division + district +
+  // location_type + the ward id for that location type (dist ->
+  // ward_id_dist, city -> ward_id_city, union + sub 2 ->
+  // ward_id_union, union + sub 1 -> ward_id_pouro) + address text.
+  function addressSideIsComplete(af, prefix) {
+    const a = Number(af[prefix + 'location_type']);
+    let ward = null;
+    if (a === 1) ward = af[prefix + 'ward_id_dist'];
+    else if (a === 3) ward = af[prefix + 'ward_id_city'];
+    else if (a === 2 && Number(af[prefix + 'sub_location_type']) === 2) ward = af[prefix + 'ward_id_union'];
+    else if (a === 2 && Number(af[prefix + 'sub_location_type']) === 1) ward = af[prefix + 'ward_id_pouro'];
+    return !!(af[prefix + 'division_id'] && af[prefix + 'district_id'] && a && ward && af[prefix + 'address']);
+  }
+  function addressSidesMatch(af) {
+    return ADDRESS_SIDE_PAIRS.every(([p, c]) => String(af[p] ?? '') === String(af[c] ?? ''));
+  }
   function syncSameAsPermanent(allVms) {
     if (sameAsPermanentClickedThisRun) return false;
     let boxWrap = null;
@@ -935,7 +985,8 @@
       .every(k => isEmptyModelVal(af[k]));
     const permFilled = ['permanent_division_id', 'permanent_district_id', 'permanent_thana_id', 'permanent_union_id', 'permanent_pouro_id', 'permanent_city_id', 'permanent_post_code', 'permanent_address']
       .some(k => !isEmptyModelVal(af[k]));
-    if (!collEmpty || !permFilled) return false;
+    const bothCompleteAndMatch = addressSideIsComplete(af, 'permanent_') && addressSideIsComplete(af, '') && addressSidesMatch(af);
+    if ((!collEmpty || !permFilled) && !bothCompleteAndMatch) return false;
     if (inp && !inp.disabled) { sameAsPermanentClickedThisRun = true; inp.click(); return true; }
     return false;
   }
@@ -3190,6 +3241,28 @@
             if (val !== undefined && val !== null && String(val).trim() !== '' && key in headTarget && isEmptyModelVal(headTarget[key])) {
               setReactive(vmHead, headTarget, key, String(val).trim());
             }
+          }
+          // (v46) Nationality: the server's applications.nationality
+          // column is NOT NULL, but the pulled record carries ""
+          // (the pull stores strOrUndef(d.nationality) -> null, and
+          // the loop above skips it) — and the site's draft save
+          // (buildDraftFormData) does NOT do the final submit's
+          // `data.nationality = this.nationality?.[0]?.id`
+          // assignment, so a draft save fails with "Column
+          // 'nationality' cannot be null" (the user's Dalimon draft,
+          // 2026-11-21 — the uploaded export has
+          // head.nationality: null). The nationality lookup has
+          // exactly one option (type 33, id 105 Bangladeshi), so
+          // fill it from the form's own list when present, else the
+          // payload's value when it is a real id, else 105.
+          // Empty-only: never overwrites a value already on the form.
+          if ('nationality' in headTarget && isEmptyModelVal(headTarget.nationality)) {
+            const natList = (vmHead && Array.isArray(vmHead.nationality)) ? vmHead.nationality : null;
+            let natId = null;
+            if (natList && natList[0] && natList[0].id !== undefined && natList[0].id !== null && String(natList[0].id).trim() !== '') natId = natList[0].id;
+            else if (h.nationality !== undefined && h.nationality !== null && String(h.nationality).trim() !== '') natId = h.nationality;
+            else natId = 105;
+            setReactive(vmHead, headTarget, 'nationality', natId);
           }
           if (h.mfs_number !== undefined && h.mfs_number !== null && String(h.mfs_number).trim() !== '' && 'mfs_number' in headTarget && isEmptyModelVal(headTarget.mfs_number)) {
             setReactive(vmHead, headTarget, 'mfs_number', String(h.mfs_number).trim());
