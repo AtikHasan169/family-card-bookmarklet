@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.47-live';
+const CURRENT_VERSION_TAG = 'v4.9.49-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -144,6 +144,11 @@ const HEAD_FIELDS = [
   // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid', label: 'NID / BRN No' },
+  // Phone + MFS (v4.9.49): the head's mobile number fills the form's
+  // mobile_number (never auto-filled before); the MFS pick fills PMT
+  // field 138 (Bkash/Nagad/...) via form_defaults.program_fields.
+  { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
+  { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
@@ -169,6 +174,9 @@ const MEMBER_FIELDS = [
   // number is (NID or BRN), so it comes first, then the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
   { key: 'nid_or_brn', label: 'NID / BRN No' },
+  // Phone (v4.9.49): a member's mobile number, filled on the form by
+  // the injector (never auto-filled before).
+  { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
   // Education / profession / marital (v4.9.39): same three the head card
   // has, so a member's derived values (e.g. the husband's Agriculture)
   // are visible and changeable offline. Profession here is the type-44
@@ -176,6 +184,15 @@ const MEMBER_FIELDS = [
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
   { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  // Disability (v4.9.49): a disabled member needs the type on the form
+  // (lookup type 11). The type row only shows when Disabled is Yes.
+  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
+  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
+  // Health (v4.9.49): কর্মক্ষম (Able-bodied, 203) is the default —
+  // the form's health field (type 43) — the other options are picked
+  // from here. A disabled member shows blank instead of the
+  // able-bodied default, so the right option gets picked.
+  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
   // Benefit (v4.9.36): whether this member already receives another
   // programme (SSNP), which card, and whether they got DSS training /
   // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
@@ -198,6 +215,45 @@ const GOV_CARD_OPTIONS = [
   { id: 170, label: 'Pension Card' },
   { id: 171, label: 'Agriculture Card' },
   { id: 172, label: 'Fishermen Card' }
+];
+// Disability types (lookup type 11, v4.9.49). The form needs the type
+// when a member is disabled; the AI cannot know it from an NID photo,
+// so the user picks it by hand on the card.
+const DISABILITY_TYPE_OPTIONS = [
+  { id: 247, label: 'শারীরিক প্রতিবন্ধিতা (Physical)' },
+  { id: 248, label: 'দৃষ্টি প্রতিবন্ধিতা (Visual)' },
+  { id: 249, label: 'শ্রবণ প্রতিবন্ধিতা (Hearing)' },
+  { id: 250, label: 'বাক প্রতিবন্ধিতা (Speech)' },
+  { id: 251, label: 'বুদ্ধি প্রতিবন্ধিতা (Intellectual)' },
+  { id: 252, label: 'মানসিক প্রতিবন্ধিতা (Mental)' },
+  { id: 253, label: 'অটিজম (Autism)' },
+  { id: 254, label: 'শ্রবণ-দৃষ্টিপ্রতিবন্ধিতা (Deaf-blind)' },
+  { id: 255, label: 'মস্তিষ্কের ক্ষতিজনিত (Cerebral palsy)' },
+  { id: 256, label: 'বহুমাত্রিক (Multiple)' },
+  { id: 257, label: 'ডাউন সিনড্রোম (Down Syndrome)' },
+  { id: 258, label: 'অন্যান্য (Others)' }
+];
+
+// MFS providers (PMT field 138, v4.9.49): which mobile banking the
+// head's mobile number has an account in. Picked by hand on the head
+// card — the injector never guesses it; the pick reaches the form via
+// form_defaults.program_fields['138'].
+const MFS_PROVIDER_OPTIONS = [
+  { id: 679, label: 'বিকাশ (Bkash)' },
+  { id: 680, label: 'নগদ (Nagad)' },
+  { id: 681, label: 'রকেট (Rocket)' },
+  { id: 682, label: 'উপায় (Upay)' },
+  { id: 683, label: 'এমক্যাশ (MCash)' },
+  { id: 684, label: 'কোনো হিসাব নেই (No Account)' }
+];
+// Health conditions (lookup type 43, v4.9.49): কর্মক্ষম (Able-bodied,
+// 203) is the default — the form's health field — the other options
+// are picked from the same dropdown.
+const HEALTH_OPTIONS = [
+  { id: 203, label: 'কর্মক্ষম (Able-bodied)' },
+  { id: 204, label: 'সম্পূর্ণ অক্ষম (Completely Disabled)' },
+  { id: 205, label: 'আংশিক কর্মক্ষম (Partially Able-bodied)' },
+  { id: 206, label: 'প্রতিবন্ধী (Person with Disability)' }
 ];
 
 // Cash usage categories (2500 Tk distribution) — the site's lookup
@@ -249,6 +305,11 @@ let lastCropFit = null;
 // remembered across sessions. Off = plain photo, crop by hand.
 let perspectiveEnabled = true;
 try { perspectiveEnabled = localStorage.getItem('fc_pro_perspective') !== '0'; } catch (_) {}
+// Banglish auto-transliteration (v4.9.48): on by default, remembered
+// across sessions. Off = typing a Bangla name leaves the English
+// field blank, so it can be typed by hand (New Form).
+let banglishEnabled = true;
+try { banglishEnabled = localStorage.getItem('fc_pro_banglish') !== '0'; } catch (_) {}
 let panX = 0;
 let panY = 0;
 let isDragging = false;
@@ -619,6 +680,24 @@ function initApp() {
   $('pullFromWebBtn').addEventListener('click', () => {
     window.parent.postMessage({ action: 'FC_PULL_DRAFT' }, '*');
     setStatus('Pulling all tabs & fields from web form...', 'loading');
+  });
+
+  // New Form (v4.9.48): a blank form to type every name by hand —
+  // replaces the Pull All button (the user asked for New Form, not a
+  // second pull). Purely panel-side: no message to the injector.
+  $('newFormBtn').addEventListener('click', newBlankForm);
+
+  // Banglish toggle (v4.9.48): on = typing a Bangla name fills the
+  // English name (the v4.9.40 behaviour); off = the English fields
+  // stay blank for hand-typing. Remembered across sessions.
+  const banglishBtn = $('banglishToggleBtn');
+  const paintBanglishBtn = () => { if (banglishBtn) banglishBtn.textContent = banglishEnabled ? 'Banglish: On' : 'Banglish: Off'; };
+  paintBanglishBtn();
+  if (banglishBtn) banglishBtn.addEventListener('click', () => {
+    banglishEnabled = !banglishEnabled;
+    try { localStorage.setItem('fc_pro_banglish', banglishEnabled ? '1' : '0'); } catch (_) {}
+    paintBanglishBtn();
+    setStatus(banglishEnabled ? 'Banglish on — typing Bangla fills the English name.' : 'Banglish off — English names stay blank for hand-typing.', 'ok');
   });
 
   ['headDropZone', 'otherDropZone'].forEach(id => {
@@ -1385,6 +1464,21 @@ function rederiveFromGenderChange(targetObj, oldGender, isHead, hasSpouse, flags
   return applyDerivedChange(targetObj, oldIds, newIds, isHead);
 }
 
+// A grandchild's father (v4.9.48): the head's Son, or the Son-in-law
+// (the Daughter's husband — the father of the Daughter's children).
+// Never the Husband: he is the grandfather, not the father. Names
+// only — a member with no name typed yet is not a candidate.
+function fatherCandidatesFor(data) {
+  const out = [];
+  if (!data || !Array.isArray(data.family_members)) return out;
+  data.family_members.forEach((m) => {
+    if (!m || (m.relation !== 'Son' && m.relation !== 'Son-in-law')) return;
+    const name = (m.name_bn && String(m.name_bn).trim()) || (m.name_en && String(m.name_en).trim());
+    if (name) out.push({ name, relation: m.relation });
+  });
+  return out;
+}
+
 // A son/daughter's parents: the mother is the female head (or the Wife
 // member when the head is male); the father is the male head (or the
 // Husband member when the head is female). Names only — no guessing.
@@ -1417,6 +1511,18 @@ function applyChildParentNames(data) {
     if (parents.father && (!m.father_name_bn || !String(m.father_name_bn).trim())) { m.father_name_bn = parents.father; did = true; }
     if (parents.mother && (!m.mother_name_bn || !String(m.mother_name_bn).trim())) { m.mother_name_bn = parents.mother; did = true; }
     if (did) changed.push(idx);
+  });
+  // Grandchildren (v4.9.48): a Nati/Natni's father is one of the
+  // candidates above. With exactly one candidate it is determined,
+  // not a guess — fill it. With several, leave it blank: the card's
+  // father-picker dropdown lets the user choose.
+  const grandFathers = fatherCandidatesFor(data);
+  data.family_members.forEach((m, idx) => {
+    if (m.relation !== 'Grandson' && m.relation !== 'Granddaughter') return;
+    if (grandFathers.length === 1 && (!m.father_name_bn || !String(m.father_name_bn).trim())) {
+      m.father_name_bn = grandFathers[0].name;
+      changed.push(idx);
+    }
   });
   return changed;
 }
@@ -1670,6 +1776,13 @@ function recalculateHouseholdSummary(data) {
   const effMale = Number.isFinite(prevOverrides.male_count) ? prevOverrides.male_count : maleCount;
   const effFemale = Number.isFinite(prevOverrides.female_count) ? prevOverrides.female_count : femaleCount;
   const effChildren = Number.isFinite(prevOverrides.children_under_18) ? prevOverrides.children_under_18 : childrenUnder18;
+  // MFS (v4.9.49): the head's MFS pick fills PMT field 138 via
+  // form_defaults.program_fields — the injector's existing override
+  // path. Other program-field overrides are preserved; clearing the
+  // pick drops 138 so the old value stops filling.
+  const prevProgFields = (prevDefaults.program_fields && typeof prevDefaults.program_fields === 'object') ? { ...prevDefaults.program_fields } : {};
+  const headMfs = Number(data.head && data.head.mfs_provider_id) || 0;
+  if (headMfs) prevProgFields['138'] = headMfs; else delete prevProgFields['138'];
   data.form_defaults = {
     total_members: effTotal,
     male_count: effMale,
@@ -1690,7 +1803,7 @@ function recalculateHouseholdSummary(data) {
     ...(Object.keys(prevOverrides).length ? { count_overrides: prevOverrides } : {}),
     ...(prevDefaults.head_options ? { head_options: prevDefaults.head_options } : {}),
     ...(prevDefaults.pmt ? { pmt: prevDefaults.pmt } : {}),
-    ...(prevDefaults.program_fields ? { program_fields: prevDefaults.program_fields } : {}),
+    ...(Object.keys(prevProgFields).length ? { program_fields: prevProgFields } : {}),
     ...(prevDefaults.member_options ? { member_options: prevDefaults.member_options } : {})
   };
 
@@ -1822,6 +1935,49 @@ function toggleIdWarning(el, targetObj, key) {
   else if (el.value && el.value.trim() !== '') el.classList.remove('field-warning');
 }
 
+// Mobile number check (v4.9.49): the site accepts English digits only,
+// 11 digits starting with 01 (app.ea9222ad mobile rule — Bangla digits
+// are rejected with "Mobile must contain only English digits"). The
+// panel converts Bangla digits on blur, like the NID.
+function checkMobileNumber(raw) {
+  const v = toEnglishDigits(String(raw || '')).replace(/\D+/g, '');
+  if (!v) return { value: '', warning: '' };
+  if (!/^01[0-9]{9}$/.test(v)) return { value: v, warning: 'সঠিক মোবাইল নম্বর দিন (০১ দিয়ে শুরু, ১১ সংখ্যা)' };
+  return { value: v, warning: '' };
+}
+
+// Convert a card's mobile number to English digits on blur (v4.9.49).
+// Returns true when it changed anything.
+function convertCardMobile(inputEl, targetObj) {
+  if (!inputEl || !targetObj) return false;
+  const chk = checkMobileNumber(targetObj.mobile_number);
+  if (chk.value && chk.value !== targetObj.mobile_number) {
+    targetObj.mobile_number = chk.value;
+    inputEl.value = chk.value;
+    return true;
+  }
+  return false;
+}
+
+// Mobile warning (v4.9.49): amber + a Bangla reason on hover, like the
+// NID warning — a wrong-length number fails on the form otherwise.
+function toggleMobileWarning(el, targetObj) {
+  if (!el || !targetObj) return;
+  const chk = checkMobileNumber(targetObj.mobile_number);
+  el.title = chk.warning || '';
+  if (chk.warning) el.classList.add('field-warning');
+  else if (el.value && el.value.trim() !== '') el.classList.remove('field-warning');
+}
+
+// Records whose Doc Type the user picked by hand (v4.9.49): a hand
+// pick wins over the 17-digit rule below, so a genuine 17-digit NID
+// stays NID. WeakSet — it never enters the JSON.
+const manualDocTypePicked = new WeakSet();
+// 17-digit values that started life as a 13-digit NID (v4.9.49):
+// the birth year was prepended, so they are NIDs, not BRNs. A Set of
+// digit strings — it survives rebuilds, unlike a record flag.
+const converted13NidValues = new Set();
+
 // Convert a 13-digit NID on the card to 17 digits with the birth year
 // (v4.9.47). Returns true when it changed anything — the caller then
 // refreshes the input and the JSON. Only ever runs on blur / after a
@@ -1829,13 +1985,35 @@ function toggleIdWarning(el, targetObj, key) {
 // 13 digits mid-typing).
 function convertCardIdNumber(inputEl, targetObj, key) {
   if (!inputEl || !targetObj) return false;
+  // How many digits the user actually typed (before any conversion):
+  // a 13-digit number is an old NID, so it must stay NID after the
+  // conversion below — it is not a birth certificate.
+  const rawDigits = toEnglishDigits(String(targetObj[key] || '')).replace(/\s+/g, '');
+  const was13 = rawDigits.length === 13;
   const chk = checkIdNumber(targetObj[key], targetObj.dob, targetObj.doc_type);
+  let changed = false;
   if (chk.value && chk.value !== targetObj[key]) {
     targetObj[key] = chk.value;
     inputEl.value = chk.value;
-    return true;
+    changed = true;
+    if (was13) converted13NidValues.add(chk.value);
   }
-  return false;
+  // Manual 17-digit (v4.9.49): a 17-digit number typed by hand is
+  // mainly a birth certificate (BRN) — few have a 17-digit NID. The
+  // AI already gets this right, so this only fires on the card: when
+  // the number is 17 digits and it did NOT come from a 13-digit NID,
+  // flip the Doc Type to BRN. A hand-picked NID stays NID.
+  const nowDigits = toEnglishDigits(String(targetObj[key] || '')).replace(/\s+/g, '');
+  if (nowDigits.length === 17 && !was13 && !converted13NidValues.has(nowDigits)
+      && (targetObj.doc_type === 'NID' || !targetObj.doc_type)
+      && !manualDocTypePicked.has(targetObj)) {
+    targetObj.doc_type = 'BRN';
+    const card = inputEl.closest ? inputEl.closest('.record-card') : null;
+    const docSel = card ? card.querySelector('select[data-field="doc_type"]') : null;
+    if (docSel) docSel.value = 'BRN';
+    changed = true;
+  }
+  return changed;
 }
 
 // Refresh a card's derived selects from its record, in place (no
@@ -1861,17 +2039,44 @@ function refreshDerivedSelects(cardContainer, targetObj, isHead) {
 // current data, in place. Called after a parent's name is typed or a
 // relation changes. Only an input that is currently empty is filled —
 // a name the user typed stays.
+// Rebuild a grandchild's father-picker options from the household
+// right now (a Son's name may have been typed since the card was
+// built). Keeps the pick that matches the record's father name.
+function rebuildFatherPickOptions(sel, selectedName) {
+  if (!sel) return;
+  sel.replaceChildren();
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = '— বাবা বেছে নিন —';
+  sel.appendChild(blank);
+  fatherCandidatesFor(state.lastExtracted).forEach((c) => {
+    const o = document.createElement('option');
+    o.value = c.name;
+    o.textContent = `${c.name} (${c.relation})`;
+    sel.appendChild(o);
+  });
+  const want = selectedName || '';
+  sel.value = [...sel.options].some((o) => o.value === want) ? want : '';
+}
+
 function refreshChildParentInputs() {
   const data = state.lastExtracted;
   if (!data || !Array.isArray(data.family_members)) return;
   data.family_members.forEach((m, idx) => {
-    if (m.relation !== 'Son' && m.relation !== 'Daughter') return;
+    const isChild = m.relation === 'Son' || m.relation === 'Daughter';
+    const isGrand = m.relation === 'Grandson' || m.relation === 'Granddaughter';
+    if (!isChild && !isGrand) return;
     const card = document.querySelector(`.record-card[data-member-idx="${idx}"]`);
     if (!card) return;
     const fIn = card.querySelector('input[data-field="father_name_bn"]');
     if (fIn && !fIn.value.trim() && m.father_name_bn) { fIn.value = m.father_name_bn; toggleWarning(fIn); }
-    const mIn = card.querySelector('input[data-field="mother_name_bn"]');
-    if (mIn && !mIn.value.trim() && m.mother_name_bn) { mIn.value = m.mother_name_bn; toggleWarning(mIn); }
+    if (isChild) {
+      const mIn = card.querySelector('input[data-field="mother_name_bn"]');
+      if (mIn && !mIn.value.trim() && m.mother_name_bn) { mIn.value = m.mother_name_bn; toggleWarning(mIn); }
+    }
+    if (isGrand) {
+      rebuildFatherPickOptions(card.querySelector('select[data-field="father_pick"]'), m.father_name_bn);
+    }
   });
 }
 
@@ -1921,6 +2126,15 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         if (fIn && !fIn.value.trim() && targetObj.father_name_bn) { fIn.value = targetObj.father_name_bn; toggleWarning(fIn); }
         const mIn = cardContainer.querySelector('input[data-field="mother_name_bn"]');
         if (mIn && !mIn.value.trim() && targetObj.mother_name_bn) { mIn.value = targetObj.mother_name_bn; toggleWarning(mIn); }
+        // Father picker (v4.9.48): show it when the relation becomes
+        // a grandchild, hide it otherwise — and rebuild its options
+        // from the household now.
+        const pickRow = cardContainer.querySelector('[data-father-pick-row="1"]');
+        if (pickRow) {
+          const isGrand = newRel === 'Grandson' || newRel === 'Granddaughter';
+          pickRow.style.display = isGrand ? '' : 'none';
+          if (isGrand) rebuildFatherPickOptions(pickRow.querySelector('select[data-field="father_pick"]'), targetObj.father_name_bn);
+        }
       }
       // The head's derived values can change too when a spouse appears
       // (its marital follows hasSpouse) — refresh the head card as
@@ -1992,6 +2206,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.value = targetObj.doc_type || 'NID';
     inputEl.addEventListener('change', (e) => {
       targetObj.doc_type = e.target.value;
+      // A hand pick wins over the 17-digit rule (v4.9.49): if the user
+      // says this 17-digit number is an NID, it stays an NID.
+      manualDocTypePicked.add(targetObj);
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
@@ -2050,6 +2267,27 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
           facRow.style.display = '';
         }
       }
+      // Disabled No clears the type and hides the type row (v4.9.49);
+      // Disabled Yes shows it again. Blank hides it too.
+      if (f.key === 'is_disabled' && cardContainer) {
+        const typeSel = cardContainer.querySelector('[data-field="disability_type_id"]');
+        const typeRow = typeSel ? typeSel.closest('.record-row') : null;
+        if (v === '1' && typeRow) {
+          typeRow.style.display = '';
+        } else {
+          targetObj.disability_type_id = undefined;
+          if (typeSel) typeSel.value = '';
+          if (typeRow) typeRow.style.display = 'none';
+        }
+        // Health (v4.9.49): the কর্মক্ষম default does not apply to a
+        // disabled member — blank the health select when Disabled
+        // turns Yes (unless a health was picked by hand), and restore
+        // the 203 default when it turns No.
+        const hSel = cardContainer.querySelector('[data-field="health_condition_id"]');
+        if (hSel && (targetObj.health_condition_id === undefined || targetObj.health_condition_id === null)) {
+          hSel.value = v === '1' ? '' : '203';
+        }
+      }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
@@ -2079,6 +2317,83 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
       notifyChange('education_status_id', v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'disability_select') {
+    // Disability type (type-11 list, v4.9.49). Only meaningful when
+    // the member is disabled; the row is hidden otherwise, and the
+    // injector fills it from the member record on Auto-Fill.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'disability_type_id');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    DISABILITY_TYPE_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.disability_type_id !== undefined && targetObj.disability_type_id !== null && String(targetObj.disability_type_id).trim() !== '' ? String(targetObj.disability_type_id) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.disability_type_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('disability_type_id', v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'mfs_select') {
+    // MFS provider (PMT field 138, v4.9.49). Blank = leave the form
+    // as-is; a pick fills field 138 via form_defaults.program_fields
+    // (wired in recalculateHouseholdSummary).
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'mfs_provider_id');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    MFS_PROVIDER_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.mfs_provider_id !== undefined && targetObj.mfs_provider_id !== null && String(targetObj.mfs_provider_id).trim() !== '' ? String(targetObj.mfs_provider_id) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.mfs_provider_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('mfs_provider_id', v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'health_select') {
+    // Health (type 43, v4.9.49). Default কর্মক্ষম (203) when the
+    // member is not disabled and nothing was picked — the form's own
+    // default for an able-bodied member. A disabled member shows blank
+    // so the user picks the right option instead of the default.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'health_condition_id');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    HEALTH_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    const defHealth = (targetObj.is_disabled === 1 || targetObj.is_disabled === '1') ? '' : '203';
+    inputEl.value = targetObj.health_condition_id !== undefined && targetObj.health_condition_id !== null && String(targetObj.health_condition_id).trim() !== '' ? String(targetObj.health_condition_id) : defHealth;
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.health_condition_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('health_condition_id', v === '' ? null : Number(v));
     });
   } else if (f.type === 'profession_select') {
     // Head profession (type-34 list). Blank until the user picks —
@@ -2206,6 +2521,13 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         if (convertCardIdNumber(inputEl, targetObj, f.key)) syncJsonOutput();
         toggleIdWarning(inputEl, targetObj, f.key);
       }
+      // Mobile (v4.9.49): Bangla digits convert to English on blur;
+      // a wrong-length number is flagged on the card instead of
+      // failing on the form.
+      if (f.key === 'mobile_number') {
+        if (convertCardMobile(inputEl, targetObj)) syncJsonOutput();
+        toggleMobileWarning(inputEl, targetObj);
+      }
     });
 
     inputEl.addEventListener('input', (e) => {
@@ -2213,6 +2535,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       const oldVal = targetObj[f.key];
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
         val = toEnglishDigits(val).replace(/\s+/g, '');
+      } else if (f.key === 'mobile_number') {
+        // Mobile (v4.9.49): English digits only, as you type.
+        val = toEnglishDigits(val).replace(/\D+/g, '');
       } else if (f.key.endsWith('_en')) {
         // English name: only the site's allowed characters survive
         // (Latin letters, dots, spaces, commas, hyphens, parentheses).
@@ -2240,6 +2565,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       }
       toggleWarning(inputEl);
       if (f.key === 'nid' || f.key === 'nid_or_brn') toggleIdWarning(inputEl, targetObj, f.key);
+      if (f.key === 'mobile_number') toggleMobileWarning(inputEl, targetObj);
       syncJsonOutput();
       // Typing a DOB fills blank derived fields live (the fill runs in
       // syncJsonOutput above); show them in the selects right away.
@@ -2271,8 +2597,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // the user fixes the EN field and it stays. The EN input is
       // refreshed in place. Member cards have no father/mother EN
       // fields (head only), so the hook only fires where the EN input
-      // exists on the card.
-      if ((f.key === 'name_bn' || f.key === 'father_name_bn' || f.key === 'mother_name_bn') && cardContainer) {
+      // exists on the card. Gated on the Banglish toggle (v4.9.48):
+      // off = no auto-fill, the EN field stays blank for hand-typing.
+      if (banglishEnabled && (f.key === 'name_bn' || f.key === 'father_name_bn' || f.key === 'mother_name_bn') && cardContainer) {
         const enKey = f.key === 'name_bn' ? 'name_en' : (f.key === 'father_name_bn' ? 'father_name_en' : 'mother_name_en');
         const enInput = cardContainer.querySelector(`input[data-field="${enKey}"]`);
         if (enInput) {
@@ -4304,6 +4631,29 @@ function prevMemberBenefit(prev, nidOrBrn, nameBn, nameEn) {
   return found || null;
 }
 
+// Same-person check for benefit inheritance (v4.9.49): two IDs are
+// the same person only when both are non-empty and equal after
+// digit normalisation. A name alone never proves it.
+function samePersonId(a, b) {
+  const x = toEnglishDigits(String(a || '')).replace(/\s+/g, '');
+  const y = toEnglishDigits(String(b || '')).replace(/\s+/g, '');
+  return x.length > 0 && x === y;
+}
+
+// Previous benefit values for a member, matched by NID/BRN only
+// (v4.9.49) — never by name, so a Yes cannot bleed into a different
+// person who happens to share the name (or into a different family
+// extracted in the same tab).
+function prevMemberBenefitById(prev, nidOrBrn) {
+  const want = toEnglishDigits(String(nidOrBrn || '')).replace(/\s+/g, '');
+  if (!want || !prev || !Array.isArray(prev.family_members)) return null;
+  for (const m of prev.family_members) {
+    const id = toEnglishDigits(String(m?.nid_or_brn || m?.nid || '')).replace(/\s+/g, '');
+    if (id && id === want) return m;
+  }
+  return null;
+}
+
 function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const s = (v) => (v == null ? '' : String(v).trim());
   const h = raw?.head || {};
@@ -4311,6 +4661,9 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   // 13-digit old NID -> 17 digits with the birth year (v4.9.47); a
   // wrong-length ID stays as typed and the card warns about it.
   const cleanHeadId = checkIdNumber(s(h.nid), headDob, h.doc_type).value;
+  // Remember a converted 13-digit NID (v4.9.49): this 17-digit value
+  // is an NID, so the manual 17-digit rule must not flip it to BRN.
+  if (toEnglishDigits(s(h.nid)).replace(/\s+/g, '').length === 13 && cleanHeadId && cleanHeadId.length === 17) converted13NidValues.add(cleanHeadId);
   const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
   const headAge = calculateAgeYears(headDob);
 
@@ -4358,27 +4711,51 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     head.marital_status = Number(h.maritial_status_id);
     head.maritial_status_id = Number(h.maritial_status_id);
   }
-  // Benefit (v4.9.36): the head's SSNP / card / DSS, same as a member.
-  // Default is No (0) unless the form, the AI, or a previous record
-  // says otherwise — the user asked for No as the default. A previous
-  // Yes survives a re-extract (the AI does not return these fields),
-  // and a Halnagad beneficiary is set to Yes after this runs.
-  if (h.is_ssnp_covered === 0 || h.is_ssnp_covered === 1 || h.is_ssnp_covered === '0' || h.is_ssnp_covered === '1') {
+  // Benefit (v4.9.36, v4.9.49): the head's SSNP / card / DSS, same as
+  // a member. Default is No (0) — the user asked for No as the
+  // default, Auto-Fill fills No, and a family that has a benefit sets
+  // it by hand. The AI never returns these fields, so after an AI
+  // extract they come only from the previous record — and only for the
+  // SAME person (matched by NID/BRN): prev may be a different family
+  // extracted in the same tab, and a Yes must never bleed across
+  // families. A Pull / import / session payload (preserveOrder) carries
+  // the form's own values, so those are taken as-is. A Halnagad
+  // beneficiary is set to Yes after this runs.
+  const headSamePerson = !!(prev && prev.head && samePersonId(cleanHeadId, prev.head.nid || prev.head.nid_or_brn));
+  const headPrev = headSamePerson ? prev.head : null;
+  if (preserveOrder && (h.is_ssnp_covered === 0 || h.is_ssnp_covered === 1 || h.is_ssnp_covered === '0' || h.is_ssnp_covered === '1')) {
     head.is_ssnp_covered = Number(h.is_ssnp_covered);
-  } else if (prev && prev.head && (prev.head.is_ssnp_covered === 0 || prev.head.is_ssnp_covered === 1)) {
-    head.is_ssnp_covered = Number(prev.head.is_ssnp_covered);
+  } else if (headPrev && (headPrev.is_ssnp_covered === 0 || headPrev.is_ssnp_covered === 1)) {
+    head.is_ssnp_covered = Number(headPrev.is_ssnp_covered);
   } else {
     head.is_ssnp_covered = 0;
   }
-  if (Array.isArray(h.facilities_ids) && h.facilities_ids.length) {
+  if (preserveOrder && Array.isArray(h.facilities_ids) && h.facilities_ids.length) {
     head.facilities_ids = h.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
+  } else if (headPrev && Array.isArray(headPrev.facilities_ids) && headPrev.facilities_ids.length) {
+    head.facilities_ids = headPrev.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
   }
-  if (h.is_dss_training_or_financial_benefit === 0 || h.is_dss_training_or_financial_benefit === 1 || h.is_dss_training_or_financial_benefit === '0' || h.is_dss_training_or_financial_benefit === '1') {
+  if (preserveOrder && (h.is_dss_training_or_financial_benefit === 0 || h.is_dss_training_or_financial_benefit === 1 || h.is_dss_training_or_financial_benefit === '0' || h.is_dss_training_or_financial_benefit === '1')) {
     head.is_dss_training_or_financial_benefit = Number(h.is_dss_training_or_financial_benefit);
-  } else if (prev && prev.head && (prev.head.is_dss_training_or_financial_benefit === 0 || prev.head.is_dss_training_or_financial_benefit === 1)) {
-    head.is_dss_training_or_financial_benefit = Number(prev.head.is_dss_training_or_financial_benefit);
+  } else if (headPrev && (headPrev.is_dss_training_or_financial_benefit === 0 || headPrev.is_dss_training_or_financial_benefit === 1)) {
+    head.is_dss_training_or_financial_benefit = Number(headPrev.is_dss_training_or_financial_benefit);
   } else {
     head.is_dss_training_or_financial_benefit = 0;
+  }
+  // SSNP No can never carry a card (v4.9.49).
+  if (head.is_ssnp_covered !== 1 && Array.isArray(head.facilities_ids) && head.facilities_ids.length) head.facilities_ids = [];
+  // Phone + MFS (v4.9.49): the head's mobile number and MFS provider.
+  // The site rejects Bangla digits in a mobile number, so normalize
+  // to English digits here too (the card does it on blur as well). A
+  // previous record's phone/MFS carry over only for the SAME person
+  // (headPrev) — a phone must never bleed across families.
+  const cleanHeadMobile = checkMobileNumber(h.mobile_number).value;
+  if (cleanHeadMobile) head.mobile_number = cleanHeadMobile;
+  else if (headPrev && headPrev.mobile_number) head.mobile_number = checkMobileNumber(headPrev.mobile_number).value || headPrev.mobile_number;
+  if (h.mfs_provider_id !== undefined && h.mfs_provider_id !== null && String(h.mfs_provider_id).trim() !== '') {
+    head.mfs_provider_id = Number(h.mfs_provider_id);
+  } else if (headPrev && headPrev.mfs_provider_id !== undefined && headPrev.mfs_provider_id !== null && String(headPrev.mfs_provider_id).trim() !== '') {
+    head.mfs_provider_id = Number(headPrev.mfs_provider_id);
   }
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
@@ -4393,6 +4770,9 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     const memDobEarly = normalizeDob(m?.dob);
     // 13-digit old NID -> 17 digits with the birth year (v4.9.47).
     const cleanMemId = checkIdNumber(rawMemId, memDobEarly, m?.doc_type).value;
+    // Remember a converted 13-digit NID (v4.9.49): this 17-digit value
+    // is an NID, so the manual 17-digit rule must not flip it to BRN.
+    if (rawMemId.length === 13 && cleanMemId && cleanMemId.length === 17) converted13NidValues.add(cleanMemId);
     if (!rawNameBn && !rawNameEn && !cleanMemId) continue;
 
     let rel = s(m?.relation);
@@ -4463,29 +4843,66 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       entry.marital_status = Number(prevM2.marital_status);
       entry.maritial_status_id = Number(prevM2.marital_status);
     }
-    // Benefit (v4.9.36): keep the SSNP / card / DSS values the form
-    // (Pull) or the user set, through rebuilds — they are what the
-    // injector reads on Auto-Fill. Default is No (0): the user asked
-    // for No as the default. A previous Yes survives a re-extract
-    // (matched by NID, else by name) because the AI omits these fields.
-    const prevM = prevMemberBenefit(prev, entry.nid_or_brn, entry.name_bn, entry.name_en);
-    if (m?.is_ssnp_covered === 0 || m?.is_ssnp_covered === 1 || m?.is_ssnp_covered === '0' || m?.is_ssnp_covered === '1') {
+    // Disability type (v4.9.49): keep an explicit pick through
+    // rebuilds, same as livelihood/marital — the AI cannot know the
+    // type, so it is always the user's hand pick (or the form's, on
+    // Pull). The previous record's pick (matched by NID, else name)
+    // is the fallback.
+    if (m?.disability_type_id !== undefined && m?.disability_type_id !== null && String(m.disability_type_id).trim() !== '') {
+      entry.disability_type_id = Number(m.disability_type_id);
+    } else if (prevM2 && prevM2.disability_type_id !== undefined && prevM2.disability_type_id !== null && String(prevM2.disability_type_id).trim() !== '') {
+      entry.disability_type_id = Number(prevM2.disability_type_id);
+    }
+    // Phone (v4.9.49): the member's mobile number, normalized to
+    // English digits (the site rejects Bangla digits in a mobile).
+    // The fallback uses the SAME-person match only — a phone number
+    // must never bleed across families via a name match.
+    const cleanMemMobile = checkMobileNumber(m?.mobile_number).value;
+    if (cleanMemMobile) entry.mobile_number = cleanMemMobile;
+    else {
+      const prevM2ById = prevMemberBenefitById(prev, entry.nid_or_brn);
+      if (prevM2ById && prevM2ById.mobile_number) entry.mobile_number = checkMobileNumber(prevM2ById.mobile_number).value || prevM2ById.mobile_number;
+    }
+    // Health (v4.9.49): keep an explicit pick through rebuilds, same
+    // as disability — blank means the injector derives কর্মক্ষম (203)
+    // for a non-disabled member.
+    if (m?.health_condition_id !== undefined && m?.health_condition_id !== null && String(m.health_condition_id).trim() !== '') {
+      entry.health_condition_id = Number(m.health_condition_id);
+    } else if (prevM2 && prevM2.health_condition_id !== undefined && prevM2.health_condition_id !== null && String(prevM2.health_condition_id).trim() !== '') {
+      entry.health_condition_id = Number(prevM2.health_condition_id);
+    }
+    // Benefit (v4.9.36, v4.9.49): keep the SSNP / card / DSS values
+    // the form (Pull) or the user set, through rebuilds — they are what
+    // the injector reads on Auto-Fill. Default is No (0): the user
+    // asked for No as the default, Auto-Fill fills No, and a family
+    // that has a benefit sets it by hand. The AI never returns these
+    // fields, so after an AI extract they come only from the previous
+    // record — and only for the SAME person (matched by NID/BRN, never
+    // by name): prev may be a different family extracted in the same
+    // tab, and a Yes must never bleed across families. A Pull / import
+    // / session payload (preserveOrder) carries the form's own values.
+    const prevM = prevMemberBenefitById(prev, entry.nid_or_brn);
+    if (preserveOrder && (m?.is_ssnp_covered === 0 || m?.is_ssnp_covered === 1 || m?.is_ssnp_covered === '0' || m?.is_ssnp_covered === '1')) {
       entry.is_ssnp_covered = Number(m.is_ssnp_covered);
     } else if (prevM && (prevM.is_ssnp_covered === 0 || prevM.is_ssnp_covered === 1)) {
       entry.is_ssnp_covered = Number(prevM.is_ssnp_covered);
     } else {
       entry.is_ssnp_covered = 0;
     }
-    if (Array.isArray(m?.facilities_ids) && m.facilities_ids.length) {
+    if (preserveOrder && Array.isArray(m?.facilities_ids) && m.facilities_ids.length) {
       entry.facilities_ids = m.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
+    } else if (prevM && Array.isArray(prevM.facilities_ids) && prevM.facilities_ids.length) {
+      entry.facilities_ids = prevM.facilities_ids.map(v => Number(v)).filter(v => !Number.isNaN(v));
     }
-    if (m?.is_dss_training_or_financial_benefit === 0 || m?.is_dss_training_or_financial_benefit === 1 || m?.is_dss_training_or_financial_benefit === '0' || m?.is_dss_training_or_financial_benefit === '1') {
+    if (preserveOrder && (m?.is_dss_training_or_financial_benefit === 0 || m?.is_dss_training_or_financial_benefit === 1 || m?.is_dss_training_or_financial_benefit === '0' || m?.is_dss_training_or_financial_benefit === '1')) {
       entry.is_dss_training_or_financial_benefit = Number(m.is_dss_training_or_financial_benefit);
     } else if (prevM && (prevM.is_dss_training_or_financial_benefit === 0 || prevM.is_dss_training_or_financial_benefit === 1)) {
       entry.is_dss_training_or_financial_benefit = Number(prevM.is_dss_training_or_financial_benefit);
     } else {
       entry.is_dss_training_or_financial_benefit = 0;
     }
+    // SSNP No can never carry a card (v4.9.49).
+    if (entry.is_ssnp_covered !== 1 && Array.isArray(entry.facilities_ids) && entry.facilities_ids.length) entry.facilities_ids = [];
 
     if (preserveOrder) {
       deduped.push(entry);
@@ -4923,6 +5340,40 @@ function makeMemberHead(memberIdx) {
 // Manual entry (v4.9.37): add a blank member card the user fills by
 // hand (no photo, no AI, no internet). The summary recounts
 // automatically on every change.
+// A blank form (v4.9.48): the New Form button's record — an empty
+// head (Female, the head is always a woman) and no members yet. The
+// user types every name by hand and adds members with Add Member;
+// no photos or AI extract needed.
+function blankFormData() {
+  return {
+    head: {
+      gender: 'Female', gender_id: 2,
+      religion: 'Islam', religion_id: 1,
+      doc_type: 'NID',
+      name_bn: '', name_en: '',
+      father_name_bn: '', father_name_en: '',
+      mother_name_bn: '', mother_name_en: '',
+      nid: '', dob: '', source_images: []
+    },
+    family_members: []
+  };
+}
+
+function newBlankForm() {
+  // A fresh form: clear the previous family's photos too, like Reset
+  // does — the blank form starts with nothing attached to it.
+  state.head = [];
+  state.other = [];
+  state.pulledImages = [];
+  state.lastExtracted = blankFormData();
+  renderPreviews('head');
+  renderPreviews('other');
+  renderExtractedCards(state.lastExtracted);
+  $('autofillBtn').disabled = false;
+  saveSessionState();
+  setStatus('Blank form — type every name by hand. Add members with + সদস্য যোগ করুন.', 'ok');
+}
+
 function addManualMember() {
   const data = state.lastExtracted;
   if (!data) return;
@@ -5151,8 +5602,45 @@ function renderExtractedCards(data) {
 
       r.append(kEl, inputEl, copyBtn);
       body.appendChild(r);
+      // Father picker (v4.9.48): on a Grandson/Granddaughter card, a
+      // dropdown under the Father row lists the household males who
+      // can be the father (a Son or a Son-in-law — never the Husband,
+      // he is the grandfather). Picking one fills the father's name.
+      // Hidden on every other relation.
+      if (isMember && f.key === 'father_name_bn') {
+        const pickRow = document.createElement('div');
+        pickRow.className = 'record-row';
+        pickRow.style.gridTemplateColumns = '105px 1fr auto';
+        pickRow.dataset.fatherPickRow = '1';
+        const pkEl = document.createElement('span');
+        pkEl.className = 'row-key';
+        pkEl.textContent = 'Father — বেছে নিন';
+        const pickSel = document.createElement('select');
+        pickSel.dataset.field = 'father_pick';
+        pickSel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+        rebuildFatherPickOptions(pickSel, targetObj.father_name_bn);
+        // Options go stale when a Son's name is typed — rebuild them
+        // every time the dropdown is opened, so the list is fresh.
+        pickSel.addEventListener('focus', () => rebuildFatherPickOptions(pickSel, targetObj.father_name_bn));
+        pickSel.addEventListener('change', () => {
+          const name = pickSel.value || '';
+          targetObj.father_name_bn = name;
+          if (banglishEnabled) targetObj.father_name_en = name ? transliterateBanglaToEnglish(name) : '';
+          if (inputEl) { inputEl.value = name; toggleWarning(inputEl); }
+          toggleWarning(pickSel);
+          syncJsonOutput();
+        });
+        const pickSpacer = document.createElement('span');
+        pickRow.append(pkEl, pickSel, pickSpacer);
+        pickRow.style.display = (targetObj.relation === 'Grandson' || targetObj.relation === 'Granddaughter') ? '' : 'none';
+        body.appendChild(pickRow);
+      }
       // Benefit (v4.9.36): the card row only shows when SSNP is Yes.
       if (f.key === 'facilities_ids' && targetObj.is_ssnp_covered !== 1 && targetObj.is_ssnp_covered !== '1') {
+        r.style.display = 'none';
+      }
+      // Disability (v4.9.49): the type row only shows when Disabled is Yes.
+      if (f.key === 'disability_type_id' && targetObj.is_disabled !== 1 && targetObj.is_disabled !== '1') {
         r.style.display = 'none';
       }
     });
@@ -5194,6 +5682,9 @@ const KNOWN_KEY_OPTIONS = {
   relation_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
   is_member_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
   is_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
+  disability_type_id: DISABILITY_TYPE_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
+  health_condition_id: HEALTH_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
+  mfs_provider_id: MFS_PROVIDER_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
   is_gov_job_holder: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
   is_ethnic: [{ value: 0, label: '0 — না (No)' }, { value: 1, label: '1 — হ্যাঁ (Yes)' }],
   location_type: AREA_TYPE_OPTIONS

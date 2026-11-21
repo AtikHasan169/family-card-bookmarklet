@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v32';
+  const FC_INJECT_VERSION = 'v34';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2673,6 +2673,9 @@
       doc_type: isBRN ? 'BRN' : 'NID',
       nid_or_brn: idVal,
       dob: m.date_of_birth || m.dob || '',
+      // Phone (v4.9.49): the form's mobile number, pulled back to the
+      // panel card. The site keeps English digits only.
+      mobile_number: toEnDigits(String(m.mobile_number || '')).replace(/\D+/g, ''),
       name_bn: m.name_bn || '',
       name_en: m.name_en || '',
       father_name_bn: m.father_name_bn || '',
@@ -2807,6 +2810,11 @@
     if (n(row.relationship_id) !== ctx.relId || s(row.relation) !== ctx.relName) return false;
     if (!locked.has('gender_id') && n(row.gender_id ?? row.gender ?? row.sex) !== ctx.genderId) return false;
     if (!locked.has('religion_id') && n(row.religion_id ?? row.religion) !== ctx.memReligionId) return false;
+    // Mobile (v4.9.49): a panel phone that differs from the row's means
+    // the row needs re-driving — but only when the panel HAS a phone; a
+    // member without one must not break the fast path.
+    const panelMobile = toEnDigits(String(m.mobile_number || '')).replace(/\D+/g, '');
+    if (panelMobile && !locked.has('mobile_number') && toEnDigits(String(row.mobile_number || '')).replace(/\D+/g, '') !== panelMobile) return false;
     if (n(row.is_member_disabled ?? 0) !== (Number(m.is_disabled) === 1 ? 1 : 0)) return false;
     return true;
   }
@@ -2973,6 +2981,12 @@
             setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
           }
 
+          // Phone (v4.9.49): the head's mobile number, filled when the
+          // head row is not site-locked for it.
+          if (!headLocked.has('mobile_number') && h.mobile_number) {
+            setReactive(vmHead, headTarget, 'mobile_number', toEnDigits(String(h.mobile_number)).replace(/\D+/g, ''));
+          }
+
           if (!isVerificationPage) {
             if (!headLocked.has('gender_id')) {
               setReactive(vmHead, headTarget, 'gender', headGenderId);
@@ -3036,6 +3050,9 @@
       // read it too.
       let benefits = null;
       let benefitDiffers = false;
+      // MFS (v4.9.49): resolved inside the member block below; declared
+      // here so the fast path (outside that block) can read it too.
+      let mfsDiffers = false;
       // Head change (v27): whether the live rows were reordered to the
       // target order — reported in the result so the panel can say so.
       let rowsReordered = false;
@@ -3130,6 +3147,19 @@
           if (ben.ssnpProvided && ben.ssnp === 0 && Array.isArray(r.facilities_ids) && r.facilities_ids.length) benefitDiffers = true;
         });
 
+        // MFS (v4.9.49): a panel MFS pick (program_fields['138']) that
+        // differs from the form's field 138 must skip the fast path —
+        // the program-fields pass that fills 138 runs behind it, so a
+        // new or changed pick would otherwise never reach the form.
+        // No pick means no opinion: the fast path is untouched.
+        mfsDiffers = false;
+        const mfsPick = defs && defs.program_fields && defs.program_fields['138'];
+        if (mfsPick !== undefined && mfsPick !== null && String(mfsPick).trim() !== '') {
+          const { values: progVals0 } = resolveProgramState(vmHead, allVms, headTarget);
+          const e138 = Array.isArray(progVals0) ? progVals0.find(x => x && Number(x.allowance_program_additional_field_id) === 138) : null;
+          if (!e138 || isEmptyModelVal(e138.allowance_program_additional_field_values_id) || Number(e138.allowance_program_additional_field_values_id) !== Number(mfsPick)) mfsDiffers = true;
+        }
+
         for (let idx = 0; idx < targetMemberList.length; idx++) {
           const m = targetMemberList[idx];
           const row = vmMembers.familyMembers[idx];
@@ -3201,6 +3231,13 @@
             setReactive(vmMembers, row, 'religion_id', memReligionId);
           }
 
+          // Phone (v4.9.49): the panel's mobile number, filled when the
+          // row is not site-locked for it. A locked (verified) member
+          // keeps the site's official number.
+          if (!locked.has('mobile_number') && m.mobile_number) {
+            setReactive(vmMembers, row, 'mobile_number', toEnDigits(String(m.mobile_number)).replace(/\D+/g, ''));
+          }
+
           setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
           setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
@@ -3267,6 +3304,10 @@
       // Program field 96 (DSS) is derived from the members' DSS radios
       // (v26) — it always wins over a stale value, so it is always forced.
       forcePmt.qids.add(96);
+      // MFS (v4.9.49): a panel MFS pick (program_fields['138']) always
+      // wins over a stale value, like program 96 — a changed pick
+      // applies on a re-fill instead of staying stuck on the old one.
+      if (defs && defs.program_fields && defs.program_fields['138'] !== undefined && defs.program_fields['138'] !== null) forcePmt.qids.add(138);
       if (correctionSets.count) {
         defs.head_options = defs.head_options || {};
         if (correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null) defs.head_options.education_status = Number(correctionsHead.education_status_id);
@@ -3280,7 +3321,7 @@
       // rebuild that wipes a value is still covered. A correction
       // always runs the passes: the fast path would skip the
       // overwrite the user just asked for.
-      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) && correctionSets.count === 0 && !benefitDiffers;
+      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) && correctionSets.count === 0 && !benefitDiffers && !mfsDiffers;
       let optionUnfilled = [];
       const gridCheckNotes = [];
       if (!alreadyFilled) try {
@@ -3602,7 +3643,10 @@
         father_name_bn: d.father_name_bn || (row0IsHead ? row0.father_name_bn : '') || '',
         father_name_en: d.father_name_en || (row0IsHead ? row0.father_name_en : '') || '',
         mother_name_bn: d.mother_name_bn || (row0IsHead ? row0.mother_name_bn : '') || '',
-        mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || ''
+        mother_name_en: d.mother_name_en || (row0IsHead ? row0.mother_name_en : '') || '',
+        // Phone (v4.9.49): the head's mobile number, pulled back to
+        // the panel card.
+        mobile_number: toEnDigits(String(d.mobile_number || (row0IsHead ? row0.mobile_number : '') || '')).replace(/\D+/g, '')
       };
 
       const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
