@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v42';
+  const FC_INJECT_VERSION = 'v44';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -3249,18 +3249,27 @@
       const defs = payload.form_defaults || {};
 
       // (v42) Pulled PMT answers: the panel's Pull brings the draft's
-      // saved PMT answers (pmt_answers), and Auto-Fill left every
-      // non-derivable question to manual selection even though the
-      // panel already knew the answer — the live report listed Q36,
-      // Q33, Q393, Q30, Q579, Q25, Q22, Q595, Q500. Feed them in as
-      // the LAST source (override > derivation > pulled) so a re-fill
-      // of the same family completes them. They ride on defs so the
-      // late watcher passes see them too. Empty-only, never
-      // overwriting a filled answer or a live derivation (when the
-      // household changed, the derivation is the fresh truth).
-      if (Array.isArray(payload.pmt_answers) && payload.pmt_answers.length) {
+      // saved PMT answers, and Auto-Fill left every non-derivable
+      // question to manual selection even though the panel already
+      // knew the answer — the live report listed Q36, Q33, Q393, Q30,
+      // Q579, Q25, Q22, Q595, Q500. Feed them in as the LAST source
+      // (override > derivation > pulled) so a re-fill of the same
+      // family completes them. They ride on defs so the late watcher
+      // passes see them too. Empty-only, never overwriting a filled
+      // answer or a live derivation (when the household changed, the
+      // derivation is the fresh truth).
+      // (v43) THEY LIVE ON HEAD, not at the top level: the pulled
+      // record (and the exported JSON) carries pmt_answers under
+      // payload.head — v42 read payload.pmt_answers, which the panel
+      // never sends, so the fallback was dead code on the real
+      // payload even though its test passed (the test had put them
+      // top-level). Read head first, top level as a fallback.
+      const pulledPmtAnswers = (payload.head && Array.isArray(payload.head.pmt_answers) && payload.head.pmt_answers.length)
+        ? payload.head.pmt_answers
+        : payload.pmt_answers;
+      if (Array.isArray(pulledPmtAnswers) && pulledPmtAnswers.length) {
         const pulledPmt = new Map();
-        for (const a of payload.pmt_answers) {
+        for (const a of pulledPmtAnswers) {
           if (!a) continue;
           const qid = Number(a.variable_id);
           const ids = Array.isArray(a.answers)
@@ -4144,8 +4153,75 @@
     throw new Error('Could not fetch photo bytes');
   }
 
+  // The pulled photo URL itself IS the stored file — the part after
+  // /cloud/ (or /storage/) is the storage key the server already
+  // holds. The browser can DISPLAY the photo (an <img> or a
+  // navigation needs no CORS) while the page still cannot READ its
+  // bytes (fetch/<img>+canvas/$axios all need the gateway's CORS
+  // headers, which it does not send) — but the bytes are not needed:
+  // the site's own draft loader (applyDraftMediaFromStorage +
+  // appendDraftMediaToFormData) attaches a draft's photos by
+  // REFERENCE — stored key + preview URL, never a download — and the
+  // submit then sends that key. So when the byte routes fail, link
+  // the already-stored file instead of uploading it again.
+  function storageKeyFromPhotoUrl(url) {
+    if (typeof url !== 'string') return null;
+    const m = url.match(/\/(?:cloud|storage)\/(.+)$/);
+    if (!m) return null;
+    return m[1].replace(/^\/+/, '').replace(/[?#].*$/, '');
+  }
+
+  function linkPulledPhoto(mediaVm, dataUrl, field) {
+    const key = storageKeyFromPhotoUrl(dataUrl);
+    if (!key || !mediaVm) return false;
+    // The final submit's appendStoredMediaToFormData reads the
+    // mixin's keys; the draft submit's appendDraftMediaToFormData and
+    // the form's own submit gates read the draft keys. Set both, so
+    // the photo is present whichever path submits it.
+    const MIXIN_STORED = { image: 'storedImagePath', signature: 'storedSignaturePath', nominee_image: 'storedNomineeImagePath', nominee_signature: 'storedNomineeSignaturePath' };
+    const MIXIN_PREVIEW = { image: 'imageUrl', signature: 'signUrl', nominee_image: 'nomineeImageUrl', nominee_signature: 'nomineeSignUrl' };
+    const storedKey = (typeof mediaVm.getMediaStoredPathKey === 'function') ? mediaVm.getMediaStoredPathKey(field) : null;
+    const previewKey = (typeof mediaVm.getMediaPreviewKey === 'function') ? mediaVm.getMediaPreviewKey(field) : null;
+    const setKey = (k, v) => {
+      if (!k) return;
+      try { if (typeof mediaVm.$set === 'function') mediaVm.$set(mediaVm, k, v); else mediaVm[k] = v; } catch (_) { try { mediaVm[k] = v; } catch (_) {} }
+    };
+    // The site's own draft-media path first: it sets the preview URL
+    // (rebuilt from the key) and the stored key, and clears any
+    // stale File for the slot.
+    try {
+      if (typeof mediaVm.applyDraftMediaFromStorage === 'function' && storedKey && previewKey) {
+        mediaVm.applyDraftMediaFromStorage({ path: key, url: dataUrl, previewKey, storedKey, dataKey: field });
+      }
+    } catch (_) {}
+    if (storedKey) setKey(storedKey, key);
+    if (previewKey) setKey(previewKey, dataUrl);
+    if (MIXIN_STORED[field]) setKey(MIXIN_STORED[field], key);
+    if (MIXIN_PREVIEW[field]) setKey(MIXIN_PREVIEW[field], dataUrl);
+    if (field === 'image' && 'draftApplicantImageMissing' in mediaVm) setKey('draftApplicantImageMissing', false);
+    if (field === 'house_image' && 'draftHouseImageMissing' in mediaVm) setKey('draftHouseImageMissing', false);
+    try { if (mediaVm.data) mediaVm.data[field] = null; } catch (_) {}
+    // The site's own sync marks a stored path as a successful
+    // upload, which is what the submit gates check.
+    try { if (typeof mediaVm.syncMediaUploadStateFromStoredPaths === 'function') mediaVm.syncMediaUploadStateFromStoredPaths(); } catch (_) {}
+    try {
+      if (mediaVm.mediaUploadState) {
+        const st = { status: 'success', progress: 100, error: null, file: null };
+        if (typeof mediaVm.$set === 'function') mediaVm.$set(mediaVm.mediaUploadState, field, st);
+        else mediaVm.mediaUploadState[field] = st;
+      }
+    } catch (_) {}
+    // Verify the stored path actually landed (the draft key at
+    // least); otherwise the submit would not see the photo.
+    try {
+      if (storedKey && mediaVm[storedKey] === key) return true;
+      if (MIXIN_STORED[field] && mediaVm[MIXIN_STORED[field]] === key) return true;
+    } catch (_) {}
+    return false;
+  }
+
   async function uploadPulledPhotos(payload, vmHead, allVms) {
-    const summary = { attempted: 0, uploaded: 0, skipped: 0, failed: [] };
+    const summary = { attempted: 0, uploaded: 0, linked: 0, skipped: 0, failed: [] };
     const images = payload && Array.isArray(payload.images) ? payload.images : [];
     if (!images.length) return summary;
     const mediaVm = findUploadMediaVm(vmHead, allVms);
@@ -4165,7 +4241,13 @@
         if (res && res.success) summary.uploaded++;
         else summary.failed.push({ slot: field, message: (res && res.message) || 'Upload failed' });
       } catch (e) {
-        summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
+        // Bytes unreachable (the gateway blocks cross-origin reads)
+        // — link the file that is already stored instead of failing
+        // the slot. Only when the link lands does the slot count.
+        let linked = false;
+        try { linked = linkPulledPhoto(mediaVm, im.dataUrl, field); } catch (_) { linked = false; }
+        if (linked) summary.linked++;
+        else summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
       }
     }
     return summary;
@@ -4179,10 +4261,19 @@
     // the first failure's message — the slots usually share one cause
     // (e.g. the gateway bytes could not be fetched).
     const reason = failed.length && failed[0] && failed[0].message ? ` — ${failed[0].message}` : '';
-    if (photos.uploaded > 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded.`;
-    if (photos.uploaded > 0 || failed.length) {
+    const linked = photos.linked || 0;
+    if (photos.uploaded > 0 && linked === 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded.`;
+    if (linked > 0 && photos.uploaded === 0 && !failed.length) return ` Photos: ${linked} linked.`;
+    if (photos.uploaded > 0 || linked > 0 || failed.length) {
       const names = failed.map((f) => f.slot).join(', ');
-      return ` Photos: ${photos.uploaded} uploaded, ${failed.length} failed${names ? ` (${names})` : ''}${reason}.`;
+      const parts = [];
+      // With a failure, keep the uploaded count in the message even
+      // when it is 0 ("0 uploaded, 1 failed") — the wording the
+      // status has used since v42.
+      if (photos.uploaded > 0 || failed.length) parts.push(`${photos.uploaded} uploaded`);
+      if (linked > 0) parts.push(`${linked} linked`);
+      if (failed.length) parts.push(`${failed.length} failed${names ? ` (${names})` : ''}`);
+      return ` Photos: ${parts.join(', ')}${reason}.`;
     }
     if (photos.skipped > 0) return ' Photos: already on form.';
     return '';
