@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.57-live';
+const CURRENT_VERSION_TAG = 'v4.9.58-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -165,7 +165,64 @@ const HEAD_FIELDS = [
   // head is the one the Halnagad check reports on.
   { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
   { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
-  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' }
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' },
+  // (v38) All-tabs pull: the rest of the form, organised in sections
+  // matching the site's tabs. Text fields are editable and fill back
+  // (empty-only); 'info' fields show the name the pull resolved from
+  // the site's own lists (the panel has no such list to offer a
+  // dropdown from, so the name is shown, not edited — the id rides
+  // on the record for Auto-Fill).
+  { key: 'spouse_name_bn', label: 'Spouse (BN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'spouse_name_en', label: 'Spouse (EN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'identification_mark', label: 'ID Mark (শনাক্তকরণ চিহ্ন)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nationality', label: 'Nationality (জাতীয়তা)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'email', label: 'Email (ইমেইল)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'mobile_operator', label: 'Mobile Operator', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'disability_id', label: 'Disability (প্রতিবন্ধিতা)', type: 'info', labelMap: 'DISABILITY_TYPE_OPTIONS', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'house_size', label: 'Household Size (খানার সদস্য)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'no_of_room_name', label: 'No. of Rooms (কক্ষ সংখ্যা)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nominee_bn', label: 'Nominee (BN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_en', label: 'Nominee (EN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_verification_number', label: 'Nominee NID/BRN', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_date_of_birth', label: 'Nominee DOB', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_address', label: 'Nominee Address', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_relation_with_beneficiary', label: 'Nominee Relation', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_nationality', label: 'Nominee Nationality', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'account_type', label: 'Account Type', type: 'account_type_select', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_name', label: 'Bank', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'branch_name', label: 'Branch', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_division_name', label: 'Bank Division', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_district_name', label: 'Bank District', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_name', label: 'Account Name', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_owner', label: 'Account Owner', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_number', label: 'Account Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'mfs_number', label: 'MFS Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'ঠিকানা (Address)' },
+  { key: 'address_division_name', label: 'Division', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_district_name', label: 'District', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_union_name', label: 'Union', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_pouro_name', label: 'Pouroshava', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_city_name', label: 'City', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_ward_name', label: 'Ward', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_post_code', label: 'Post Code', section: 'ঠিকানা (Address)' },
+  { key: 'address_text', label: 'Address (ঠিকানা)', section: 'ঠিকানা (Address)' },
+  { key: 'permanent_address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_division_name', label: 'Division', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_district_name', label: 'District', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_union_name', label: 'Union', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_pouro_name', label: 'Pouroshava', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_city_name', label: 'City', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_ward_name', label: 'Ward', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_post_code', label: 'Post Code', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_text', label: 'Address (ঠিকানা)', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'program_male', label: 'Male Members (পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_female', label: 'Female Members (নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_hijra', label: 'Hijra Members (হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_male', label: 'Abroad — Male (বিদেশে পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_female', label: 'Abroad — Female (বিদেশে নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_hijra', label: 'Abroad — Hijra (বিদেশে হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' }
 ];
 
 const MEMBER_FIELDS = [
@@ -194,6 +251,13 @@ const MEMBER_FIELDS = [
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
   { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  // (v38) The rest of the member row's own fields: literacy (the
+  // form's own answer), annual income (the form's real number, not
+  // the panel's 0 / 60000 guess — editable, fills back empty-only),
+  // and the government-job flag.
+  { key: 'literacy_id', label: 'Literacy (সাক্ষরতা)', type: 'info', labelMap: 'LITERACY_LABELS' },
+  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
+  { key: 'is_gov_job_holder', label: 'Govt Job? (সরকারি চাকরি)', type: 'info', labelMap: { 0: 'No (না)', 1: 'Yes (হ্যাঁ)' } },
   // Disability (v4.9.49): a disabled member needs the type on the form
   // (lookup type 11). The type row only shows when Disabled is Yes.
   { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
@@ -265,6 +329,30 @@ const HEALTH_OPTIONS = [
   { id: 205, label: 'আংশিক কর্মক্ষম (Partially Able-bodied)' },
   { id: 206, label: 'প্রতিবন্ধী (Person with Disability)' }
 ];
+// Account type (v38): the head form's account_type — 1 = bank
+// account, 2 = MFS (from the uploaded bundle's summary view).
+const ACCOUNT_TYPE_OPTIONS = [
+  { id: 1, label: 'ব্যাংক অ্যাকাউন্ট (Bank Account)' },
+  { id: 2, label: 'মোবাইল ব্যাংকিং (MFS)' }
+];
+// Location type (v38): the address form's location_type — the
+// site's subLocationType list: 1 Pouroshava, 2 Union.
+const LOCATION_TYPE_OPTIONS = [
+  { id: 1, label: 'পৌরসভা (Pouroshava)' },
+  { id: 2, label: 'ইউনিয়ন (Union)' }
+];
+// Literacy (lookup type 45, v38): 241 read and write, 242 read only,
+// 243 cannot read or write — shown as a label on member cards.
+const LITERACY_LABELS = {
+  241: 'পড়তে ও লিখতে পারে (Read & write)',
+  242: 'শুধু পড়তে পারে (Read only)',
+  243: 'পড়তে/লিখতে পারে না (Cannot read or write)'
+};
+// (v38) Label maps the 'info' field type resolves BY NAME — the field
+// lists reference them as strings, so a test that loads HEAD_FIELDS /
+// MEMBER_FIELDS first never hits a const-initialisation order trap
+// (the direct const reference crashed every such test).
+const LABEL_MAPS = { DISABILITY_TYPE_OPTIONS, LITERACY_LABELS };
 
 // Cash usage categories (2500 Tk distribution) — the site's lookup
 // type 46, real ids from getApplicationPageData. The "Other" row
@@ -628,6 +716,8 @@ function initApp() {
   $('uploadOtherBtn').addEventListener('click', () => $('otherUpload').click());
   $('headUpload').addEventListener('change', (e) => handleUpload(e, 'head'));
   $('otherUpload').addEventListener('change', (e) => handleUpload(e, 'other'));
+  const pulledResetBtn = $('pulledResetBtn');
+  if (pulledResetBtn) pulledResetBtn.addEventListener('click', resetPulledImages);
 
   $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
@@ -2572,6 +2662,58 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       syncJsonOutput();
       notifyChange('marital_status', v === '' ? null : Number(v));
     });
+  } else if (f.type === 'account_type_select' || f.type === 'location_type_select') {
+    // (v38) Two static id lists: account type (1 Bank / 2 MFS) and
+    // location type (1 Pouroshava / 2 Union). Blank = leave the form
+    // as-is; a pick fills back empty-only on Auto-Fill.
+    const opts = f.type === 'account_type_select' ? ACCOUNT_TYPE_OPTIONS : LOCATION_TYPE_OPTIONS;
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', f.key);
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    opts.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj[f.key] !== undefined && targetObj[f.key] !== null && String(targetObj[f.key]).trim() !== '' ? String(targetObj[f.key]) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj[f.key] = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange(f.key, v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'info') {
+    // (v38) Read-only display: a value the pull resolved from the
+    // site's own lists (bank / branch / division / ... name). The
+    // panel has no such list to offer a dropdown from, so the name is
+    // shown, not edited — the id rides on the record for Auto-Fill.
+    // A labelMap turns an id into a friendly label — an options array
+    // like DISABILITY_TYPE_OPTIONS, or an id->label map like
+    // LITERACY_LABELS; the field lists name it by string and it is
+    // resolved through LABEL_MAPS (so the lists stay load-order safe).
+    inputEl = document.createElement('div');
+    inputEl.setAttribute('data-field', f.key);
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:600; color:var(--text-main);';
+    const v = targetObj[f.key];
+    let shown = '—';
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      shown = String(v);
+      const map = typeof f.labelMap === 'string' ? LABEL_MAPS[f.labelMap] : f.labelMap;
+      if (Array.isArray(map)) {
+        const hit = map.find((o) => o && Number(o.id) === Number(v));
+        if (hit) shown = `${hit.id} — ${hit.label}`;
+      } else if (map && typeof map === 'object') {
+        const hit = map[Number(v)] ?? map[String(v)];
+        if (hit !== undefined) shown = String(hit);
+      }
+    }
+    inputEl.textContent = shown;
   } else {
     inputEl = document.createElement('input');
     inputEl.type = 'text';
@@ -3054,6 +3196,18 @@ function renderPulledImages() {
     wrap.appendChild(bar);
     grid.appendChild(wrap);
   });
+}
+
+// (v38) Reset the Draft Photos (from website): the pulled photos
+// persist in the session, so a stale set from another draft/family
+// stays until a new pull replaces it — and an import merges more in.
+// Reset clears just this section (the record and the upload lists
+// are untouched) and saves the empty state, so a reload does not
+// bring the stale photos back. A re-pull re-fills it.
+function resetPulledImages() {
+  state.pulledImages = [];
+  renderPulledImages();
+  saveSessionState();
 }
 
 function fileToBase64(file) {
@@ -4916,6 +5070,31 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   } else if (headPrev && headPrev.health_condition_id !== undefined && headPrev.health_condition_id !== null && String(headPrev.health_condition_id).trim() !== '') {
     head.health_condition_id = Number(headPrev.health_condition_id);
   }
+  // (v38) All-tabs pull: the extra head fields the injector now
+  // sends — general extras, bank, address, nominee, program counts,
+  // PMT answers. Text keys keep the trimmed string, id keys keep the
+  // number, name keys keep the resolved display name. A previous
+  // record's values carry over only for the SAME person (headPrev),
+  // so nothing bleeds across families.
+  const headTextKeys = ['spouse_name_bn', 'spouse_name_en', 'identification_mark', 'nationality', 'email', 'account_name', 'account_number', 'mfs_number', 'address_text', 'address_post_code', 'permanent_address_text', 'permanent_address_post_code', 'nominee_en', 'nominee_bn', 'nominee_verification_number', 'nominee_date_of_birth', 'nominee_address', 'nominee_relation_with_beneficiary', 'nominee_nationality', 'mobile_operator', 'account_type_label', 'bank_name', 'branch_name', 'bank_division_name', 'bank_district_name', 'account_owner', 'address_division_name', 'address_district_name', 'address_thana_name', 'address_union_name', 'address_pouro_name', 'address_city_name', 'address_city_thana_name', 'address_district_pouro_name', 'address_ward_name', 'address_location_type_name', 'address_ward_key', 'permanent_address_division_name', 'permanent_address_district_name', 'permanent_address_thana_name', 'permanent_address_union_name', 'permanent_address_pouro_name', 'permanent_address_city_name', 'permanent_address_city_thana_name', 'permanent_address_district_pouro_name', 'permanent_address_ward_name', 'permanent_address_location_type_name', 'permanent_address_ward_key', 'house_size', 'no_of_room_name'];
+  const headIdKeys = ['mobile_operator_id', 'disability_id', 'account_type', 'bank_name_id', 'branch_name_id', 'bank_division_id', 'bank_district_id', 'account_owner_id', 'address_division_id', 'address_district_id', 'address_thana_id', 'address_union_id', 'address_pouro_id', 'address_city_id', 'address_city_thana_id', 'address_district_pouro_id', 'address_ward_id', 'address_location_type_id', 'address_sub_location_type_id', 'permanent_address_division_id', 'permanent_address_district_id', 'permanent_address_thana_id', 'permanent_address_union_id', 'permanent_address_pouro_id', 'permanent_address_city_id', 'permanent_address_city_thana_id', 'permanent_address_district_pouro_id', 'permanent_address_ward_id', 'permanent_address_location_type_id', 'permanent_address_sub_location_type_id', 'no_of_room', 'program_male', 'program_female', 'program_hijra', 'program_abroad_male', 'program_abroad_female', 'program_abroad_hijra'];
+  for (const k of headTextKeys) {
+    if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== '') head[k] = String(h[k]).trim();
+    else if (headPrev && headPrev[k] !== undefined && headPrev[k] !== null && String(headPrev[k]).trim() !== '') head[k] = String(headPrev[k]).trim();
+  }
+  for (const k of headIdKeys) {
+    if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== '') head[k] = Number(h[k]);
+    else if (headPrev && headPrev[k] !== undefined && headPrev[k] !== null && String(headPrev[k]).trim() !== '') head[k] = Number(headPrev[k]);
+  }
+  // Bangla names stay Bangla (like the head's own name_bn).
+  if (head.spouse_name_bn) head.spouse_name_bn = stripLatinLetters(head.spouse_name_bn);
+  if (head.nominee_bn) head.nominee_bn = stripLatinLetters(head.nominee_bn);
+  // Program fields + PMT answers are arrays — keep the pull's list,
+  // else the same person's previous list.
+  if (preserveOrder && Array.isArray(h.program_fields) && h.program_fields.length) head.program_fields = h.program_fields;
+  else if (headPrev && Array.isArray(headPrev.program_fields) && headPrev.program_fields.length) head.program_fields = headPrev.program_fields;
+  if (preserveOrder && Array.isArray(h.pmt_answers) && h.pmt_answers.length) head.pmt_answers = h.pmt_answers;
+  else if (headPrev && Array.isArray(headPrev.pmt_answers) && headPrev.pmt_answers.length) head.pmt_answers = headPrev.pmt_answers;
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -5027,6 +5206,27 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       entry.health_condition_id = Number(m.health_condition_id);
     } else if (prevM2 && prevM2.health_condition_id !== undefined && prevM2.health_condition_id !== null && String(prevM2.health_condition_id).trim() !== '') {
       entry.health_condition_id = Number(prevM2.health_condition_id);
+    }
+    // (v38) The rest of the member row's own fields: literacy (the
+    // form's own answer — the panel derives it from education, but
+    // the form's value is the ground truth), annual income (the form
+    // holds the real number, e.g. 150000 for the husband, not the
+    // panel's 0 / 60000 guess), and the government-job flag. Same
+    // person only (prevM2, matched by NID/BRN).
+    if (m?.literacy_id !== undefined && m?.literacy_id !== null && String(m.literacy_id).trim() !== '') {
+      entry.literacy_id = Number(m.literacy_id);
+    } else if (prevM2 && prevM2.literacy_id !== undefined && prevM2.literacy_id !== null && String(prevM2.literacy_id).trim() !== '') {
+      entry.literacy_id = Number(prevM2.literacy_id);
+    }
+    if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '') {
+      entry.estimate_annual_income = Number(m.estimate_annual_income);
+    } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '') {
+      entry.estimate_annual_income = Number(prevM2.estimate_annual_income);
+    }
+    if (m?.is_gov_job_holder === 0 || m?.is_gov_job_holder === 1 || m?.is_gov_job_holder === '0' || m?.is_gov_job_holder === '1') {
+      entry.is_gov_job_holder = Number(m.is_gov_job_holder);
+    } else if (prevM2 && (prevM2.is_gov_job_holder === 0 || prevM2.is_gov_job_holder === 1 || prevM2.is_gov_job_holder === '0' || prevM2.is_gov_job_holder === '1')) {
+      entry.is_gov_job_holder = Number(prevM2.is_gov_job_holder);
     }
     // Benefit (v4.9.36, v4.9.49): keep the SSNP / card / DSS values
     // the form (Pull) or the user set, through rebuilds — they are what
@@ -5740,7 +5940,25 @@ function renderExtractedCards(data) {
     const body = document.createElement('div');
     body.className = 'record-rows';
 
+    // (v38) Section headers: a field with f.section starts a new
+    // section when the section changes. The header is only inserted
+    // when the first field of that section actually renders, so a
+    // section whose fields are all hidden (e.g. no nominee) never
+    // shows an empty header.
+    let lastSection = null;
+    let pendingSection = null;
     fields.forEach((f) => {
+      if (f.hideWhenEmpty && (targetObj[f.key] === undefined || targetObj[f.key] === null || String(targetObj[f.key]).trim() === '')) return;
+      if (f.section && f.section !== lastSection) pendingSection = f.section;
+      if (pendingSection) {
+        const sec = document.createElement('div');
+        sec.className = 'record-section';
+        sec.style.cssText = 'font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; padding:10px 2px 2px; border-top:1px solid var(--border); margin-top:6px;';
+        sec.textContent = pendingSection;
+        body.appendChild(sec);
+        lastSection = pendingSection;
+        pendingSection = null;
+      }
       const r = document.createElement('div');
       r.className = 'record-row';
       r.style.gridTemplateColumns = '105px 1fr auto';
@@ -5813,6 +6031,35 @@ function renderExtractedCards(data) {
     });
 
     card.appendChild(body);
+    // (v38) Program + PMT answers the pull brings (head card only):
+    // a collapsible list, so the form's own answers are visible
+    // organised instead of only inside the Raw JSON dump.
+    if (!isMember && ((Array.isArray(targetObj.program_fields) && targetObj.program_fields.length) || (Array.isArray(targetObj.pmt_answers) && targetObj.pmt_answers.length))) {
+      const det = document.createElement('details');
+      det.style.cssText = 'margin:6px 10px 10px; border:1px solid var(--border); border-radius:6px; padding:6px 8px;';
+      const sum = document.createElement('summary');
+      sum.style.cssText = 'font-size:12px; font-weight:700; cursor:pointer; color:var(--text-main);';
+      sum.textContent = 'প্রোগ্রাম ও PMT উত্তর (Program & PMT answers — from the website)';
+      det.appendChild(sum);
+      const list = document.createElement('div');
+      list.style.cssText = 'margin-top:6px; display:flex; flex-direction:column; gap:4px;';
+      const addDetailRow = (label, value) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; gap:8px; font-size:12px;';
+        const l = document.createElement('span');
+        l.style.cssText = 'flex:0 0 55%; color:var(--muted);';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.style.cssText = 'font-weight:600; color:var(--text-main);';
+        v.textContent = value;
+        row.append(l, v);
+        list.appendChild(row);
+      };
+      (targetObj.program_fields || []).forEach((pf) => addDetailRow(pf.field_name || `Program field ${pf.field_id}`, pf.value_name || String(pf.value_id ?? '—')));
+      (targetObj.pmt_answers || []).forEach((pa) => addDetailRow(pa.question || `প্রশ্ন ${pa.variable_id}`, (pa.answers || []).map((a) => a.name || String(a.id)).join(', ') || '—'));
+      det.appendChild(list);
+      card.appendChild(det);
+    }
     return card;
   };
 
@@ -6616,6 +6863,9 @@ function exportExtractedJson() {
   const filename = `FC_${idPart}_${new Date().toISOString().slice(0, 10)}.json`;
   // Save the photos inside the JSON so an import brings them back: the NID
   // uploads (head/other) as bare base64, the draft photos as full data URLs.
+  // (v38) A pulled photo can also be the site's own https preview URL
+  // (gateway) when the byte fetch failed — the import keeps those too,
+  // so the photo survives the export/import round-trip.
   const photoCount = state.head.length + state.other.length + (state.pulledImages || []).length;
   const exportObj = {
     ...state.lastExtracted,
@@ -6699,7 +6949,13 @@ function restoreImportedImages(images) {
   addBack('other', images.other);
   if (Array.isArray(images.pulled)) {
     images.pulled.forEach((im) => {
-      if (!im || typeof im.dataUrl !== 'string' || !im.dataUrl.startsWith('data:image')) return;
+      // (v38) A pulled photo's dataUrl is a data: URL when the bytes
+      // were fetched, or the site's own https preview URL (gateway)
+      // when the byte fetch failed — both display in a plain <img>,
+      // so keep both. Before v38 only data: URLs were restored, so a
+      // photo exported as a gateway URL vanished on import ("we dont
+      // get the photo") even though the export had it.
+      if (!im || typeof im.dataUrl !== 'string' || !(im.dataUrl.startsWith('data:image') || /^https?:\/\//i.test(im.dataUrl))) return;
       if ((state.pulledImages || []).some((it) => it.dataUrl === im.dataUrl)) return;
       state.pulledImages.push({ slot: im.slot || 'image', name: im.name || 'Photo', dataUrl: im.dataUrl });
       restored++;

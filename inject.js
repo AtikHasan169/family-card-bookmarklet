@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v37';
+  const FC_INJECT_VERSION = 'v38';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1830,6 +1830,76 @@
       }
     }
 
+    // ---- (v38) Head id fields the pull now brings: bank + address
+    // selects. The value is the form's own stored id (the panel
+    // keeps it beside the resolved display name). Each entry writes
+    // the MODEL when it is empty (which also drives the site's own
+    // cascade watchers — division loads districts, and so on) and
+    // drives the rendered select when it exists and the id is in its
+    // items. A cascade that has not loaded yet simply waits for the
+    // next watcher pass. branch_name is included — the existing
+    // single-branch watcher only fires when exactly one branch
+    // exists, so a many-branch bank needs the pulled id.
+    if (headTarget && headMember) {
+      // (v38) allVms is not a parameter here — the address tab's model
+      // lives on its own component VM, so re-scan for it (the fill
+      // does the same at its start and after mounting tabs).
+      const afOwnerS = getVueNodes().allVms.find((v) => v && v.addressForm);
+      const afS = afOwnerS ? afOwnerS.addressForm : null;
+      const headIdFields = [
+        { scope: 'data', key: 'account_type', value: headMember.account_type },
+        { scope: 'data', key: 'bank_name', value: headMember.bank_name_id },
+        { scope: 'data', key: 'branch_name', value: headMember.branch_name_id },
+        { scope: 'data', key: 'bank_division_id', value: headMember.bank_division_id },
+        { scope: 'data', key: 'bank_district_id', value: headMember.bank_district_id },
+        { scope: 'data', key: 'account_owner', value: headMember.account_owner_id },
+        { scope: 'data', key: 'mobile_operator', value: headMember.mobile_operator_id },
+        { scope: 'addressForm', key: 'division_id', value: headMember.address_division_id },
+        { scope: 'addressForm', key: 'district_id', value: headMember.address_district_id },
+        { scope: 'addressForm', key: 'thana_id', value: headMember.address_thana_id },
+        { scope: 'addressForm', key: 'union_id', value: headMember.address_union_id },
+        { scope: 'addressForm', key: 'pouro_id', value: headMember.address_pouro_id },
+        { scope: 'addressForm', key: 'city_id', value: headMember.address_city_id },
+        { scope: 'addressForm', key: 'city_thana_id', value: headMember.address_city_thana_id },
+        { scope: 'addressForm', key: 'district_pouro_id', value: headMember.address_district_pouro_id },
+        { scope: 'addressForm', key: 'ward_id_union', value: headMember.address_ward_id === undefined ? undefined : (headMember.address_ward_key === 'ward_id_union' ? headMember.address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'ward_id_pouro', value: headMember.address_ward_id === undefined ? undefined : (headMember.address_ward_key === 'ward_id_pouro' ? headMember.address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'ward_id_city', value: headMember.address_ward_id === undefined ? undefined : (headMember.address_ward_key === 'ward_id_city' ? headMember.address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'ward_id_dist', value: headMember.address_ward_id === undefined ? undefined : (headMember.address_ward_key === 'ward_id_dist' ? headMember.address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'permanent_division_id', value: headMember.permanent_address_division_id },
+        { scope: 'addressForm', key: 'permanent_district_id', value: headMember.permanent_address_district_id },
+        { scope: 'addressForm', key: 'permanent_thana_id', value: headMember.permanent_address_thana_id },
+        { scope: 'addressForm', key: 'permanent_union_id', value: headMember.permanent_address_union_id },
+        { scope: 'addressForm', key: 'permanent_pouro_id', value: headMember.permanent_address_pouro_id },
+        { scope: 'addressForm', key: 'permanent_city_id', value: headMember.permanent_address_city_id },
+        { scope: 'addressForm', key: 'permanent_city_thana_id', value: headMember.permanent_address_city_thana_id },
+        { scope: 'addressForm', key: 'permanent_district_pouro_id', value: headMember.permanent_address_district_pouro_id },
+        { scope: 'addressForm', key: 'permanent_ward_id_union', value: headMember.permanent_address_ward_id === undefined ? undefined : (headMember.permanent_address_ward_key === 'ward_id_union' ? headMember.permanent_address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'permanent_ward_id_pouro', value: headMember.permanent_address_ward_id === undefined ? undefined : (headMember.permanent_address_ward_key === 'ward_id_pouro' ? headMember.permanent_address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'permanent_ward_id_city', value: headMember.permanent_address_ward_id === undefined ? undefined : (headMember.permanent_address_ward_key === 'ward_id_city' ? headMember.permanent_address_ward_id : undefined) },
+        { scope: 'addressForm', key: 'permanent_ward_id_dist', value: headMember.permanent_address_ward_id === undefined ? undefined : (headMember.permanent_address_ward_key === 'ward_id_dist' ? headMember.permanent_address_ward_id : undefined) }
+      ];
+      for (const f of headIdFields) {
+        const want = Number(f.value);
+        if (!Number.isFinite(want) || want <= 0) continue;
+        const modelObj = f.scope === 'addressForm' ? afS : headTarget;
+        const modelVm = f.scope === 'addressForm' ? afOwnerS : vmHead;
+        if (!modelObj || !(f.key in modelObj)) continue;
+        if (onlyEmpty && !isEmptyModelVal(modelObj[f.key])) continue;
+        if (isEmptyModelVal(modelObj[f.key])) setReactive(modelVm, modelObj, f.key, want);
+        const list = byField.get(f.scope + '.' + f.key) || [];
+        for (const c of list) {
+          if (!c.isSelect || c.vInst.disabled || c.vInst.readonly) continue;
+          if (!Array.isArray(c.vInst.items) || !c.vInst.items.length) continue;
+          const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
+          if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
+          if (!c.vInst.items.some((it) => Number(optionItemId(c.vInst, it)) === want)) continue;
+          selectVuetifyItem(c.vInst, (it) => Number(optionItemId(c.vInst, it)) === want);
+          triggerVeeValidate(c.wrap);
+        }
+      }
+    }
+
     // ---- Address cascade: auto-pick when exactly one usable option exists.
     const geoKeyRe = /^(division|district|thana|union|ward|pouro|city|district_pouro|city_thana)(_id)?(_city|_dist|_pouro|_union)?$/;
     const geoKeyRe2 = /^(permanent_)?(division|district|thana|union|ward|pouro|city)/;
@@ -2655,6 +2725,13 @@
     return Number.isFinite(n) && n > 0 ? n : undefined;
   }
 
+  // (v38) Like pullId, but 0 counts — an annual income of 0 is a
+  // real answer (the head's income), not a missing one.
+  function pullNum(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
   function parseMemberRow(m) {
     const relId = Number(m.relationship_id || m.relation_id || 0);
     const relName = ID_TO_RELATION_MAP[relId] || m.relation || 'Son';
@@ -2702,6 +2779,14 @@
       maritial_status_id: pullId(m.maritial_status_id),
       disability_type_id: pullId(m.disability_type_id),
       health_condition_id: pullId(m.health_condition_id),
+      // (v38) The rest of the member row's own fields: literacy
+      // (the panel derives it from education, but the form's own
+      // answer is the ground truth), annual income (the panel used
+      // to guess 0 / 60000 — the form holds the real number, e.g.
+      // 150000 for the husband), and the government-job flag.
+      literacy_id: pullId(m.literacy_id),
+      estimate_annual_income: pullNum(m.estimate_annual_income),
+      is_gov_job_holder: (m.is_gov_job_holder === 0 || m.is_gov_job_holder === 1) ? Number(m.is_gov_job_holder) : undefined,
       // Benefit (v26): what the form itself holds for this member.
       is_ssnp_covered: (m.is_ssnp_covered === 0 || m.is_ssnp_covered === 1) ? Number(m.is_ssnp_covered) : null,
       facilities_ids: Array.isArray(m.facilities_ids) ? m.facilities_ids.slice() : [],
@@ -3010,6 +3095,36 @@
             setReactive(vmHead, headTarget, 'mobile', toEnDigits(String(h.mobile_number)).replace(/\D+/g, ''));
           }
 
+          // (v38) General + bank text fields the pull now brings: the
+          // head form's own text inputs, empty-only. None of these is
+          // in the site's locked set, so no lock check is needed. The
+          // address text / post code go to both d and the address
+          // tab's addressForm (the tab's live model) when it exists.
+          const headTextFields = [
+            ['spouse_name_bn', h.spouse_name_bn], ['spouse_name_en', h.spouse_name_en],
+            ['identification_mark', h.identification_mark], ['nationality', h.nationality],
+            ['email', h.email], ['account_name', h.account_name], ['account_number', h.account_number]
+          ];
+          for (const [key, val] of headTextFields) {
+            if (val !== undefined && val !== null && String(val).trim() !== '' && key in headTarget && isEmptyModelVal(headTarget[key])) {
+              setReactive(vmHead, headTarget, key, String(val).trim());
+            }
+          }
+          if (h.mfs_number !== undefined && h.mfs_number !== null && String(h.mfs_number).trim() !== '' && 'mfs_number' in headTarget && isEmptyModelVal(headTarget.mfs_number)) {
+            setReactive(vmHead, headTarget, 'mfs_number', String(h.mfs_number).trim());
+          }
+          const afOwnerW = (allVms || []).find((v) => v && v.addressForm);
+          const afW = afOwnerW ? afOwnerW.addressForm : null;
+          const addrTextPairs = [
+            ['address', h.address_text], ['post_code', h.address_post_code],
+            ['permanent_address', h.permanent_address_text], ['permanent_post_code', h.permanent_address_post_code]
+          ];
+          for (const [key, val] of addrTextPairs) {
+            if (val === undefined || val === null || String(val).trim() === '') continue;
+            if (key in headTarget && isEmptyModelVal(headTarget[key])) setReactive(vmHead, headTarget, key, String(val).trim());
+            if (afW && key in afW && isEmptyModelVal(afW[key])) setReactive(afOwnerW, afW, key, String(val).trim());
+          }
+
           if (!isVerificationPage) {
             if (!headLocked.has('gender_id')) {
               setReactive(vmHead, headTarget, 'gender', headGenderId);
@@ -3281,11 +3396,19 @@
             setReactive(vmMembers, row, 'disability_type_id', Number(m.disability_type_id));
           }
 
+          // Income (v38): the pull now brings the form's own annual
+          // income (e.g. 150000 for the husband) — write it back when
+          // the row is empty, instead of the 60000 guess below. The
+          // head/student 0-rule still applies after it.
+          const isHeadRow = relId === 260 || relName === 'Head/Self';
+          const isStudentRow = memAge !== null && memAge >= 4 && memAge <= 24;
+          if (!isHeadRow && !isStudentRow && m.estimate_annual_income !== undefined && m.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && isEmptyModelVal(row.estimate_annual_income)) {
+            setReactive(vmMembers, row, 'estimate_annual_income', Number(m.estimate_annual_income));
+          }
+
           // Income: the head and students earn nothing — keep it 0.
           // The 60000 default is only for an earning (non-student,
           // non-head) husband.
-          const isHeadRow = relId === 260 || relName === 'Head/Self';
-          const isStudentRow = memAge !== null && memAge >= 4 && memAge <= 24;
           if (isHeadRow || isStudentRow) {
             setReactive(vmMembers, row, 'estimate_annual_income', 0);
           } else if (relName === 'Husband' && !row.estimate_annual_income) {
@@ -3488,6 +3611,114 @@
       }
     }
     return null;
+  }
+
+  // (v38) Clean display name for one option-list item: Bangla first.
+  // Lookup lists render value_bn/value_en, geo lists name_bn/name_en
+  // (see the itemToStr note) — unlike itemToStr, which concatenates
+  // every label field for pattern matching, this returns ONE name.
+  function itemDisplayName(it) {
+    if (it === null || it === undefined) return '';
+    if (typeof it !== 'object') return String(it).trim();
+    return String(it.value_bn || it.name_bn || it.value_en || it.name_en || it.text || it.label_bn || it.label_en || it.label || it.title_bn || it.title_en || it.title || it.name || '').trim();
+  }
+
+  // (v38) Resolve one stored id to its display name through the
+  // rendered controls: find the control bound to (scope, key) — e.g.
+  // ('data', 'bank_name') or ('addressForm', 'division_id') — then
+  // the item whose id matches. Returns { id, name } or null when the
+  // control is not mounted or the id is not in its items. Takes the
+  // controls list so it is unit-testable without a DOM.
+  function resolveControlName(controls, scope, key, id) {
+    const numId = Number(id);
+    if (!Number.isFinite(numId)) return null;
+    for (const c of (controls || [])) {
+      if (!c || !c.vInst || !Array.isArray(c.vInst.items)) continue;
+      const cls = classifyControl(c);
+      if (cls.scope !== scope || cls.key !== key) continue;
+      const item = c.vInst.items.find((it) => Number(optionItemId(c.vInst, it)) === numId);
+      if (item !== undefined) return { id: numId, name: itemDisplayName(item) };
+    }
+    return null;
+  }
+
+  // (v38) Program additional fields (Family Card, program 24) — the
+  // field labels from PMT_AND_PROGRAM_FIELDS.md (getApplicationPageData,
+  // 2026-11-12). Used when the live displayAdditionalFields are not
+  // mounted, so a pulled program value still has a name.
+  const PROGRAM_FIELD_NAMES = {
+    75: 'পরিবারে পুরুষ সদস্য সংখ্যা (No. of Male)',
+    77: 'পরিবারে নারী সদস্য সংখ্যা (No. of Female)',
+    142: 'পরিবারে হিজড়া সদস্য সংখ্যা (Hijra member)',
+    96: 'সমাজসেবা অধিদপ্তর থেকে প্রশিক্ষণ/আর্থিক সুবিধা (DSS training/benefit)',
+    138: 'মোবাইল ব্যাংকিং (MFS Account)',
+    139: 'বিদেশে পুরুষ সদস্য (Male member in abroad)',
+    140: 'বিদেশে মহিলা সদস্য (Female member in abroad)',
+    141: 'বিদেশে হিজড়া সদস্য (Hijra member in abroad)'
+  };
+  // Value names for the count fields are the number itself (value_en
+  // "0".."10"); DSS is 650 Yes / 651 No; MFS is the provider name.
+  // The count fields' value ids are consecutive from a base (from
+  // PMT_AND_PROGRAM_FIELDS.md): 75 from 716 (0), 77 from 726 (0 —
+  // the list starts at 727 = 1, there is no 0), 142 from 709 (0),
+  // 139 from 688 (0), 140 from 695 (0), 141 from 702 (0).
+  const PROGRAM_COUNT_FIELDS = { 75: 'male', 77: 'female', 142: 'hijra', 139: 'abroad_male', 140: 'abroad_female', 141: 'abroad_hijra' };
+  const PROGRAM_COUNT_BASE = { 75: 716, 77: 726, 142: 709, 139: 688, 140: 695, 141: 702 };
+  function resolveProgramFieldName(displayFields, fieldId, valueId) {
+    const fid = Number(fieldId), vid = Number(valueId);
+    let fieldName = PROGRAM_FIELD_NAMES[fid] || `Program field ${fid}`;
+    let valueName = '';
+    if (Array.isArray(displayFields)) {
+      for (const f of displayFields) {
+        if (!f || typeof f !== 'object') continue;
+        const fId = Number(f.additional_field_id ?? f.id ?? f.field_id ?? NaN);
+        if (fId !== fid) continue;
+        fieldName = itemDisplayName(f) || fieldName;
+        const opts = f.additional_field_values || f.values || f.children || f.items || [];
+        const opt = (Array.isArray(opts) ? opts : []).find((o) => o && Number(o.id ?? o.value) === vid);
+        if (opt) valueName = itemDisplayName(opt);
+        break;
+      }
+    }
+    if (!valueName) {
+      if (fid === 96) valueName = vid === 650 ? 'হ্যা (Yes)' : vid === 651 ? 'না (No)' : String(vid);
+      else if (fid === 138) valueName = ({ 679: 'বিকাশ (Bkash)', 680: 'নগদ (Nagad)', 681: 'রকেট (Rocket)', 682: 'উপায় (Upay)', 683: 'এমক্যাশ (MCash)', 684: 'কোনো হিসাব নেই (No Account)' })[vid] || String(vid);
+      else if (PROGRAM_COUNT_BASE[fid] !== undefined) valueName = String(vid - PROGRAM_COUNT_BASE[fid]);
+      else valueName = String(vid);
+    }
+    return { fieldName, valueName };
+  }
+
+  // (v38) Resolve one PMT answer to its question + answer names
+  // through the live PMT variables (question + children), falling
+  // back to the rendered PMT controls when the variables are not
+  // loaded. Returns { question, answers: [{ id, name }] }.
+  function resolvePmtAnswer(pmtVariables, controls, variableId, subRaw) {
+    const qid = Number(variableId);
+    const subIds = (Array.isArray(subRaw) ? subRaw : [subRaw]).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    let question = `প্রশ্ন ${qid}`;
+    const byId = new Map();
+    if (Array.isArray(pmtVariables)) {
+      const q = pmtVariables.find((x) => x && Number(x.id) === qid);
+      if (q) {
+        question = itemDisplayName(q) || question;
+        for (const ch of (Array.isArray(q.children) ? q.children : [])) {
+          if (ch) byId.set(Number(ch.id), itemDisplayName(ch));
+        }
+      }
+    }
+    if (!byId.size && Array.isArray(controls)) {
+      for (const c of controls) {
+        if (!c || !c.vInst || !Array.isArray(c.vInst.items)) continue;
+        const ident = identifyDynamicControl(c);
+        if (ident.kind !== 'pmt' || Number(ident.id) !== qid) continue;
+        for (const it of c.vInst.items) {
+          if (it && typeof it === 'object') byId.set(Number(optionItemId(c.vInst, it)), itemDisplayName(it));
+        }
+        break;
+      }
+    }
+    return { question, answers: subIds.map((id) => ({ id, name: byId.get(id) || String(id) })) };
   }
 
   function findMediaVm(vmHead, allVms) {
@@ -3738,21 +3969,35 @@
       const headVerType = Number(hSource.verification_type || row0.verification_type || 1);
       const headGenVal = normalizeGenderId(hSource.gender_id || hSource.gender || row0.gender_id || row0.gender || GENDER_FEMALE);
 
-      // MFS (v36): PMT question 138 lives in data.application_pmt
-      // (resolvePmtState / findPmtEntryIn — the same lookup the fill
-      // uses); its answer id is the panel's mfs_provider_id. A
-      // single-select answer is one id; a multi-select is an array.
+      // MFS (v38): the MFS answer lives in the PROGRAM additional
+      // fields (applicationAllowanceValues / application_allowance_values,
+      // field 138) — a REAL draft (9373308) has 138 -> 679 there and
+      // NO 138 entry in application_pmt at all, so v36/v37's
+      // PMT-first read found nothing on it. Order now: allowance
+      // field 138 first, then PMT 138, then the payment section's
+      // data.mfs_name (an mfss-list id, mapped by name).
       const pullPmt = resolvePmtState(vmHead, allVms, d);
+      const pullProg = resolveProgramState(vmHead, allVms, d);
+      const pullAllowance = Array.isArray(pullProg.values) ? pullProg.values
+        : (Array.isArray(d.application_allowance_values) ? d.application_allowance_values : []);
+      const allowanceEntry = (fid) => (Array.isArray(pullAllowance) ? pullAllowance : [])
+        .find((x) => x && Number(x.allowance_program_additional_field_id) === Number(fid));
+      const allowanceValId = (fid) => {
+        const e = allowanceEntry(fid);
+        return e ? pullId(e.allowance_program_additional_field_values_id) : undefined;
+      };
+      let pullMfsId = allowanceValId(138);
       const pullMfsEntry = findPmtEntryIn(pullPmt.pmtArray, 138);
-      const pullMfsRaw = pullMfsEntry ? pullMfsEntry.sub_variables : undefined;
-      let pullMfsId = Array.isArray(pullMfsRaw)
-        ? pullMfsRaw.map(Number).find((n) => Number.isFinite(n) && n > 0)
-        : pullId(pullMfsRaw);
+      if (pullMfsId === undefined) {
+        const pullMfsRaw = pullMfsEntry ? pullMfsEntry.sub_variables : undefined;
+        const subList = Array.isArray(pullMfsRaw) ? pullMfsRaw : [pullMfsRaw];
+        for (const s of subList) { const v = pullId(s); if (v !== undefined) { pullMfsId = v; break; } }
+      }
       // (v37) Fallback — the payment section's data.mfs_name: it
       // holds an id from the server's mfss list, so resolve its name
       // and map it to the PMT 138 id (679 Bkash … 684 No Account).
-      // Only when PMT 138 itself is unanswered — the PMT answer wins
-      // when both are set.
+      // Only when both the allowance field and PMT 138 are
+      // unanswered — the allowance answer wins when both are set.
       if (pullMfsId === undefined) {
         const mfsFormId = pullId(d.mfs_name);
         if (mfsFormId !== undefined) {
@@ -3761,6 +4006,140 @@
           if (mapped) pullMfsId = mapped;
         }
       }
+
+      // (v38) All tabs, organised: the pull used to send only the
+      // head + members + cash + photos, so everything else on the
+      // form (bank, address, program counts, PMT answers, spouse,
+      // nominee, ...) was invisible in the panel except inside the
+      // Raw JSON dump. Read them all here, with NAMES resolved from
+      // the live controls / field definitions — the panel shows them
+      // in sections matching the site's tabs.
+      const pullControls = collectOptionControls();
+      await waitForOptionItems(pullControls, 3000);
+      const ctlName = (scope, key, id) => {
+        const r = resolveControlName(pullControls, scope, key, id);
+        return r ? r.name : undefined;
+      };
+      const strOrUndef = (v) => { const s = String(v ?? '').trim(); return s ? s : undefined; };
+      // Prefix an object's keys (skipping undefined values) — the
+      // address blocks are built once and spread as address_* /
+      // permanent_address_* on the flat head record.
+      const prefixKeys = (prefix, obj) => {
+        const out = {};
+        for (const [k, v] of Object.entries(obj || {})) {
+          if (v !== undefined) out[prefix + k] = v;
+        }
+        return out;
+      };
+
+      // Program additional fields (all 8): male/female/hijra counts,
+      // DSS, MFS, abroad male/female/hijra — with field + value names.
+      const pullProgramFields = (Array.isArray(pullAllowance) ? pullAllowance : [])
+        .filter((x) => x && Number(x.allowance_program_additional_field_id) > 0)
+        .map((x) => {
+          const fid = Number(x.allowance_program_additional_field_id);
+          const vid = pullId(x.allowance_program_additional_field_values_id);
+          const names = resolveProgramFieldName(pullProg.fields, fid, vid);
+          return { field_id: fid, value_id: vid, field_name: names.fieldName, value_name: names.valueName };
+        });
+      // The household counts the program tab holds (its own ground
+      // truth, beside the panel's computed form_defaults).
+      const pullProgramCounts = {};
+      for (const pf of pullProgramFields) {
+        const key = PROGRAM_COUNT_FIELDS[pf.field_id];
+        if (key && pf.value_id !== undefined) {
+          const n = Number(pf.value_name);
+          pullProgramCounts[key] = Number.isFinite(n) ? n : undefined;
+        }
+      }
+
+      // PMT answers (all 24): question + answer names.
+      const pullPmtAnswers = (Array.isArray(pullPmt.pmtArray) ? pullPmt.pmtArray : [])
+        .filter((e) => e && Number(e.variable_id) > 0)
+        .map((e) => {
+          const r = resolvePmtAnswer(pullPmt.pmtVariables, pullControls, e.variable_id, e.sub_variables);
+          return { variable_id: Number(e.variable_id), question: r.question, answers: r.answers };
+        });
+
+      // General extras off the head form (d): spouse, identification
+      // mark, nationality, email, mobile operator, disability, and
+      // the household size / room counts the form itself stores.
+      const pullMobileOpId = pullId(d.mobile_operator);
+      const pullMobileOpName = pullMobileOpId !== undefined
+        ? ctlName('data', 'mobile_operator', pullMobileOpId)
+        : (typeof d.mobile_operator === 'string' ? strOrUndef(d.mobile_operator) : undefined);
+      // Nominee (all null on a draft without one — sent only when set).
+      const pullNominee = {
+        nominee_en: strOrUndef(d.nominee_en),
+        nominee_bn: strOrUndef(d.nominee_bn),
+        nominee_verification_number: strOrUndef(d.nominee_verification_number),
+        nominee_date_of_birth: strOrUndef(d.nominee_date_of_birth),
+        nominee_address: strOrUndef(d.nominee_address),
+        nominee_relation_with_beneficiary: strOrUndef(d.nominee_relation_with_beneficiary),
+        nominee_nationality: strOrUndef(d.nominee_nationality)
+      };
+      const pullHasNominee = Object.values(pullNominee).some((v) => v !== undefined);
+
+      // Bank / payment (d): account type, bank + branch, bank
+      // division/district, account name/owner/number, MFS number.
+      const pullAccountType = pullId(d.account_type);
+      const pullBankId = pullId(d.bank_name);
+      const pullBranchId = pullId(d.branch_name);
+      const pullBankDivId = pullId(d.bank_division_id);
+      const pullBankDistId = pullId(d.bank_district_id);
+      const pullAccountOwnerId = pullId(d.account_owner);
+
+      // Address (addressForm first, d as fallback): present +
+      // permanent, every key, names from the live cascade selects.
+      const afOwner = (allVms || []).find((v) => v && v.addressForm);
+      const af = afOwner ? afOwner.addressForm : null;
+      const addrVal = (key) => (af && af[key] !== undefined && af[key] !== null && af[key] !== '' ? af[key] : d[key]);
+      const addrName = (key, id) => {
+        const n = Number(id);
+        if (!Number.isFinite(n)) return undefined;
+        return ctlName('addressForm', key, n) || ctlName('data', key, n);
+      };
+      const buildAddress = (prefix) => {
+        const g = (k) => addrVal(prefix + k);
+        const divisionId = pullId(g('division_id'));
+        const districtId = pullId(g('district_id'));
+        const thanaId = pullId(g('thana_id'));
+        const unionId = pullId(g('union_id'));
+        const pouroId = pullId(g('pouro_id'));
+        const cityId = pullId(g('city_id'));
+        const cityThanaId = pullId(g('city_thana_id'));
+        const distPouroId = pullId(g('district_pouro_id'));
+        const wardUnionId = pullId(g('ward_id_union'));
+        const wardPouroId = pullId(g('ward_id_pouro'));
+        const wardCityId = pullId(g('ward_id_city'));
+        const wardDistId = pullId(g('ward_id_dist'));
+        const wardId = wardUnionId ?? wardPouroId ?? wardCityId ?? wardDistId;
+        const wardKey = wardUnionId !== undefined ? 'ward_id_union'
+          : wardPouroId !== undefined ? 'ward_id_pouro'
+          : wardCityId !== undefined ? 'ward_id_city' : 'ward_id_dist';
+        const locTypeId = pullId(g('location_type'));
+        return {
+          division_id: divisionId, division_name: divisionId !== undefined ? addrName('division_id', divisionId) : undefined,
+          district_id: districtId, district_name: districtId !== undefined ? addrName('district_id', districtId) : undefined,
+          thana_id: thanaId, thana_name: thanaId !== undefined ? addrName('thana_id', thanaId) : undefined,
+          union_id: unionId, union_name: unionId !== undefined ? addrName('union_id', unionId) : undefined,
+          pouro_id: pouroId, pouro_name: pouroId !== undefined ? addrName('pouro_id', pouroId) : undefined,
+          city_id: cityId, city_name: cityId !== undefined ? addrName('city_id', cityId) : undefined,
+          city_thana_id: cityThanaId, city_thana_name: cityThanaId !== undefined ? addrName('city_thana_id', cityThanaId) : undefined,
+          district_pouro_id: distPouroId, district_pouro_name: distPouroId !== undefined ? addrName('district_pouro_id', distPouroId) : undefined,
+          ward_id: wardId, ward_name: wardId !== undefined ? addrName(wardKey, wardId) : undefined, ward_key: wardId !== undefined ? wardKey : undefined,
+          post_code: strOrUndef(g('post_code')),
+          // Named 'text' (not 'address_text') so the 'address_' /
+          // 'permanent_address_' prefix lands on address_text /
+          // permanent_address_text — the panel's key.
+          text: strOrUndef(g('address')),
+          location_type_id: locTypeId,
+          location_type_name: locTypeId === 1 ? 'পৌরসভা (Pouroshava)' : locTypeId === 2 ? 'ইউনিয়ন (Union)' : undefined,
+          sub_location_type_id: pullId(g('sub_location_type'))
+        };
+      };
+      const pullAddress = buildAddress('');
+      const pullPermanentAddress = buildAddress('permanent_');
 
       const head = {
         doc_type: headVerType === 2 ? 'BRN' : 'NID',
@@ -3800,7 +4179,68 @@
         // Phone (v4.9.50): the head's mobile number, pulled back to the
         // panel card — the form's only mobile field is data.mobile on
         // the head form (the head row's mobile_number is the fallback).
-        mobile_number: toEnDigits(String(d.mobile || (row0IsHead ? row0.mobile_number : '') || '')).replace(/\D+/g, '')
+        mobile_number: toEnDigits(String(d.mobile || (row0IsHead ? row0.mobile_number : '') || '')).replace(/\D+/g, ''),
+        // General extras (v38): spouse, identification mark,
+        // nationality, email, mobile operator, disability, household
+        // size / room counts — the head form's own fields the pull
+        // never sent, so the panel never showed them.
+        spouse_name_bn: strOrUndef(d.spouse_name_bn),
+        spouse_name_en: strOrUndef(d.spouse_name_en),
+        identification_mark: strOrUndef(d.identification_mark),
+        nationality: strOrUndef(d.nationality),
+        email: strOrUndef(d.email),
+        mobile_operator: pullMobileOpName,
+        mobile_operator_id: pullMobileOpId,
+        disability_id: pullId(d.disability_id),
+        house_size: strOrUndef(d.house_size),
+        // no_of_room is the PMT Q500 answer id (503 = 3 rooms), not a
+        // room count — resolve it to the answer name for the panel.
+        no_of_room: pullId(d.no_of_room),
+        no_of_room_name: (() => {
+          const rid = pullId(d.no_of_room);
+          if (rid === undefined) return undefined;
+          const r = resolvePmtAnswer(pullPmt.pmtVariables, pullControls, 500, rid);
+          return r.answers[0] ? r.answers[0].name : undefined;
+        })(),
+        // Nominee (v38): only when the draft has one.
+        ...(pullHasNominee ? pullNominee : {}),
+        // Bank / payment (v38): account type, bank + branch, bank
+        // division/district, account name/owner/number, MFS number.
+        // The *_name keys hold the resolved display name; the *_id
+        // keys hold the form's stored id (the fill writes those back).
+        account_type: pullAccountType,
+        account_type_label: pullAccountType === 1 ? 'ব্যাংক অ্যাকাউন্ট (Bank Account)' : pullAccountType === 2 ? 'মোবাইল ব্যাংকিং (MFS)' : undefined,
+        bank_name: pullBankId !== undefined ? ctlName('data', 'bank_name', pullBankId) : undefined,
+        bank_name_id: pullBankId,
+        branch_name: pullBranchId !== undefined ? ctlName('data', 'branch_name', pullBranchId) : undefined,
+        branch_name_id: pullBranchId,
+        bank_division_name: pullBankDivId !== undefined ? ctlName('data', 'bank_division_id', pullBankDivId) : undefined,
+        bank_division_id: pullBankDivId,
+        bank_district_name: pullBankDistId !== undefined ? ctlName('data', 'bank_district_id', pullBankDistId) : undefined,
+        bank_district_id: pullBankDistId,
+        account_name: strOrUndef(d.account_name),
+        account_owner: pullAccountOwnerId !== undefined ? ctlName('data', 'account_owner', pullAccountOwnerId) : undefined,
+        account_owner_id: pullAccountOwnerId,
+        account_number: strOrUndef(d.account_number),
+        mfs_number: strOrUndef(d.mfs_number),
+        // Address (v38): present + permanent, every key, names from
+        // the live cascade selects. The *_name keys are display; the
+        // *_id keys are what the fill writes back.
+        ...prefixKeys('address_', pullAddress),
+        ...prefixKeys('permanent_address_', pullPermanentAddress),
+        // Program additional fields + household counts (v38): the
+        // program tab's own answers, with names — including the
+        // Socio-Economic counts (male/female/hijra, abroad).
+        program_fields: pullProgramFields,
+        program_male: pullProgramCounts.male,
+        program_female: pullProgramCounts.female,
+        program_hijra: pullProgramCounts.hijra,
+        program_abroad_male: pullProgramCounts.abroad_male,
+        program_abroad_female: pullProgramCounts.abroad_female,
+        program_abroad_hijra: pullProgramCounts.abroad_hijra,
+        // PMT answers (v38): every answered question with its
+        // question + answer names.
+        pmt_answers: pullPmtAnswers
       };
 
       const memberSlice = row0IsHead ? rawMembers.slice(1) : rawMembers;
