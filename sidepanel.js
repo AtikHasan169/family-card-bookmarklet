@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.40-live';
+const CURRENT_VERSION_TAG = 'v4.9.41-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -127,11 +127,16 @@ const RELIGION_ID_MAP = { Islam: 1, Hinduism: 2, Buddhism: 3, Christianity: 4, O
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const HEAD_FIELDS = [
-  // Order (v4.9.39): identity first, then DOB, then the fields the DOB
-  // derives (education / profession / marital) — so typing the DOB
-  // fills them. DOB stays before NID, as on the BD NID card.
+  // Order (v4.9.41): identity first — name, then the parents' names
+  // right under it (as on the BD NID card), then gender / religion /
+  // DOB, then the fields the DOB derives (education / profession /
+  // marital). DOB stays before NID, as on the BD NID card.
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
+  { key: 'father_name_bn', label: 'Father (BN)' },
+  { key: 'father_name_en', label: 'Father (EN)' },
+  { key: 'mother_name_bn', label: 'Mother (BN)' },
+  { key: 'mother_name_en', label: 'Mother (EN)' },
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
@@ -140,10 +145,6 @@ const HEAD_FIELDS = [
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  { key: 'father_name_bn', label: 'Father (BN)' },
-  { key: 'father_name_en', label: 'Father (EN)' },
-  { key: 'mother_name_bn', label: 'Mother (BN)' },
-  { key: 'mother_name_en', label: 'Mother (EN)' },
   // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
   // head is the one the Halnagad check reports on.
   { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
@@ -155,6 +156,10 @@ const MEMBER_FIELDS = [
   { key: 'relation', label: 'Relation', type: 'rel_select' },
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
+  // Parents' names (v4.9.41): right under the name, as on the BD NID
+  // card — not down below the derived fields.
+  { key: 'father_name_bn', label: 'Father (BN)' },
+  { key: 'mother_name_bn', label: 'Mother (BN)' },
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
   { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
@@ -167,8 +172,6 @@ const MEMBER_FIELDS = [
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
   { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  { key: 'father_name_bn', label: 'Father (BN)' },
-  { key: 'mother_name_bn', label: 'Mother (BN)' },
   // Benefit (v4.9.36): whether this member already receives another
   // programme (SSNP), which card, and whether they got DSS training /
   // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
@@ -1405,16 +1408,19 @@ function countBreakdownHtml(data) {
   const groups = householdCountGroups(data);
   const overrides = (data.form_defaults && data.form_defaults.count_overrides) || {};
   const line = (label, names, auto, key) => {
+    // A group with nobody in it says nothing (v4.9.41) — the counts
+    // are already on the pills, so "অটো 0 জন: কেউ নেই" is just noise.
+    // Only groups that actually have members are listed.
+    if (!names.length) return '';
     const eff = overrides[key];
     const effNote = (eff !== undefined && eff !== null && eff !== auto) ? `, হাতে লেখা ${eff} জন` : '';
-    const namesTxt = names.length ? names.join(', ') : 'কেউ নেই';
-    return `<div>${label} — অটো ${auto} জন${effNote}: ${namesTxt}</div>`;
+    return `<div>${label} — অটো ${auto} জন${effNote}: ${names.join(', ')}</div>`;
   };
   return [
     line('পুরুষ', groups.male, groups.male.length, 'male_count'),
     line('মহিলা', groups.female, groups.female.length, 'female_count'),
     line('শিশু (<18)', groups.children, groups.children.length, 'children_under_18')
-  ].join('');
+  ].filter(Boolean).join('');
 }
 // --- end household count groups ---
 
@@ -1538,7 +1544,12 @@ function recalculateHouseholdSummary(data) {
   if ($('fcPillMaleCount')) $('fcPillMaleCount').textContent = `${data.form_defaults.male_count} জন`;
   if ($('fcPillFemaleCount')) $('fcPillFemaleCount').textContent = `${data.form_defaults.female_count} জন`;
   if ($('fcPillChildrenCount')) $('fcPillChildrenCount').textContent = `${data.form_defaults.children_under_18} জন`;
-  if ($('fcCountBreakdown')) $('fcCountBreakdown').innerHTML = countBreakdownHtml(data);
+  const bdEl = $('fcCountBreakdown');
+  if (bdEl) {
+    const bdHtml = countBreakdownHtml(data);
+    bdEl.innerHTML = bdHtml;
+    bdEl.style.display = bdHtml ? '' : 'none';
+  }
 }
 
 function syncJsonOutput() {
@@ -4453,6 +4464,9 @@ function renderHouseholdSummaryCard(data) {
   breakdown.id = 'fcCountBreakdown';
   breakdown.style.cssText = 'padding:8px 10px; font-size:12px; line-height:1.7; color:var(--text-main); background:var(--surface-muted); border-radius:6px; margin:0 10px 8px;';
   breakdown.innerHTML = countBreakdownHtml(data);
+  // No members yet: hide the box entirely (v4.9.41) — an empty box
+  // with "কেউ নেই" lines is noise when the counts are on the pills.
+  breakdown.style.display = breakdown.innerHTML ? '' : 'none';
   card.appendChild(breakdown);
 
   const rows = document.createElement('div');
