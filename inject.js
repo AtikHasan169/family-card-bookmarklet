@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v41';
+  const FC_INJECT_VERSION = 'v42';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2153,6 +2153,31 @@
   }
   // Program additional-field values + field definitions (the parent
   // owns both; DynamicAdditionalFields only renders them).
+  // (v42) The allowance entry's FIELD key has TWO spellings on the
+  // site, and the pull only knew one of them. The API-shaped data the
+  // user pasted (and every test fixture built from it) uses the
+  // SINGULAR key, allowance_program_additional_field_id — but the
+  // live form's own code builds d.application_allowance_values with
+  // the PLURAL key, allowance_program_additional_fields_id (verified
+  // in app.ea9222ad: the fresh-form builder, the draft hydrator, the
+  // submit payload builder and the merge lookup all use the plural
+  // spelling), while the program component's camelCase
+  // applicationAllowanceValues uses the singular one. The pull's
+  // merge matched only the singular key, so every entry from the
+  // draft's own snake_case list parsed as NaN and was dropped — MFS
+  // stayed "—" on the live site even after the v40 empty-array fix,
+  // because on the draft-edit page that list is the ONLY populated
+  // one (the component's camelCase array stays empty there). Every
+  // field-id match in the file now goes through this helper, which
+  // accepts either spelling. The VALUE key,
+  // allowance_program_additional_field_values_id, is spelled the same
+  // in both shapes, so it needs no such treatment.
+  function allowanceFieldId(x) {
+    if (!x) return NaN;
+    const v = x.allowance_program_additional_field_id ?? x.allowance_program_additional_fields_id;
+    return Number(v);
+  }
+
   function resolveProgramState(vmHead, allVms, headTarget) {
     // (v40) Prefer a NON-EMPTY applicationAllowanceValues array: the
     // main form component initialises it to [] and it only fills when
@@ -2242,6 +2267,7 @@
     const seenProgram = new Set();
     const pmtOverrides = (defs && defs.pmt) || {};
     const progOverrides = (defs && defs.program_fields) || {};
+    const pulledPmt = (defs && defs.pulledPmt instanceof Map) ? defs.pulledPmt : null;
     const hasSpouseInHousehold = targetMemberList.some(mm => mm.relation === 'Husband' || mm.relation === 'Wife');
 
     const headAge = headMember ? calculateAgeYears(headMember.dob) : null;
@@ -2336,9 +2362,10 @@
       }) || null;
     };
 
-    // Resolve one control's answer: override > derivation. Returns
+    // Resolve one control's answer: override > derivation > pulled
+    // (v42: the draft's saved answer, last resort only). Returns
     // { ids: [...] } or null.
-    const resolveChoice = (vInst, key, derived, overrides) => {
+    const resolveChoice = (vInst, key, derived, overrides, pulled) => {
       const ov = overrides[key] ?? overrides[String(key)];
       if (ov === null || ov === false) return null;
       if (ov !== undefined) {
@@ -2359,23 +2386,38 @@
         }
         return ids.length ? { ids } : null;
       }
-      if (derived === undefined) return null;
-      if (Array.isArray(derived)) {
-        // Multi-answer derivation (e.g. Q47 assets): resolve each id.
+      if (derived !== undefined) {
+        if (Array.isArray(derived)) {
+          // Multi-answer derivation (e.g. Q47 assets): resolve each id.
+          const ids = [];
+          for (const v of derived) {
+            const item = matchIdItem(vInst, Number(v));
+            if (item) ids.push(optionItemId(vInst, item));
+            else if (!Number.isNaN(Number(v))) ids.push(Number(v));
+          }
+          if (ids.length) return { ids };
+        } else if (derived && typeof derived === 'object' && derived.number !== undefined) {
+          const item = matchNumberItem(vInst, derived.number);
+          if (item) return { ids: [optionItemId(vInst, item)] };
+        } else {
+          const item = matchIdItem(vInst, derived);
+          if (item) return { ids: [optionItemId(vInst, item)] };
+        }
+      }
+      // Pulled fallback: the draft's saved answer for this question.
+      // Only reached when neither an override nor a derivation
+      // resolved anything. Numeric ids are trusted (as overrides are).
+      if (pulled !== undefined && pulled !== null) {
+        const list = Array.isArray(pulled) ? pulled : [pulled];
         const ids = [];
-        for (const v of derived) {
+        for (const v of list) {
           const item = matchIdItem(vInst, Number(v));
           if (item) ids.push(optionItemId(vInst, item));
           else if (!Number.isNaN(Number(v))) ids.push(Number(v));
         }
-        return ids.length ? { ids } : null;
+        if (ids.length) return { ids };
       }
-      if (derived && typeof derived === 'object' && derived.number !== undefined) {
-        const item = matchNumberItem(vInst, derived.number);
-        return item ? { ids: [optionItemId(vInst, item)] } : null;
-      }
-      const item = matchIdItem(vInst, derived);
-      return item ? { ids: [optionItemId(vInst, item)] } : null;
+      return null;
     };
 
     for (const c of controls) {
@@ -2391,7 +2433,7 @@
         const entry = findPmtEntry(ident.id);
         const currentVal = entry ? entry.sub_variables : (c.vInst.internalValue ?? c.vInst.lazyValue);
         if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
-        const choice = resolveChoice(c.vInst, ident.id, derivedPmt.get(ident.id), pmtOverrides);
+        const choice = resolveChoice(c.vInst, ident.id, derivedPmt.get(ident.id), pmtOverrides, pulledPmt ? pulledPmt.get(ident.id) : undefined);
         if (!choice) { unfilled.push(`PMT Q${ident.id} (${shortLabel})`); continue; }
         const ids = isMulti ? choice.ids : [choice.ids[0]];
         if (entry) setReactive(pmtOwnerVm, entry, 'sub_variables', isMulti ? ids : ids[0]);
@@ -2424,14 +2466,14 @@
     // displayAdditionalFields options), so each tab shows filled values
     // whenever the user opens it. Never overwrites a non-empty entry.
     if (pmtArray && pmtVariables) {
-      const allQids = new Set([...derivedPmt.keys(), ...Object.keys(pmtOverrides).map(Number)]);
+      const allQids = new Set([...derivedPmt.keys(), ...Object.keys(pmtOverrides).map(Number), ...(pulledPmt ? [...pulledPmt.keys()] : [])]);
       for (const qid of allQids) {
         const entry = findPmtEntry(qid);
         if (!entry) continue;
         const question = pmtVariables.find(q => Number(q.id) === Number(qid));
         if (!question || !Array.isArray(question.children) || !question.children.length) continue;
         const fakeVInst = { items: question.children, itemValue: 'id', returnObject: false };
-        const choice = resolveChoice(fakeVInst, qid, derivedPmt.get(qid), pmtOverrides);
+        const choice = resolveChoice(fakeVInst, qid, derivedPmt.get(qid), pmtOverrides, pulledPmt ? pulledPmt.get(qid) : undefined);
         if (!choice) continue;
         const isMulti = Number(question.field_type) === 2;
         if (isMulti) {
@@ -2455,7 +2497,7 @@
     if (Array.isArray(progValues) && Array.isArray(progFields)) {
       const allFids = new Set([...derivedProg.keys(), ...Object.keys(progOverrides).map(Number)]);
       for (const fid of allFids) {
-        const entry = progValues.find(e => e && Number(e.allowance_program_additional_field_id) === Number(fid));
+        const entry = progValues.find(e => e && allowanceFieldId(e) === Number(fid));
         if (!entry) continue;
         // A forced question (v26: program 96 DSS, re-derived from the
         // members) overwrites even when already filled — same rule as
@@ -2677,7 +2719,7 @@
         let progVerified;
         if (Array.isArray(progVals) && progVals.length) {
           progVerified = wantProg.every(id => {
-            const e = progVals.find(x => x && Number(x.allowance_program_additional_field_id) === Number(id));
+            const e = progVals.find(x => x && allowanceFieldId(x) === Number(id));
             return e && !isEmptyModelVal(e.allowance_program_additional_field_values_id);
           });
         } else {
@@ -2907,7 +2949,7 @@
       const wantProg = [75, 142, 96, 139, 140, 141];
       if (Number(counts.femaleCount) > 0) wantProg.push(77);
       for (const fid of wantProg) {
-        const e = progVals.find(x => x && Number(x.allowance_program_additional_field_id) === Number(fid));
+        const e = progVals.find(x => x && allowanceFieldId(x) === Number(fid));
         if (!e || isEmptyModelVal(e.allowance_program_additional_field_values_id)) return false;
       }
     }
@@ -3206,6 +3248,29 @@
 
       const defs = payload.form_defaults || {};
 
+      // (v42) Pulled PMT answers: the panel's Pull brings the draft's
+      // saved PMT answers (pmt_answers), and Auto-Fill left every
+      // non-derivable question to manual selection even though the
+      // panel already knew the answer — the live report listed Q36,
+      // Q33, Q393, Q30, Q579, Q25, Q22, Q595, Q500. Feed them in as
+      // the LAST source (override > derivation > pulled) so a re-fill
+      // of the same family completes them. They ride on defs so the
+      // late watcher passes see them too. Empty-only, never
+      // overwriting a filled answer or a live derivation (when the
+      // household changed, the derivation is the fresh truth).
+      if (Array.isArray(payload.pmt_answers) && payload.pmt_answers.length) {
+        const pulledPmt = new Map();
+        for (const a of payload.pmt_answers) {
+          if (!a) continue;
+          const qid = Number(a.variable_id);
+          const ids = Array.isArray(a.answers)
+            ? a.answers.map((x) => Number(x && x.id)).filter((n) => Number.isFinite(n))
+            : [];
+          if (Number.isFinite(qid) && qid > 0 && ids.length && !pulledPmt.has(qid)) pulledPmt.set(qid, ids);
+        }
+        if (pulledPmt.size) defs.pulledPmt = pulledPmt;
+      }
+
       const counts = {
         totalMembers: defs.total_members !== undefined ? Number(defs.total_members) : allPeopleForCount.length,
         maleCount: defs.male_count !== undefined ? Number(defs.male_count) : calcMaleCount,
@@ -3333,7 +3398,7 @@
         const mfsPick = defs && defs.program_fields && defs.program_fields['138'];
         if (mfsPick !== undefined && mfsPick !== null && String(mfsPick).trim() !== '') {
           const { values: progVals0 } = resolveProgramState(vmHead, allVms, headTarget);
-          const e138 = Array.isArray(progVals0) ? progVals0.find(x => x && Number(x.allowance_program_additional_field_id) === 138) : null;
+          const e138 = Array.isArray(progVals0) ? progVals0.find(x => x && allowanceFieldId(x) === 138) : null;
           if (!e138 || isEmptyModelVal(e138.allowance_program_additional_field_values_id) || Number(e138.allowance_program_additional_field_values_id) !== Number(mfsPick)) mfsDiffers = true;
         }
 
@@ -4042,20 +4107,41 @@
       return new File([blob], name, { type: blob.type || 'image/jpeg' });
     }
     // An https preview URL (a pulled photo whose bytes the pull could
-    // not fetch): the site's own fetcher rewrites the gateway URL and
-    // fetches with credentials:"omit" — a plain fetch() fails there
-    // (v37). Fall back to a plain omit-credentials fetch when the VM
-    // has no fetcher of its own.
+    // not fetch): the bytes must come from the page, and there are
+    // three routes, tried in order — the failure that bit v41 was
+    // stopping at the first one. (a) The site's own fetcher rewrites
+    // the gateway URL and fetches with credentials:"omit". (b) The
+    // site's own $axios GET as a blob — the authenticated call the
+    // page's API uses — for the case where the file endpoint wants
+    // the session/token rather than failing on CORS. (c) A plain
+    // omit-credentials fetch, for a CORS-allowed host. If all three
+    // fail the slot is reported (never silently dropped) with a
+    // reason the status message shows.
+    const toFile = (blob) => {
+      if (!blob || !blob.size) return null;
+      return new File([blob], name, { type: blob.type || 'image/jpeg' });
+    };
     if (mediaVm && typeof mediaVm.fetchStorageFile === 'function') {
-      const f = await mediaVm.fetchStorageFile(dataUrl, name);
-      if (f) return f;
-      throw new Error('Could not fetch photo');
+      try {
+        const f = await mediaVm.fetchStorageFile(dataUrl, name);
+        if (f) return f;
+      } catch (_) {}
     }
-    const res = await fetch(dataUrl, { credentials: 'omit' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    if (!blob || !blob.size) throw new Error('Empty photo');
-    return new File([blob], name, { type: blob.type || 'image/jpeg' });
+    if (mediaVm && mediaVm.$axios && typeof mediaVm.$axios.get === 'function') {
+      try {
+        const r = await mediaVm.$axios.get(dataUrl, { responseType: 'blob' });
+        const f = toFile(r && r.data);
+        if (f) return f;
+      } catch (_) {}
+    }
+    try {
+      const res = await fetch(dataUrl, { credentials: 'omit' });
+      if (res.ok) {
+        const f = toFile(await res.blob());
+        if (f) return f;
+      }
+    } catch (_) {}
+    throw new Error('Could not fetch photo bytes');
   }
 
   async function uploadPulledPhotos(payload, vmHead, allVms) {
@@ -4088,10 +4174,15 @@
   function autofillPhotoNote(photos) {
     if (!photos) return '';
     const failed = Array.isArray(photos.failed) ? photos.failed : [];
+    // The reason matters more than the count: v41 only named the
+    // failed slots, so a live "3 failed" gave nobody the cause. Show
+    // the first failure's message — the slots usually share one cause
+    // (e.g. the gateway bytes could not be fetched).
+    const reason = failed.length && failed[0] && failed[0].message ? ` — ${failed[0].message}` : '';
     if (photos.uploaded > 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded.`;
     if (photos.uploaded > 0 || failed.length) {
       const names = failed.map((f) => f.slot).join(', ');
-      return ` Photos: ${photos.uploaded} uploaded, ${failed.length} failed${names ? ` (${names})` : ''}.`;
+      return ` Photos: ${photos.uploaded} uploaded, ${failed.length} failed${names ? ` (${names})` : ''}${reason}.`;
     }
     if (photos.skipped > 0) return ' Photos: already on form.';
     return '';
@@ -4172,13 +4263,13 @@
       for (const list of allowanceLists) {
         for (const x of list) {
           if (!x) continue;
-          const fid = Number(x.allowance_program_additional_field_id);
+          const fid = allowanceFieldId(x);
           if (Number.isFinite(fid) && fid > 0 && !allowanceById.has(fid)) allowanceById.set(fid, x);
         }
       }
       const pullAllowance = [...allowanceById.values()];
       const allowanceEntry = (fid) => pullAllowance
-        .find((x) => x && Number(x.allowance_program_additional_field_id) === Number(fid));
+        .find((x) => x && allowanceFieldId(x) === Number(fid));
       const allowanceValId = (fid) => {
         const e = allowanceEntry(fid);
         return e ? pullId(e.allowance_program_additional_field_values_id) : undefined;
@@ -4232,9 +4323,9 @@
       // Program additional fields (all 8): male/female/hijra counts,
       // DSS, MFS, abroad male/female/hijra — with field + value names.
       const pullProgramFields = (Array.isArray(pullAllowance) ? pullAllowance : [])
-        .filter((x) => x && Number(x.allowance_program_additional_field_id) > 0)
+        .filter((x) => x && allowanceFieldId(x) > 0)
         .map((x) => {
-          const fid = Number(x.allowance_program_additional_field_id);
+          const fid = allowanceFieldId(x);
           const vid = pullId(x.allowance_program_additional_field_values_id);
           const names = resolveProgramFieldName(pullProg.fields, fid, vid);
           return { field_id: fid, value_id: vid, field_name: names.fieldName, value_name: names.valueName };
