@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.39-live';
+const CURRENT_VERSION_TAG = 'v4.9.40-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1260,6 +1260,164 @@ function applyChildParentNames(data) {
 }
 // --- end DOB derivation pure helpers ---
 
+// --- Bangla name -> Banglish transliteration (v4.9.40) ---
+// Typing a Bangla name fills the matching English (Banglish) field.
+// Pure functions, so they are easy to test. Orthographic
+// transliteration: each consonant carries its inherent 'a' unless a
+// vowel sign (kar), a hasanta (join) or a word-end follows. A
+// word-final consonant that closes a conjunct (চন্দ্র) still takes
+// the 'a' (CHANDRA), while a plain word-final consonant does not
+// (করিম -> KARIM, আব্দুল -> ABDUL). Common name words the plain rule
+// gets wrong are fixed by BN_NAME_FIXES (বেগম -> BEGUM, রহমান ->
+// RAHMAN, পারভীন -> PARVIN). The result is always uppercase, and
+// মোঃ / মোছাঃ become MD. / MST. like formatEnglishName. If the
+// transliteration is wrong for a name, the user edits the EN field
+// by hand — the panel never overwrites a hand-edited EN value.
+const BN_NAME_FIXES = {
+  'বেগম': 'BEGUM',
+  'রহমান': 'RAHMAN',
+  'পারভীন': 'PARVIN',
+  'হোসেন': 'HOSSAIN',
+  'হুসাইন': 'HUSSAIN',
+  'মোহাম্মদ': 'MOHAMMAD',
+  'মুহাম্মদ': 'MUHAMMAD',
+  'কমল': 'KAMAL',
+  'অমল': 'AMAL',
+  'বিমল': 'BIMAL'
+};
+const BN_CONSONANT = {
+  'ক': 'K', 'খ': 'KH', 'গ': 'G', 'ঘ': 'GH', 'ঙ': 'NG',
+  'চ': 'CH', 'ছ': 'CH', 'জ': 'J', 'ঝ': 'JH', 'ঞ': 'N',
+  'ট': 'T', 'ঠ': 'TH', 'ড': 'D', 'ঢ': 'DH', 'ণ': 'N',
+  'ত': 'T', 'থ': 'TH', 'দ': 'D', 'ধ': 'DH', 'ন': 'N',
+  'প': 'P', 'ফ': 'F', 'ব': 'B', 'ভ': 'BH', 'ম': 'M',
+  'য': 'Y', 'র': 'R', 'ল': 'L', 'শ': 'SH', 'ষ': 'SH', 'স': 'S', 'হ': 'H',
+  'ড়': 'R', 'ঢ়': 'RH', 'য়': 'Y', 'ৎ': 'T'
+};
+const BN_VOWEL = {
+  'অ': 'A', 'আ': 'A', 'ই': 'I', 'ঈ': 'I', 'উ': 'U', 'ঊ': 'U',
+  'ঋ': 'RI', 'এ': 'E', 'ঐ': 'OI', 'ও': 'O', 'ঔ': 'OU'
+};
+const BN_KAR = {
+  'া': 'A', 'ি': 'I', 'ী': 'I', 'ু': 'U', 'ূ': 'U',
+  'ৃ': 'RI', 'ে': 'E', 'ৈ': 'OI', 'ো': 'O', 'ৌ': 'OU'
+};
+const BN_SIGN = { 'ং': 'NG', 'ঃ': 'H', 'ঁ': 'N' };
+const BN_HASANTA = '্';
+const BN_NUKTA = '়';
+// A nukta after a consonant changes its sound (য + ় = য়). The
+// nukta is a separate code point, so it is handled here rather than
+// as its own letter.
+const BN_NUKTA_FORM = {
+  'য': 'Y', 'ড': 'R', 'ঢ': 'RH', 'ক': 'Q', 'খ': 'KH',
+  'গ': 'GH', 'জ': 'Z', 'ফ': 'F'
+};
+
+function transliterateBanglaWord(word) {
+  if (!word) return '';
+  if (BN_NAME_FIXES[word]) return BN_NAME_FIXES[word];
+  const chs = [...word];
+  let out = '';
+  for (let i = 0; i < chs.length; i++) {
+    const ch = chs[i];
+    const prev = chs[i - 1];
+    if (BN_CONSONANT[ch]) {
+      // A nukta right after the consonant changes its sound.
+      let base = BN_CONSONANT[ch];
+      let j = i + 1;
+      if (chs[j] === BN_NUKTA) {
+        base = BN_NUKTA_FORM[ch] || base;
+        j++;
+      }
+      const next = chs[j];
+      if (next && BN_KAR[next]) { out += base + BN_KAR[next]; i = j; }
+      else if (next === BN_HASANTA) { out += base; i = j; }
+      else if (next && BN_SIGN[next]) { out += base + 'A' + BN_SIGN[next]; i = j; }
+      else if (!next) { out += base + (prev === BN_HASANTA ? 'A' : ''); }
+      // A consonant in the middle of a word, followed by another
+      // consonant, drops its inherent 'a' (Bengali schwa deletion:
+      // শারমিন -> SHARMIN, সুলতানা -> SULTANA). Only a word-initial
+      // consonant keeps it (করিম -> KARIM). Sanskrit-derived names
+      // that keep it (কমল -> KAMAL) live in BN_NAME_FIXES.
+      else { out += base + (i === 0 ? 'A' : ''); }
+    } else if (BN_VOWEL[ch]) {
+      out += BN_VOWEL[ch];
+    } else if (BN_KAR[ch]) {
+      out += BN_KAR[ch];
+    } else if (BN_SIGN[ch]) {
+      out += BN_SIGN[ch];
+    } else if (ch === BN_HASANTA || ch === BN_NUKTA) {
+      // stray hasanta / nukta — skip
+    } else if (/[A-Za-z0-9]/.test(ch)) {
+      out += ch;
+    } else if (ch === '.' || ch === '-') {
+      out += ch;
+    }
+    // other punctuation is dropped
+  }
+  return out;
+}
+
+function transliterateBanglaToEnglish(bn) {
+  if (!bn) return '';
+  let s = String(bn).trim().replace(/\s+/g, ' ');
+  if (!s) return '';
+  // মোঃ / মোছাঃ prefixes become MD. / MST. (same as formatEnglishName).
+  let prefix = '';
+  const mstM = s.match(/^(?:মোছাঃ|মোসাঃ|মোছা|মোসা)[:.]?\s+/);
+  const mdM = s.match(/^(?:মোঃ|মো)[:.]?\s+/);
+  if (mstM) { prefix = 'MST. '; s = s.slice(mstM[0].length); }
+  else if (mdM) { prefix = 'MD. '; s = s.slice(mdM[0].length); }
+  const words = s.split(' ').map((w) => transliterateBanglaWord(w)).filter(Boolean);
+  return (prefix + words.join(' ')).replace(/\s+/g, ' ').trim().toUpperCase();
+}
+// --- end Bangla name -> Banglish transliteration ---
+
+// --- Household count groups (v4.9.40) ---
+// Who is counted in each group, so the user can verify the counts.
+// Pure helpers: the breakdown is shown under the Household Counts
+// card, and the hand-typed count (count_overrides) is shown next to
+// the auto count when they differ.
+function householdCountGroups(data) {
+  const people = [];
+  if (data.head && (data.head.nid || data.head.name_bn || data.head.name_en || data.head.dob)) {
+    people.push({ ...data.head, _isHead: true });
+  }
+  if (Array.isArray(data.family_members)) {
+    data.family_members.forEach((m) => people.push({ ...m, _isHead: false }));
+  }
+  const label = (p) => p.name_bn || p.name_en || (p._isHead ? 'প্রধান' : (p.relation || 'সদস্য'));
+  const males = people.filter((p) => (p.gender || '').toLowerCase() === 'male');
+  const females = people.filter((p) => (p.gender || '').toLowerCase() === 'female');
+  const children = people.filter((p) => {
+    const a = calculateAgeYears(p.dob);
+    return a !== null && a >= 0 && a < 18;
+  });
+  return {
+    total: people.length || 1,
+    male: males.map(label),
+    female: females.map(label),
+    children: children.map(label)
+  };
+}
+
+function countBreakdownHtml(data) {
+  const groups = householdCountGroups(data);
+  const overrides = (data.form_defaults && data.form_defaults.count_overrides) || {};
+  const line = (label, names, auto, key) => {
+    const eff = overrides[key];
+    const effNote = (eff !== undefined && eff !== null && eff !== auto) ? `, হাতে লেখা ${eff} জন` : '';
+    const namesTxt = names.length ? names.join(', ') : 'কেউ নেই';
+    return `<div>${label} — অটো ${auto} জন${effNote}: ${namesTxt}</div>`;
+  };
+  return [
+    line('পুরুষ', groups.male, groups.male.length, 'male_count'),
+    line('মহিলা', groups.female, groups.female.length, 'female_count'),
+    line('শিশু (<18)', groups.children, groups.children.length, 'children_under_18')
+  ].join('');
+}
+// --- end household count groups ---
+
 function recalculateHouseholdSummary(data) {
   if (!data) return;
   const allPeople = [];
@@ -1336,13 +1494,23 @@ function recalculateHouseholdSummary(data) {
   // program overrides) — the popup then asked again on every Auto-Fill.
   // Keep them across the rebuild.
   const prevDefaults = data.form_defaults || {};
+  // Hand-typed counts (v4.9.40): a count the user typed by hand in
+  // the summary card is stored in form_defaults.count_overrides and
+  // wins over the auto count on every rebuild — before this, the
+  // rebuild wiped the hand-typed value back to the auto count on the
+  // next change.
+  const prevOverrides = (prevDefaults.count_overrides && typeof prevDefaults.count_overrides === 'object') ? prevDefaults.count_overrides : {};
+  const effTotal = Number.isFinite(prevOverrides.total_members) ? prevOverrides.total_members : totalMembers;
+  const effMale = Number.isFinite(prevOverrides.male_count) ? prevOverrides.male_count : maleCount;
+  const effFemale = Number.isFinite(prevOverrides.female_count) ? prevOverrides.female_count : femaleCount;
+  const effChildren = Number.isFinite(prevOverrides.children_under_18) ? prevOverrides.children_under_18 : childrenUnder18;
   data.form_defaults = {
-    total_members: totalMembers,
-    male_count: maleCount,
-    female_count: femaleCount,
+    total_members: effTotal,
+    male_count: effMale,
+    female_count: effFemale,
     other_gender_count: 0,
     bidesh_count: 0,
-    children_under_18: childrenUnder18,
+    children_under_18: effChildren,
     religion: finalReligion,
     religion_id: finalReligionId,
     religion_label: RELIGION_OPTIONS.find(r => r.value === finalReligion)?.label || 'ইসলাম (Islam)',
@@ -1353,6 +1521,7 @@ function recalculateHouseholdSummary(data) {
     khudro_nrigosthi_label: Number(areaPresets.is_ethnic) === 1 ? 'হ্যাঁ (Yes)' : 'না (No)',
     area_type_id: Number(areaPresets.area_type_id ?? 1),
     area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)',
+    ...(Object.keys(prevOverrides).length ? { count_overrides: prevOverrides } : {}),
     ...(prevDefaults.head_options ? { head_options: prevDefaults.head_options } : {}),
     ...(prevDefaults.pmt ? { pmt: prevDefaults.pmt } : {}),
     ...(prevDefaults.program_fields ? { program_fields: prevDefaults.program_fields } : {}),
@@ -1369,6 +1538,7 @@ function recalculateHouseholdSummary(data) {
   if ($('fcPillMaleCount')) $('fcPillMaleCount').textContent = `${data.form_defaults.male_count} জন`;
   if ($('fcPillFemaleCount')) $('fcPillFemaleCount').textContent = `${data.form_defaults.female_count} জন`;
   if ($('fcPillChildrenCount')) $('fcPillChildrenCount').textContent = `${data.form_defaults.children_under_18} জন`;
+  if ($('fcCountBreakdown')) $('fcCountBreakdown').innerHTML = countBreakdownHtml(data);
 }
 
 function syncJsonOutput() {
@@ -1799,6 +1969,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
 
     inputEl.addEventListener('input', () => {
       let val = inputEl.value;
+      const oldVal = targetObj[f.key];
       if (f.key === 'nid' || f.key === 'nid_or_brn') {
         val = toEnglishDigits(val).replace(/\s+/g, '');
       } else if (f.key.endsWith('_en')) {
@@ -1832,6 +2003,29 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         // father/mother names (filled in the data by syncJsonOutput)
         // show in their cards now.
         refreshChildParentInputs();
+      }
+      // Bangla name -> Banglish (v4.9.40): typing a BN name fills the
+      // matching EN field with the transliteration, but only when the
+      // EN field is blank or still holds the transliteration of the
+      // OLD BN name (auto-filled, not hand-edited). A hand-edited EN
+      // value is never overwritten — if the transliteration is wrong,
+      // the user fixes the EN field and it stays. The EN input is
+      // refreshed in place. Member cards have no father/mother EN
+      // fields (head only), so the hook only fires where the EN input
+      // exists on the card.
+      if ((f.key === 'name_bn' || f.key === 'father_name_bn' || f.key === 'mother_name_bn') && cardContainer) {
+        const enKey = f.key === 'name_bn' ? 'name_en' : (f.key === 'father_name_bn' ? 'father_name_en' : 'mother_name_en');
+        const enInput = cardContainer.querySelector(`input[data-field="${enKey}"]`);
+        if (enInput) {
+          const newTranslit = transliterateBanglaToEnglish(val);
+          const oldTranslit = transliterateBanglaToEnglish(oldVal || '');
+          const curEn = targetObj[enKey];
+          if (isBlankVal(curEn) || curEn === oldTranslit) {
+            targetObj[enKey] = newTranslit;
+            enInput.value = newTranslit;
+            toggleWarning(enInput);
+          }
+        }
       }
     });
   }
@@ -4252,6 +4446,15 @@ function renderHouseholdSummaryCard(data) {
   `;
   card.appendChild(pills);
 
+  // Who is counted in each group (v4.9.40) — the names behind the
+  // numbers, so the user can verify the counts at a glance. Updated
+  // on every recalculation.
+  const breakdown = document.createElement('div');
+  breakdown.id = 'fcCountBreakdown';
+  breakdown.style.cssText = 'padding:8px 10px; font-size:12px; line-height:1.7; color:var(--text-main); background:var(--surface-muted); border-radius:6px; margin:0 10px 8px;';
+  breakdown.innerHTML = countBreakdownHtml(data);
+  card.appendChild(breakdown);
+
   const rows = document.createElement('div');
   rows.className = 'record-rows';
 
@@ -4262,8 +4465,32 @@ function renderHouseholdSummaryCard(data) {
     inp.value = String(defs[key] ?? 0);
     inp.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:700; border:1px solid var(--border-hover); background:var(--surface); color:var(--text-main); border-radius:5px; width:100%;';
     inp.addEventListener('input', () => {
-      defs[key] = parseInt(inp.value, 10) || 0;
-      if ($(pillId)) $(pillId).textContent = `${defs[key]} জন`;
+      // A hand-typed count is an override (v4.9.40): it is stored in
+      // form_defaults.count_overrides so the next recalculation keeps
+      // it instead of wiping it back to the auto count. Write to the
+      // CURRENT form_defaults (state.lastExtracted) — the defs object
+      // captured at render time has already been replaced by
+      // recalculateHouseholdSummary, so writing to it was lost.
+      // Typing the auto value again clears the override, so the count
+      // tracks the members once more.
+      const n = parseInt(inp.value, 10);
+      const val = Number.isFinite(n) ? n : 0;
+      const cur = state.lastExtracted && state.lastExtracted.form_defaults;
+      if (!cur) return;
+      cur[key] = val;
+      const groups = householdCountGroups(state.lastExtracted);
+      const autoMap = { total_members: groups.total, male_count: groups.male.length, female_count: groups.female.length, children_under_18: groups.children.length };
+      if (val === autoMap[key]) {
+        if (cur.count_overrides) {
+          delete cur.count_overrides[key];
+          if (!Object.keys(cur.count_overrides).length) delete cur.count_overrides;
+        }
+      } else {
+        cur.count_overrides = cur.count_overrides || {};
+        cur.count_overrides[key] = val;
+      }
+      if ($(pillId)) $(pillId).textContent = `${val} জন`;
+      if ($('fcCountBreakdown')) $('fcCountBreakdown').innerHTML = countBreakdownHtml(state.lastExtracted);
       $('rawJsonOutput').textContent = JSON.stringify(state.lastExtracted, null, 2);
       saveSessionState();
     });
