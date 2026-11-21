@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.32-live';
+const CURRENT_VERSION_TAG = 'v4.9.33-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -58,6 +58,31 @@ const ETHNIC_OPTIONS = [
   { value: 1, label: 'হ্যাঁ (Yes)' }
 ];
 
+// Head profession (type-34 list, real ids from the site's lookup —
+// DIFFERENT from the member livelihood list, type 44).
+const PROFESSION_OPTIONS = [
+  { id: 109, label: 'শ্রমজীবী / Laborer' },
+  { id: 181, label: 'গৃহীনি / House Wife' },
+  { id: 150, label: 'দিনমজুর / Day Laborer' },
+  { id: 151, label: 'কৃষিকাজ / Farmer' },
+  { id: 149, label: 'ব্যবসা / Business' },
+  { id: 107, label: 'চাকুরি / Service' },
+  { id: 106, label: 'শিক্ষার্থী / Student' },
+  { id: 108, label: 'কর্মহীন / Unemployed' },
+  { id: 110, label: 'অন্যান্য / Others' }
+];
+
+// Marital status (type-32 list, real ids from the site's lookup).
+const MARITAL_OPTIONS = [
+  { id: 101, label: 'বিবাহিত / Married' },
+  { id: 102, label: 'অবিবাহিত / Unmarried' },
+  { id: 103, label: 'বিধবা / Widow' },
+  { id: 104, label: 'স্বামী নিগৃহীতা / Separated' },
+  { id: 244, label: 'তালাকপ্রাপ্ত / Divorced' },
+  { id: 245, label: 'দাম্পত্য বিচ্ছিন্ন / Maritally Separated' },
+  { id: 276, label: 'বিপত্নীক / Widower' }
+];
+
 const RELATION_ID_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.value, r.id]));
 const ID_TO_RELATION_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.id !== null).map((r) => [r.id, r.value]));
 const RELATION_GENDER_MAP = Object.fromEntries(RELATION_OPTIONS.filter((r) => r.gender !== null).map((r) => [r.value, r.gender]));
@@ -69,6 +94,9 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 const HEAD_FIELDS = [
   { key: 'gender', label: 'Gender', type: 'gender_select' },
   { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
+  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
+  { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
+  { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
   { key: 'name_bn', label: 'Name (BN)' },
   { key: 'name_en', label: 'Name (EN)' },
   { key: 'father_name_bn', label: 'Father (BN)' },
@@ -576,6 +604,15 @@ function handleIncomingMessages(e) {
 
   if (e.data.action === 'FC_AUTOFILL_RESPONSE') {
     setStatus(e.data.detail.message, e.data.detail.success ? 'ok' : 'err');
+    // Head corrections (v4.9.33): the injector reports how many it
+    // applied. Only clear on a report from an injector that knows
+    // about corrections (v25+) — an older injector has no such field,
+    // so the corrections stay for the next fill after it is updated.
+    const applied = e.data.detail && e.data.detail.correctionsApplied;
+    if (e.data.detail.success && typeof applied === 'number' && applied > 0 && state.lastExtracted && state.lastExtracted.corrections) {
+      delete state.lastExtracted.corrections;
+      saveSessionState();
+    }
   }
   if (e.data.action === 'FC_STATUS_REPLY') {
     const pill = $('connStatus');
@@ -935,7 +972,8 @@ function toggleWarning(el) {
   else el.classList.remove('field-warning');
 }
 
-function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
+function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange) {
+  const notifyChange = (key, value) => { if (typeof onChange === 'function') onChange(key, value); };
   let inputEl;
   if (f.type === 'rel_select') {
     inputEl = document.createElement('select');
@@ -1014,6 +1052,81 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer) {
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
+    });
+  } else if (f.type === 'edu_select') {
+    // Head education (v4.9.33): the field the user most often has to
+    // correct after a fill. A change here is a head correction — the
+    // injector overwrites the form's education with it on the next fill.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'education_status_id');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    EDUCATION_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.education_status_id !== undefined && targetObj.education_status_id !== null && String(targetObj.education_status_id).trim() !== '' ? String(targetObj.education_status_id) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.education_status_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('education_status_id', v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'profession_select') {
+    // Head profession (type-34 list). Blank until the user picks —
+    // extraction never knows it, and the injector derives it by age.
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'profession');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    PROFESSION_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.profession !== undefined && targetObj.profession !== null && String(targetObj.profession).trim() !== '' ? String(targetObj.profession) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.profession = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('profession', v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'marital_select') {
+    // Head marital status (type-32 list). Sets both spellings: the
+    // panel's `marital_status` (head form) and the site's typo
+    // `maritial_status_id` (head member row).
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', 'marital_status');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    MARITAL_OPTIONS.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj.marital_status !== undefined && targetObj.marital_status !== null && String(targetObj.marital_status).trim() !== '' ? String(targetObj.marital_status) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj.marital_status = v === '' ? undefined : Number(v);
+      targetObj.maritial_status_id = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('marital_status', v === '' ? null : Number(v));
     });
   } else {
     inputEl = document.createElement('input');
@@ -3378,6 +3491,42 @@ function renderHouseholdSummaryCard(data) {
   wrap.appendChild(card);
 }
 
+// Head corrections (v4.9.33): when the user changes the head's
+// education, profession or marital status on the card AFTER a fill,
+// the change is recorded here so the next Auto-Fill overwrites the
+// form's value instead of skipping the already-filled field. Only
+// these three option fields are recorded — the text fields (name,
+// DOB, NID, gender, religion) are already written unconditionally
+// by the injector on every fill, so they need no correction. A blank
+// (—) clears the correction and the head_options override, letting
+// the injector derive the value again. The corrections are cleared
+// on a successful fill (see the FC_AUTOFILL_RESPONSE handler), so a
+// later hand-change on the form is never overwritten by a stale one.
+const HEAD_CORRECTION_KEYS = ['education_status_id', 'profession', 'marital_status'];
+function recordHeadCorrection(key, value) {
+  if (!HEAD_CORRECTION_KEYS.includes(key)) return;
+  if (!state.lastExtracted) return;
+  const d = state.lastExtracted;
+  d.corrections = d.corrections || {};
+  d.corrections.head = d.corrections.head || {};
+  d.form_defaults = d.form_defaults || {};
+  d.form_defaults.head_options = d.form_defaults.head_options || {};
+  if (value === null || value === undefined || value === '') {
+    delete d.corrections.head[key];
+    if (key === 'education_status_id') delete d.form_defaults.head_options.education_status;
+    if (key === 'profession') delete d.form_defaults.head_options.profession;
+    if (key === 'marital_status') delete d.form_defaults.head_options.marital_status;
+  } else {
+    d.corrections.head[key] = Number(value);
+    if (key === 'education_status_id') d.form_defaults.head_options.education_status = Number(value);
+    if (key === 'profession') d.form_defaults.head_options.profession = Number(value);
+    if (key === 'marital_status') d.form_defaults.head_options.marital_status = Number(value);
+  }
+  if (!Object.keys(d.corrections.head).length) delete d.corrections.head;
+  if (!Object.keys(d.corrections).length) delete d.corrections;
+  saveSessionState();
+}
+
 function renderExtractedCards(data) {
   const container = $('visualCards');
   container.replaceChildren();
@@ -3427,7 +3576,7 @@ function renderExtractedCards(data) {
       kEl.className = 'row-key';
       kEl.textContent = f.label;
 
-      const inputEl = createFieldControl(f, targetObj, refreshHeader, body);
+      const inputEl = createFieldControl(f, targetObj, refreshHeader, body, isMember ? null : recordHeadCorrection);
 
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';

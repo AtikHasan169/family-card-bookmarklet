@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v24';
+  const FC_INJECT_VERSION = 'v25';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1383,12 +1383,49 @@
     return Number.isNaN(n) ? null : n;
   }
 
+  // Head corrections (v25): the panel records the head fields the user
+  // changed on the card AFTER a fill, as payload.corrections.head
+  // (panel head-record keys). On a re-fill these must OVERWRITE the
+  // form's current values — the normal passes only fill empty fields,
+  // so without this a correction never lands. Only the listed fields
+  // are forced; everything else stays empty-only, so a hand-filled
+  // value is never touched. Profession has no row key: the member row
+  // uses the different type-44 livelihood list, not the head's type-34
+  // profession list. A corrected education also forces PMT Q14 (the
+  // head-education band) to be re-derived in the model-only pass.
+  const HEAD_CORRECTION_MAP = {
+    // Literacy follows the education (v23 rule), so a corrected
+    // education also re-derives the head row's literacy_id.
+    education_status_id: { head: ['education_status'], row: ['education_status_id', 'literacy_id'], pmt: [14] },
+    profession: { head: ['profession'], row: [], pmt: [] },
+    marital_status: { head: ['marital_status'], row: ['maritial_status_id'], pmt: [] },
+  };
+  function headCorrectionSets(correctionsHead) {
+    const headKeys = new Set(), rowKeys = new Set(), pmtQids = new Set();
+    let count = 0;
+    if (correctionsHead && typeof correctionsHead === 'object') {
+      for (const key of Object.keys(correctionsHead)) {
+        const map = HEAD_CORRECTION_MAP[key];
+        if (!map) continue;
+        count++;
+        map.head.forEach(k => headKeys.add(k));
+        map.row.forEach(k => rowKeys.add(k));
+        map.pmt.forEach(q => pmtQids.add(q));
+      }
+    }
+    return { headKeys, rowKeys, pmtQids, count };
+  }
+
   // Fill every option control the old injector skipped. `memberRows` are the
   // live Vue row objects (same order as targetMemberList). `headMember` is
   // the payload head (for age/gender/relation-aware head defaults).
   // Returns an array of human-readable "not filled" notes for the result message.
-  async function syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs, onlyEmpty) {
+  async function syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs, onlyEmpty, force) {
     const unfilled = [];
+    const forceSets = force || { headKeys: new Set(), rowKeys: new Set() };
+    // The head row is the member whose relation is Head/Self (row 0
+    // when the head is in the list). Row corrections apply only to it.
+    const headRowIdx = targetMemberList.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
     const memberOverrides = (defs && defs.member_options) || {};
     const headOverrides = (defs && defs.head_options) || {};
 
@@ -1430,7 +1467,11 @@
         const row = memberRows[idx];
         if (!row) continue;
         if (field.key === 'disability_type_id' && Number(row.is_member_disabled) !== 1) continue;
-        if (onlyEmpty && !isEmptyModelVal(row[field.key])) continue;
+        // A head correction (v25) overwrites the head row's value even
+        // when it is already filled — but only the head row, and only
+        // the corrected fields. Every other row stays empty-only.
+        const isForcedRowField = forceSets.rowKeys.has(field.key) && idx === headRowIdx;
+        if (onlyEmpty && !isForcedRowField && !isEmptyModelVal(row[field.key])) continue;
         const age = calculateAgeYears(m.dob);
         const genderId = resolveGenderId(m);
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold);
@@ -1551,7 +1592,10 @@
             for (const c of list) {
               if (c.vInst.disabled || c.vInst.readonly) continue;
               const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
-              if (onlyEmpty && !isEmptyModelVal(currentVal)) continue;
+              // A head correction (v25) overwrites the head form's
+              // value even when it is already filled — but only the
+              // corrected fields. Everything else stays empty-only.
+              if (onlyEmpty && !forceSets.headKeys.has(key) && !isEmptyModelVal(currentVal)) continue;
               // Education: the head member row (সদস্য page) is the source
               // of truth — it wins over the age derivation, unless an
               // explicit head override is set.
@@ -1819,7 +1863,7 @@
     return { values, fields };
   }
 
-  async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty) {
+  async function syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, onlyEmpty, forcePmt) {
     const unfilled = [];
     const gridNotes = [];
     const seenPmt = new Set();
@@ -1837,8 +1881,11 @@
     // while the member row IS filled (Class 1-4) — and Q14 never
     // derived, even though Q18 (spouse, read from the spouse row)
     // filled fine. Reading the row fixes that.
+    // A head education correction (v25) wins over both: the row may
+    // not be rendered yet, but the corrected id is the truth.
     const headRowEdu = headRowEducationId(memberRows, targetMemberList);
-    const headEduId = Number(headRowEdu || (headTarget ? headTarget.education_status : 0) || 0);
+    const correctedHeadEdu = (forcePmt && forcePmt.headEduId) ? Number(forcePmt.headEduId) : 0;
+    const headEduId = Number(correctedHeadEdu || headRowEdu || (headTarget ? headTarget.education_status : 0) || 0);
     let spouseEduId = 0;
     targetMemberList.forEach((m, idx) => {
       if ((m.relation === 'Husband' || m.relation === 'Wife') && memberRows[idx]) {
@@ -2019,7 +2066,10 @@
           const merged = [...new Set([...existing, ...choice.ids.map(Number)])];
           if (merged.length !== existing.length) setReactive(pmtOwnerVm, entry, 'sub_variables', merged);
         } else {
-          if (!isEmptyModelVal(entry.sub_variables)) continue;
+          // A corrected head education (v25) re-derives Q14 even when
+          // it is already filled — the band must follow the new
+          // education. Every other question stays empty-only here.
+          if (!isEmptyModelVal(entry.sub_variables) && !(forcePmt && forcePmt.qids && forcePmt.qids.has(qid))) continue;
           setReactive(pmtOwnerVm, entry, 'sub_variables', choice.ids[0]);
         }
       }
@@ -2212,7 +2262,7 @@
   // section used to need a second click. Re-run the dynamic sync
   // (onlyEmpty: never overwrites a filled/user value) until every
   // derivable id has been seen and filled, or 30s pass.
-  function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs) {
+  function watchDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, headMember, counts, defs, forcePmt) {
     const wantPmt = [576, 530, 571, 1, 7, 12, 14, 18, 29, 47, 548, 40, 567, 41];
     const wantProg = [75, 142, 96, 139, 140, 141];
     if (Number(counts.femaleCount) > 0) wantProg.push(77); // field 77 has no 0 option
@@ -2230,7 +2280,7 @@
         const fresh = getVueNodes();
         const vh = fresh.vmHead || vmHead;
         const ht = getHeadTargetObj(vh) || headTarget;
-        const res = await syncDynamicSections(vh, fresh.allVms || allVms, ht, memberRows, targetMemberList, headMember, counts, defs, true);
+        const res = await syncDynamicSections(vh, fresh.allVms || allVms, ht, memberRows, targetMemberList, headMember, counts, defs, true, forcePmt);
         if (res.seenPmt.size || res.seenProgram.size) seenAny = true;
         try { syncSameAsPermanent(fresh.allVms || allVms); } catch (_) {}
         // Verify against the live MODELS, not just "no unfilled
@@ -2291,7 +2341,7 @@
   // re-drove the whole form). Re-run the empty-only option sync
   // until nothing changes any more, up to ~30s. Empty-only, so
   // hand corrections are never touched.
-  function watchOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs) {
+  function watchOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, headMember, defs, force) {
     let inFlight = false;
     let stableTicks = 0;
     let seenData = false;
@@ -2309,7 +2359,7 @@
         const controls = collectOptionControls();
         if (controls.some(c => c.vInst && Array.isArray(c.vInst.items) && c.vInst.items.length)) seenData = true;
         const sigBefore = optionWatcherSignature(rows, ht, controls);
-        await syncOptionSelects(vh, vm, rows, targetMemberList, ht, headMember, defs, true);
+        await syncOptionSelects(vh, vm, rows, targetMemberList, ht, headMember, defs, true, force);
         const sigAfter = optionWatcherSignature(rows, ht, collectOptionControls());
         if (sigAfter === sigBefore) {
           if (seenData && ++stableTicks >= 2) { clearInterval(timer); return; }
@@ -2798,30 +2848,52 @@
       // survive a second click); a second empty-only pass after a
       // short delay catches selects that render late (disability
       // type, cascaded union/ward lists).
+      // Head corrections (v25): the panel records the head fields the
+      // user changed on the card after a fill. They must overwrite the
+      // form's current values, so the fast path is skipped and the
+      // sync passes get a force set for exactly those fields. The
+      // corrected values are also merged into head_options so the
+      // head block reads them as overrides even if the panel's copy
+      // is stale. Everything else stays empty-only.
+      const correctionsHead = (payload.corrections && payload.corrections.head) || null;
+      const correctionSets = headCorrectionSets(correctionsHead);
+      const forcePmt = {
+        qids: correctionSets.pmtQids,
+        headEduId: (correctionsHead && correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null)
+          ? Number(correctionsHead.education_status_id) : null,
+      };
+      if (correctionSets.count) {
+        defs.head_options = defs.head_options || {};
+        if (correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null) defs.head_options.education_status = Number(correctionsHead.education_status_id);
+        if (correctionsHead.profession !== undefined && correctionsHead.profession !== null) defs.head_options.profession = Number(correctionsHead.profession);
+        if (correctionsHead.marital_status !== undefined && correctionsHead.marital_status !== null) defs.head_options.marital_status = Number(correctionsHead.marital_status);
+      }
       // Fast path: if the form already holds this payload
       // completely, skip the passes and their waits — a re-click
       // returns in under a second instead of re-driving every
       // filled field. Watchers still start below, so a late site
-      // rebuild that wipes a value is still covered.
-      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs);
+      // rebuild that wipes a value is still covered. A correction
+      // always runs the passes: the fast path would skip the
+      // overwrite the user just asked for.
+      const alreadyFilled = isRefill && allRowsMatched && isFormFullyFilled(vmHead, vmMembers, allVms, headTarget, targetMemberList, counts, defs) && correctionSets.count === 0;
       let optionUnfilled = [];
       const gridCheckNotes = [];
       if (!alreadyFilled) try {
         await new Promise(r => setTimeout(r, isRefill ? 50 : 250));
         const memberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
-        optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, isRefill);
+        optionUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, isRefill, correctionSets);
         await new Promise(r => setTimeout(r, isRefill ? 150 : 900));
-        const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true);
+        const lateUnfilled = await syncOptionSelects(vmHead, vmMembers, memberRows, targetMemberList, headTarget, payload.head || null, defs, true, correctionSets);
         optionUnfilled = [...new Set([...optionUnfilled, ...lateUnfilled])];
         // PMT + program additional fields (counts, location, age/education
         // bands). Runs after the option sync so head/spouse education ids
         // are already in the models for the PMT band mapping. A third
         // late pass covers PMT/program data that loads after the form.
-        const dynUnfilled = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false)).unfilled;
+        const dynUnfilled = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, false, forcePmt)).unfilled;
         await new Promise(r => setTimeout(r, isRefill ? 150 : 600));
-        const dynLate = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true)).unfilled;
+        const dynLate = (await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true, forcePmt)).unfilled;
         await new Promise(r => setTimeout(r, isRefill ? 400 : 2000));
-        const dynLast = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true);
+        const dynLast = await syncDynamicSections(vmHead, allVms, headTarget, memberRows, targetMemberList, payload.head || null, counts, defs, true, forcePmt);
         const dynLate2 = dynLast.unfilled;
         gridCheckNotes.push(...(dynLast.gridNotes || []));
         optionUnfilled = [...new Set([...optionUnfilled, ...dynUnfilled, ...dynLate, ...dynLate2])];
@@ -2841,10 +2913,10 @@
       // Keep the PMT/program sections filled even if their data
       // arrives or rebuilds after autofill. Fire-and-forget.
       const finalMemberRows = (vmMembers && Array.isArray(vmMembers.familyMembers)) ? vmMembers.familyMembers : [];
-      try { watchDynamicSections(vmHead, allVms, headTarget, finalMemberRows, targetMemberList, payload.head || null, counts, defs); } catch (_) {}
+      try { watchDynamicSections(vmHead, allVms, headTarget, finalMemberRows, targetMemberList, payload.head || null, counts, defs, forcePmt); } catch (_) {}
       // Keep the member/head dropdowns filled even if their lookup
       // lists arrive after the option passes. Fire-and-forget.
-      try { watchOptionSelects(vmHead, vmMembers, finalMemberRows, targetMemberList, headTarget, payload.head || null, defs); } catch (_) {}
+      try { watchOptionSelects(vmHead, vmMembers, finalMemberRows, targetMemberList, headTarget, payload.head || null, defs, correctionSets); } catch (_) {}
 
       // Spouse name (shows only when head marital status = Married): fill
       // from the Husband/Wife member when one is in the household.
@@ -2881,6 +2953,7 @@
         detail: {
           version: FC_INJECT_VERSION,
           success: true,
+          correctionsApplied: correctionSets.count,
           message: alreadyFilled
             ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].`
             : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}`
