@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.44-live';
+const CURRENT_VERSION_TAG = 'v4.9.46-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1113,10 +1113,10 @@ function educationIdForAge(age) {
   if (age === 14) return 89;   // JSC/8th
   if (age === 15) return 193;  // Class 9
   if (age < 18) return 90;     // SSC
-  if (age <= 19) return 91;    // HSC
-  if (age <= 22) return 92;    // Graduate
-  if (age <= 24) return 93;    // Post Graduate
-  return 190;                  // 25+ Class 1-4 (the injector's guess)
+  if (age <= 23) return 91;    // HSC (HSC finishes at 19 in BD; honours takes 5 years with the gap and admission delays)
+  if (age <= 24) return 92;    // Graduate (honours finishes at 24)
+  if (age <= 25) return 93;    // Post Graduate
+  return 190;                  // 26+ Class 1-4 (the injector's guess)
 }
 
 // Profession for the head (type-34) or livelihood for a member
@@ -1133,15 +1133,15 @@ function professionIdForAgeGender(age, gender, isHead) {
 function maritalIdForAgeGenderRel(age, gender, relation, isHead, hasSpouse) {
   if (age === null || age === undefined || age < 0) return null;
   if (age < 18) return 102; // Unmarried
-  // Head: Married / বিবাহিত (101) only once a spouse is listed. With
-  // no spouse listed yet there is no guess — return null so the field
-  // stays blank. A missing spouse is not Widow / Widower (the husband
-  // is usually alive and just not added yet), and it is not Married
-  // either until the spouse is added. A real widow / widower is picked
-  // by hand (a hand-picked value is never overwritten). Adding the
-  // spouse later fills the blank with Married, because derivation
-  // runs again on every change.
-  if (isHead) return hasSpouse ? 101 : null; // Married, or blank
+  // Head: Married / বিবাহিত (101) is the default, with or without a
+  // spouse listed yet — the head is married in almost every family
+  // here, and the spouse is added by hand afterwards. (Blank was
+  // tried in v4.9.44 and reverted: with a blank marital the site
+  // hides the spouse-name field and the injector skips the spouse
+  // name, so nothing got added when Husband was selected.) A real
+  // widow / widower is picked by hand (a hand-picked value is never
+  // overwritten).
+  if (isHead) return 101; // Married
   if (MARRIED_RELATIONS_PANEL.includes(relation) || relation === 'Head/Self') return 101; // Married
   return 102; // Unmarried
 }
@@ -1762,6 +1762,14 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
         if (fIn && !fIn.value.trim() && targetObj.father_name_bn) { fIn.value = targetObj.father_name_bn; toggleWarning(fIn); }
         const mIn = cardContainer.querySelector('input[data-field="mother_name_bn"]');
         if (mIn && !mIn.value.trim() && targetObj.mother_name_bn) { mIn.value = targetObj.mother_name_bn; toggleWarning(mIn); }
+      }
+      // The head's derived values can change too when a spouse appears
+      // (its marital follows hasSpouse) — refresh the head card as
+      // well, or it keeps showing the old value while the data already
+      // changed. The head card is the first .record-card.
+      const headCard = document.querySelector('.record-card');
+      if (headCard && headCard !== cardContainer && state.lastExtracted && state.lastExtracted.head) {
+        refreshDerivedSelects(headCard, state.lastExtracted.head, true);
       }
       refreshChildParentInputs();
     });

@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v29';
+  const FC_INJECT_VERSION = 'v31';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1291,9 +1291,13 @@
     const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
     // Education by age band, using the real type-8 ids. Student ages
-    // 18-24 follow the study ladder (HSC -> Graduate -> Post Graduate);
-    // age 25+ defaults to Class 1-4 (190) — override via form_defaults
-    // if the real level is known.
+    // 18-24 follow the study ladder (HSC 18-23 -> Graduate 24 -> Post
+    // Graduate 25); HSC finishes at 19 in BD, and honours takes 5
+    // years with the gap and admission delays, so 18-23 are still
+    // students with HSC as their highest finished level. A 25-year-old
+    // gets Post Graduate (93) — not a student any more, but masters is
+    // done by then. Age 26+ defaults to Class 1-4 (190) — override via
+    // form_defaults if the real level is known.
     let education = null, educationIds = [];
     if (age !== null) {
       if (age < 3) { education = OPTION_PATTERNS.educationNone; educationIds = [E.none]; }
@@ -1305,9 +1309,9 @@
       else if (age === 14) { education = OPTION_PATTERNS.educationJsc; educationIds = [E.jsc, E.class6to7]; }
       else if (age === 15) { education = OPTION_PATTERNS.educationClass9; educationIds = [E.class9, E.jsc]; }
       else if (age < 18) { education = OPTION_PATTERNS.educationSsc; educationIds = [E.ssc, E.class9]; }
-      else if (age <= 19) { education = OPTION_PATTERNS.educationHsc; educationIds = [E.hsc, E.ssc]; }
-      else if (age <= 22) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
-      else if (age <= 24) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
+      else if (age <= 23) { education = OPTION_PATTERNS.educationHsc; educationIds = [E.hsc, E.ssc]; }
+      else if (age <= 24) { education = OPTION_PATTERNS.educationGraduate; educationIds = [E.graduate, E.hsc]; }
+      else if (age <= 25) { education = OPTION_PATTERNS.educationPg; educationIds = [E.pg, E.graduate]; }
       else { education = OPTION_PATTERNS.educationClass1to4; educationIds = [E.class1to4, E.none]; }
     }
 
@@ -1340,13 +1344,13 @@
     if (isChild) {
       marital = OPTION_PATTERNS.maritalUnmarried;
       maritalIds = [LOOKUP_IDS.marital.unmarried];
-    } else if (relName === 'Head/Self' && !hasSpouseInHousehold) {
-      // No spouse listed yet: no guess — the field stays blank for the
-      // user to pick. A missing spouse is not Widow / Widower (the
-      // husband is usually alive and just not added yet), and not
-      // Married either until the spouse is added. marital stays null
-      // and maritalIds stays [], so resolveOptionChoice writes nothing.
     } else if (MARRIED_RELATIONS.includes(relName) || relName === 'Head/Self') {
+      // Head default is Married / বিবাহিত (101), with or without a
+      // spouse listed yet — the head is married in almost every family
+      // here, and the spouse is added by hand afterwards. (Blank was
+      // tried in v29 and reverted: with a blank marital the site hides
+      // the spouse-name field and the spouse-name fill below is skipped,
+      // so nothing got added when Husband was selected.)
       marital = OPTION_PATTERNS.maritalMarried;
       maritalIds = [LOOKUP_IDS.marital.married];
       // "বিবাহিত" is a substring of "অবিবাহিত" — exclude the unmarried
