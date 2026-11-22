@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.65-live';
+const CURRENT_VERSION_TAG = 'v4.9.67-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -3597,6 +3597,8 @@ function stopPanelCameraTracks() {
 }
 
 function stopPanelCamera() {
+  burstRunId++; // cancel a burst in progress (e.g. Cancel mid-burst)
+  hideBurstPicker();
   stopPanelCameraTracks();
   setPanelWide(false); // back to the normal panel width
   const modal = $('cameraModal');
@@ -3951,17 +3953,77 @@ function openCamera(category) {
   openPanelCamera(category);
 }
 
-function capturePanelPhoto() {
-  const video = $('cameraVideo');
-  if (!video || !video.videoWidth) {
-    setStatus('Camera is not ready yet — wait a second and try again.', 'err');
-    return;
+// --- Burst sharpness (v4.9.67) ---
+const BURST_SHOTS = 5;
+const BURST_GAP_MS = 120;
+// Laplacian variance: how sharp is this photo? Pure — takes an
+// ImageData-like {width, height, data} (RGBA) and returns a number;
+// higher = sharper. Only used to RANK the burst shots (the sharpest
+// gets a star), never to reject one — the user picks.
+function laplacianSharpness(img) {
+  const w = img && img.width, h = img && img.height, d = img && img.data;
+  if (!w || !h || !d || d.length < w * h * 4) return 0;
+  const g = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    g[i] = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2];
   }
+  let n = 0, sum = 0, sumSq = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const l = g[i - w] + g[i - 1] - 4 * g[i] + g[i + 1] + g[i + w];
+      sum += l; sumSq += l * l; n++;
+    }
+  }
+  if (!n) return 0;
+  const mean = sum / n;
+  return Math.max(0, sumSq / n - mean * mean);
+}
+// Index of the sharpest shot in [{sharp}], or -1 when there is none.
+function sharpestShotIndex(shots) {
+  let best = -1, bestSharp = -Infinity;
+  for (let i = 0; i < (shots || []).length; i++) {
+    const s = shots[i] && shots[i].sharp;
+    if (typeof s === 'number' && s > bestSharp) { bestSharp = s; best = i; }
+  }
+  return best;
+}
+// --- end Burst sharpness ---
+
+// Sharpness of a captured canvas: downscale to ~160px wide first so
+// the score stays cheap on a tablet, then the Laplacian variance.
+function scoreCanvas(canvas) {
+  try {
+    const w = 160;
+    const h = Math.max(1, Math.round(canvas.height * w / Math.max(1, canvas.width)));
+    const small = document.createElement('canvas');
+    small.width = w; small.height = h;
+    small.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return laplacianSharpness(small.getContext('2d').getImageData(0, 0, w, h));
+  } catch (_) { return 0; }
+}
+
+// Burst state (v4.9.67): one Capture tap takes BURST_SHOTS shots and
+// the picker lets the user choose one. burstRunId cancels a burst in
+// progress (Cancel mid-burst bumps it via stopPanelCamera).
+let burstRunId = 0;
+let burstShots = [];
+let burstSelected = 0;
+
+// One frame from the live video, exactly as Capture used to take it:
+// straightened when the green lock is fresh, else the white frame's
+// crop. Returns { b64, sharp } — sharp is the Laplacian score of the
+// shot (0 when it could not be scored).
+function grabCameraFrame() {
+  const video = $('cameraVideo');
+  if (!video || !video.videoWidth) return { b64: '', sharp: 0 };
   const maxDim = 1500;
   const cv = document.createElement('canvas');
   // If the live edge view found the document, straighten the shot now —
   // the crop editor then opens on an already-straight photo.
   let b64 = '';
+  let shotCanvas = null;
   const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
   if (quad) {
     const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
@@ -3972,6 +4034,7 @@ function capturePanelPhoto() {
       const qscale = cv.width / video.videoWidth;
       const warped = warpQuadImage(cv, quad.map((p) => ({ x: p.x * qscale, y: p.y * qscale })));
       b64 = warped.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+      if (b64) shotCanvas = warped;
     } catch (_) { b64 = ''; }
   }
   if (!b64) {
@@ -3993,13 +4056,125 @@ function capturePanelPhoto() {
     cv.height = Math.max(1, Math.round(sh * csc));
     cv.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
     b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '';
+    if (b64) shotCanvas = cv;
   }
-  if (!b64) {
-    setStatus('Could not capture this photo — try again.', 'err');
+  if (!b64) return { b64: '', sharp: 0 };
+  return { b64, sharp: shotCanvas ? scoreCanvas(shotCanvas) : 0 };
+}
+
+// Burst (v4.9.67): one Capture tap takes BURST_SHOTS shots, then the
+// picker lets the user choose one — the sharpest is starred, but the
+// user decides. The camera keeps running until a shot is used.
+async function capturePanelPhoto() {
+  const video = $('cameraVideo');
+  if (!video || !video.videoWidth) {
+    setStatus('Camera is not ready yet — wait a second and try again.', 'err');
     return;
   }
-  // Retake: the new shot replaces the old photo in place (same list
-  // position, same person binding), then opens in the crop editor.
+  const runId = ++burstRunId;
+  const capBtn = $('capturePhotoBtn');
+  if (capBtn) { capBtn.disabled = true; capBtn.style.opacity = '0.5'; }
+  burstShots = [];
+  burstSelected = 0;
+  for (let i = 0; i < BURST_SHOTS; i++) {
+    if (runId !== burstRunId) return; // cancelled mid-burst
+    setCameraHint('Shooting… ' + (i + 1) + ' of ' + BURST_SHOTS, '');
+    const shot = grabCameraFrame();
+    if (shot.b64) burstShots.push(shot);
+    if (i < BURST_SHOTS - 1) await new Promise((r) => setTimeout(r, BURST_GAP_MS));
+  }
+  if (runId !== burstRunId) return;
+  if (capBtn) { capBtn.disabled = false; capBtn.style.opacity = ''; }
+  if (!burstShots.length) {
+    setStatus('Could not capture this photo — try again.', 'err');
+    setCameraHint(frameHintText(), '');
+    return;
+  }
+  burstSelected = sharpestShotIndex(burstShots);
+  if (burstSelected < 0) burstSelected = 0;
+  showBurstPicker();
+}
+
+// The burst picker: thumbnails of the shots, tap one to select it,
+// "Use this shot" sends it to the crop editor, "Retake" shoots
+// another burst. Built in JS (no sidepanel.html change).
+function showBurstPicker() {
+  let picker = $('burstPicker');
+  if (!picker) {
+    picker = document.createElement('div');
+    picker.id = 'burstPicker';
+    picker.style.cssText = 'padding:10px 4px 0;';
+    const card = $('cameraModal') && $('cameraModal').querySelector('.dialog-card');
+    const actions = $('cameraModal') && $('cameraModal').querySelector('.dialog-actions');
+    if (card && actions) card.insertBefore(picker, actions);
+    else if (card) card.appendChild(picker);
+  }
+  const sharpest = sharpestShotIndex(burstShots);
+  picker.innerHTML = '';
+  const label = document.createElement('div');
+  label.textContent = 'Pick a shot — ★ is the sharpest:';
+  label.style.cssText = 'font-size:13px; font-weight:700; margin-bottom:8px;';
+  picker.appendChild(label);
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;';
+  burstShots.forEach((shot, i) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative; flex:0 0 auto; cursor:pointer;';
+    const img = document.createElement('img');
+    img.src = 'data:image/jpeg;base64,' + shot.b64;
+    img.alt = 'Shot ' + (i + 1);
+    img.style.cssText = 'display:block; width:72px; height:96px; object-fit:cover; border-radius:8px; border:3px solid ' + (i === burstSelected ? '#2563eb' : '#cbd5e1') + ';';
+    wrap.appendChild(img);
+    if (i === sharpest) {
+      const star = document.createElement('span');
+      star.textContent = '★ Sharpest';
+      star.style.cssText = 'position:absolute; left:2px; top:2px; background:rgba(22,163,74,.92); color:#fff; font-size:10px; font-weight:700; padding:2px 5px; border-radius:999px;';
+      wrap.appendChild(star);
+    }
+    wrap.addEventListener('click', () => { burstSelected = i; showBurstPicker(); });
+    row.appendChild(wrap);
+  });
+  picker.appendChild(row);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+  const useBtn = document.createElement('button');
+  useBtn.type = 'button';
+  useBtn.className = 'btn';
+  useBtn.textContent = 'Use this shot';
+  useBtn.style.cssText = 'flex:1; background:#2563eb; color:#fff;';
+  useBtn.addEventListener('click', useBurstShot);
+  btnRow.appendChild(useBtn);
+  const retakeBtn = document.createElement('button');
+  retakeBtn.type = 'button';
+  retakeBtn.className = 'btn';
+  retakeBtn.textContent = 'Retake';
+  retakeBtn.style.cssText = 'flex:1; background:#475569; color:#fff;';
+  retakeBtn.addEventListener('click', () => { hideBurstPicker(); capturePanelPhoto(); });
+  btnRow.appendChild(retakeBtn);
+  picker.appendChild(btnRow);
+  picker.style.display = 'block';
+  setCameraHint('Pick the sharpest shot below.', '');
+  // Hide Capture while picking, so a second burst cannot start.
+  const capBtn = $('capturePhotoBtn');
+  if (capBtn) capBtn.style.display = 'none';
+}
+
+function hideBurstPicker() {
+  const picker = $('burstPicker');
+  if (picker) picker.style.display = 'none';
+  const capBtn = $('capturePhotoBtn');
+  if (capBtn) { capBtn.style.display = ''; capBtn.disabled = false; capBtn.style.opacity = ''; }
+  setCameraHint(frameHintText(), '');
+}
+
+// The chosen burst shot goes through the same path a single Capture
+// used to: retake replaces the old photo in place, otherwise it is
+// added and opens in the crop editor. The other shots are discarded.
+function useBurstShot() {
+  const shot = burstShots[burstSelected];
+  if (!shot || !shot.b64) return;
+  const b64 = shot.b64;
+  burstShots = [];
   const replacing = retakeItem;
   retakeItem = null;
   stopPanelCamera();
@@ -5461,25 +5636,20 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     } else if (prevM2 && prevM2.literacy_id !== undefined && prevM2.literacy_id !== null && String(prevM2.literacy_id).trim() !== '') {
       entry.literacy_id = Number(prevM2.literacy_id);
     }
-    // (v4.9.65) Annual income: the injector's 0 / 60000 defaults do
-    // not live in the panel — a student (age 4-24) gets 0 and an
-    // earning husband gets 60000 from the injector itself, so a pulled
-    // 0 / 60000 for those rows is the guess, not data, and the card
-    // shows it blank. Any other income is kept; a default falls
-    // through to the previous record's value for the same person,
-    // like a missing value does. The form still gets its 0 / 60000
-    // from the injector, so the fill is unchanged.
-    const incomeIsDefault = (v) => {
-      const n = Number(v);
-      if (!Number.isFinite(n)) return false;
-      if (n === 0 && memAge !== null && memAge >= 4 && memAge <= 24) return true;
-      if (n === 60000 && rel === 'Husband') return true;
-      return false;
-    };
-    if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && !incomeIsDefault(m.estimate_annual_income)) {
+    // (v4.9.66) Annual income ALWAYS shows a value in the panel so it
+    // can be edited: a blank income gets the red field-warning in the
+    // card, and the site's income field is required on one form
+    // variant, so an empty income glows red there too. A real income
+    // wins; otherwise the Husband defaults to 60000 (the injector's
+    // default) and everyone else to 0 — the value the form gets.
+    // This reverses the v4.9.65 hiding: the blank it left behind was
+    // the red field the user reported ("show 0, so we can edit it").
+    if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '') {
       entry.estimate_annual_income = Number(m.estimate_annual_income);
-    } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '' && !incomeIsDefault(prevM2.estimate_annual_income)) {
+    } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '') {
       entry.estimate_annual_income = Number(prevM2.estimate_annual_income);
+    } else {
+      entry.estimate_annual_income = rel === 'Husband' ? 60000 : 0;
     }
     if (m?.is_gov_job_holder === 0 || m?.is_gov_job_holder === 1 || m?.is_gov_job_holder === '0' || m?.is_gov_job_holder === '1') {
       entry.is_gov_job_holder = Number(m.is_gov_job_holder);
@@ -6012,6 +6182,9 @@ function addManualMember() {
     mother_name_bn: '', mother_name_en: '',
     doc_type: 'NID', dob: '', nid: '', nid_or_brn: '',
     is_disabled: 0, is_currently_student: 0, health_condition_id: 203,
+    // Annual income starts at 0 (v4.9.66) — a blank income glows red
+    // in the card, and 0 is what the form gets for a non-husband.
+    estimate_annual_income: 0,
     // Benefit defaults are No (0) — the user asked for No as the default.
     is_ssnp_covered: 0, facilities_ids: [],
     is_dss_training_or_financial_benefit: 0,
