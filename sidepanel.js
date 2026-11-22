@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.71-live';
+const CURRENT_VERSION_TAG = 'v4.9.72-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -164,13 +164,13 @@ function hasPulledSections(targetObj) {
 // (Q393) together. Order is most-common first (user-confirmed
 // 2026-11-22).
 const HOME_COMBOS = [
-  { floor: 539, wall: 341, roof: 396, label: 'মাটি মেঝে + সিমেন্ট দেয়াল + টিন ছাদ' },
-  { floor: 539, wall: 338, roof: 396, label: 'মাটি মেঝে + টিন দেয়াল + টিন ছাদ' },
-  { floor: 537, wall: 341, roof: 396, label: 'ঢালাই মেঝে + সিমেন্ট দেয়াল + টিন ছাদ' },
-  { floor: 539, wall: 340, roof: 396, label: 'মাটি মেঝে + মাটি দেয়াল + টিন ছাদ' },
-  { floor: 537, wall: 338, roof: 396, label: 'ঢালাই মেঝে + টিন দেয়াল + টিন ছাদ' },
-  { floor: 537, wall: 341, roof: 398, label: 'ঢালাই মেঝে + সিমেন্ট দেয়াল + সিমেন্ট ছাদ' },
-  { floor: 538, wall: 341, roof: 398, label: 'টাইলস মেঝে + সিমেন্ট দেয়াল + সিমেন্ট ছাদ' }
+  { floor: 539, wall: 341, roof: 396, label: 'মেঝে মাটি + দেয়াল সিমেন্ট + ছাদ টিন' },
+  { floor: 539, wall: 338, roof: 396, label: 'মেঝে মাটি + দেয়াল টিন + ছাদ টিন' },
+  { floor: 537, wall: 341, roof: 396, label: 'মেঝে ঢালাই + দেয়াল সিমেন্ট + ছাদ টিন' },
+  { floor: 539, wall: 340, roof: 396, label: 'মেঝে মাটি + দেয়াল মাটি + ছাদ টিন' },
+  { floor: 537, wall: 338, roof: 396, label: 'মেঝে ঢালাই + দেয়াল টিন + ছাদ টিন' },
+  { floor: 537, wall: 341, roof: 398, label: 'মেঝে ঢালাই + দেয়াল সিমেন্ট + ছাদ সিমেন্ট' },
+  { floor: 538, wall: 341, roof: 398, label: 'মেঝে টাইলস + দেয়াল সিমেন্ট + ছাদ সিমেন্ট' }
 ];
 const HOME_COMBO_OTHER = 'other';
 const HOME_COMBO_STORAGE_KEY = 'fc_pro_home_combo';
@@ -236,6 +236,59 @@ const PMT_ROOF_OPTIONS = [
   { id: 398, label: 'ইট/সিমেন্ট' },
   { id: 542, label: 'ট্যালী' }
 ];
+// Durable assets (Q47, multi-answer) and rooms (Q500) — the site's
+// exact option names, in the site's order. Q47 is the one PMT
+// question with more than one answer; its options all carry a score
+// (see PMT_SCORE_BY_OPTION), so the picker feeds the running total.
+const PMT_ASSET_OPTIONS = [
+  { id: 422, label: 'কম্পিউটার/ল্যাপটপ' },
+  { id: 424, label: 'গাড়ী' },
+  { id: 425, label: 'মোটর সাইকেল' },
+  { id: 430, label: 'টেলিভিশন' },
+  { id: 435, label: 'মোবাইল ফোন' },
+  { id: 436, label: 'ক্যামেরা' },
+  { id: 429, label: 'রেফ্রিজারেটর/ওভেন/ওয়াশিং মেশিন' },
+  { id: 529, label: 'কার্পেট' },
+  { id: 437, label: 'কৃষি সেচের পাওয়ার পাম্প' },
+  { id: 560, label: 'সোলার প্যানেল' },
+  { id: 559, label: 'বৈদ্যুতিক পাখা' },
+  { id: 562, label: 'সোফা সেট' },
+  { id: 563, label: 'খাট' },
+  { id: 564, label: 'ডাইনিং টেবিল' },
+  { id: 565, label: 'আলমারি/ওয়ারড্রব /শোকেস/ ড্রেসিং টেবিল' },
+  { id: 561, label: 'পাওয়ার টিলার' },
+  { id: 591, label: 'টিউবওয়েল' },
+  { id: 566, label: 'নৌকা' },
+  { id: 592, label: 'সাইকেল/রিকশা' },
+  { id: 593, label: 'হিটার/ইনডাকশন চুলা' },
+  { id: 594, label: 'ভিসিআর/ভিসিপি/ডিশ সংযোগ' },
+];
+const PMT_ROOMS_OPTIONS = [
+  { id: 501, label: '১' },
+  { id: 502, label: '২' },
+  { id: 503, label: '৩' },
+  { id: 504, label: '৪' },
+  { id: 505, label: '৫' },
+  { id: 506, label: '৬' },
+  { id: 507, label: '৭' },
+  { id: 508, label: '৮' },
+  { id: 509, label: '৯' },
+  { id: 510, label: '১০' },
+  { id: 511, label: '১১' },
+  { id: 512, label: '১২' },
+  { id: 513, label: '১৩' },
+  { id: 514, label: '১৪' },
+  { id: 515, label: '১৫' },
+  { id: 516, label: '১৬' },
+  { id: 517, label: '১৭' },
+  { id: 518, label: '১৮' },
+  { id: 519, label: '১৯' },
+  { id: 520, label: '২০' }
+];
+// User-confirmed default assets (2026-11-22): fan, bed, mobile,
+// tubewell — the ones (nearly) every household has. Only the mobile
+// scores (+14); the rest score 0.
+const PMT_ASSET_DEFAULT_IDS = [559, 563, 435, 591];
 // User-confirmed defaults for the leftover picks (2026-11-22):
 // kitchen Yes (a separate kitchen is common), dining No (a dining
 // room is uncommon), land 0.50 acre or less (most common), diesel
@@ -313,15 +366,29 @@ function pmtPulledAnswerId(pmtAnswers, qid) {
   const id = Number(pa.answers[0] && pa.answers[0].id);
   return Number.isFinite(id) ? id : undefined;
 }
-// Effective PMT picks for the head: raw (extract/pull) wins, then
-// the same person's previous record, then the pulled draft's
-// answers, then the user defaults (kitchen Yes, dining No, land
-// 0.5 acre, diesel 0, LPG 0 unless the fuel is LPG). The combo:
-// explicit pick, then a pulled floor/wall/roof that matches a combo,
-// then "other" when the pulled parts match no combo, then the
-// sticky combo. fuelId is the effective cooking fuel option id
-// (550 wood unless overridden or pulled as LPG 556).
-function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId) {
+// All pulled answer ids for a PMT question, or undefined. Q47
+// (durable assets) is multi-answer, so the singular helper above
+// only takes the first — this one takes the whole list.
+function pmtPulledAnswerIds(pmtAnswers, qid) {
+  if (!Array.isArray(pmtAnswers)) return undefined;
+  const pa = pmtAnswers.find((e) => e && Number(e.variable_id) === Number(qid));
+  if (!pa || !Array.isArray(pa.answers) || !pa.answers.length) return undefined;
+  const ids = pa.answers.map((a) => Number(a && a.id)).filter((n) => Number.isFinite(n));
+  return ids.length ? ids : undefined;
+}
+// Effective PMT picks for the head: raw (extract/pull) wins, then the
+// imported form_defaults.pmt override, then the same person's previous
+// record, then the pulled draft's answers, then the user defaults
+// (kitchen Yes, dining No, land 0.5 acre, diesel 0, LPG 0 unless the
+// fuel is LPG; assets fan/bed/mobile/tubewell). The combo: explicit
+// pick, then a pulled floor/wall/roof that matches a combo, then
+// "other" when the pulled parts match no combo, then the sticky
+// combo. fuelId is the effective cooking fuel option id (550 wood
+// unless overridden or pulled as LPG 556). importedAssets is the
+// imported form_defaults.pmt['47'] override (a single id or a list) —
+// it is a source for the assets, not a preserved entry: the head
+// pick wins for Q47 now that the panel owns it.
+function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId, importedAssets) {
   const raw = rawHead || {};
   const prev = prevHead || {};
   const pulled = Array.isArray(raw.pmt_answers) && raw.pmt_answers.length ? raw.pmt_answers : (Array.isArray(prev.pmt_answers) ? prev.pmt_answers : []);
@@ -330,13 +397,25 @@ function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId) {
     const v = num(raw[key]) ?? num(prev[key]) ?? pmtPulledAnswerId(pulled, qid) ?? defVal;
     return v === undefined ? undefined : Number(v);
   };
+  // A multi-answer pick (Q47 assets): any non-empty id list wins, in
+  // the same precedence as pick. An empty list falls through — the
+  // default preset applies, so "owns nothing" cannot be recorded.
+  const toIds = (v) => {
+    if (v === undefined || v === null || v === false) return undefined;
+    const list = Array.isArray(v) ? v : [v];
+    const ids = list.map((x) => Number(x)).filter((n) => Number.isFinite(n));
+    return ids.length ? ids : undefined;
+  };
+  const pickMulti = (key, qid, imported, defVal) =>
+    toIds(raw[key]) ?? toIds(imported) ?? toIds(prev[key]) ?? pmtPulledAnswerIds(pulled, qid) ?? defVal;
   const out = {
     pmt_kitchen: pick('pmt_kitchen', 36, PMT_PICK_DEFAULTS.kitchen),
     pmt_dining: pick('pmt_dining', 33, PMT_PICK_DEFAULTS.dining),
     pmt_land: pick('pmt_land', 25, PMT_PICK_DEFAULTS.land),
     pmt_occupation: pick('pmt_occupation', 22, undefined),
     pmt_lpg: pick('pmt_lpg', 579, Number(fuelId) === 556 ? undefined : PMT_PICK_DEFAULTS.lpg),
-    pmt_diesel: pick('pmt_diesel', 595, PMT_PICK_DEFAULTS.diesel)
+    pmt_diesel: pick('pmt_diesel', 595, PMT_PICK_DEFAULTS.diesel),
+    pmt_assets: pickMulti('pmt_assets', 47, importedAssets, PMT_ASSET_DEFAULT_IDS)
   };
   // Combo + the three material picks.
   const rawCombo = raw.home_combo ?? prev.home_combo;
@@ -368,6 +447,7 @@ function pmtOverridesFromHead(head) {
   const h = head || {};
   const out = {};
   const set = (qid, v) => { if (v !== undefined && v !== null && String(v).trim() !== '') out[String(qid)] = Number(v); };
+  const setMulti = (qid, v) => { if (Array.isArray(v) && v.length) { const ids = v.map(Number).filter((n) => Number.isFinite(n)); if (ids.length) out[String(qid)] = ids; } };
   set(36, h.pmt_kitchen);
   set(33, h.pmt_dining);
   set(25, h.pmt_land);
@@ -378,6 +458,7 @@ function pmtOverridesFromHead(head) {
   set(536, h.pmt_floor);
   set(30, h.pmt_wall);
   set(393, h.pmt_roof);
+  setMulti(47, h.pmt_assets);
   return out;
 }
 // Warning text for the home combo: the draft's own floor/wall/roof
@@ -494,11 +575,16 @@ function computePmtScoreTotal(data) {
   // Remittance (override only — the panel never picks Yes; No scores 0).
   const rem = overrideIds(29);
   if (rem && rem.length) total += scoreOf(29, rem[0]);
-  // Latrine (preset sanitary +7 unless overridden) + assets (preset
-  // fan/bed/mobile/tubewell = +14 from the mobile, unless overridden).
+  // Latrine (preset sanitary +7 unless overridden) + assets (the
+  // head card's pick, else the preset fan/bed/mobile/tubewell =
+  // +14 from the mobile, unless overridden).
   total += scoreOf(41, pickId(41, undefined, 386));
-  const assets = overrideIds(47);
-  const assetIds = (assets && assets.length ? assets : [559, 563, 435, 591]);
+  const ovAssets = overrideIds(47);
+  const headAssets = Array.isArray(head.pmt_assets) && head.pmt_assets.length
+    ? head.pmt_assets.map(Number).filter((n) => Number.isFinite(n)) : undefined;
+  const assetIds = (ovAssets && ovAssets.length ? ovAssets
+    : (headAssets && headAssets.length ? headAssets
+    : (pmtPulledAnswerIds(pulled, 47) || PMT_ASSET_DEFAULT_IDS)));
   assetIds.forEach((id) => { total += scoreOf(47, id); });
   // Leftover picks.
   total += scoreOf(36, pickId(36, 'pmt_kitchen', PMT_PICK_DEFAULTS.kitchen));
@@ -562,9 +648,10 @@ const HEAD_FIELDS = [
   { key: 'pmt_dining', label: 'খানায় কি পৃথক খাবার ঘর/কক্ষ আছে?', type: 'pmt_option_select', options: PMT_DINING_OPTIONS },
   { key: 'pmt_land', label: 'খানার সকল সদস্যের মালিকানাধীন মোট জমির পরিমাণ কত?', type: 'pmt_option_select', options: PMT_LAND_OPTIONS },
   { key: 'pmt_occupation', label: 'খানার কোন সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?', type: 'pmt_option_select', options: PMT_OCCUPATION_OPTIONS },
-  { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'rooms_number' },
+  { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'pmt_option_select', options: PMT_ROOMS_OPTIONS },
   { key: 'pmt_lpg', label: 'খানায় রান্নার জ্বালানির প্রধান উপকরণ এলপিজি গ্যাস হলে প্রতিমাসে এলপিজি গ্যাস ব্যবহারের পরিমান', type: 'pmt_option_select', options: PMT_LPG_OPTIONS },
   { key: 'pmt_diesel', label: 'কৃষি কাজে ডিজেল ব্যবহার হলে তার মাসিক আনুমানিক পরিমাণ', type: 'pmt_option_select', options: PMT_DIESEL_OPTIONS },
+  { key: 'pmt_assets', label: 'খানার মালিকানাধীন নিম্নের পরিসম্পদ গুলোর কোনটি আছে ? (একাধিক উত্তর হতে পারে)', type: 'pmt_assets_multi' },
   { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
@@ -2545,10 +2632,10 @@ function recalculateHouseholdSummary(data) {
   const prevProgFields = (prevDefaults.program_fields && typeof prevDefaults.program_fields === 'object') ? { ...prevDefaults.program_fields } : {};
   const headMfs = Number(data.head && data.head.mfs_provider_id) || 0;
   if (headMfs) prevProgFields['138'] = headMfs; else delete prevProgFields['138'];
-  // PMT leftover picks (v4.9.69): the head card's picks flow into
-  // form_defaults.pmt — the injector's existing override path.
-  // Preserved pmt entries (e.g. an imported Q47 override) stay; the
-  // head's picks win for the leftover questions.
+  // PMT leftover picks (v4.9.69, assets v4.9.72): the head card's picks
+  // flow into form_defaults.pmt — the injector's existing override
+  // path. Preserved pmt entries for questions the panel does not own
+  // stay; the head's picks win for the leftover questions.
   const prevPmt = (prevDefaults.pmt && typeof prevDefaults.pmt === 'object') ? { ...prevDefaults.pmt } : {};
   Object.assign(prevPmt, pmtOverridesFromHead(data.head || {}));
   data.form_defaults = {
@@ -3278,36 +3365,50 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.addEventListener('change', (e) => {
       const v = e.target.value;
       targetObj[f.key] = v === '' ? undefined : Number(v);
+      // Rooms (Q500, v4.9.72): the info row shows the Bangla numeral
+      // (no_of_room_name), so keep it in step with the picked option.
+      if (f.key === 'no_of_room') {
+        const opt = (f.options || []).find((o) => String(o.id) === v);
+        targetObj.no_of_room_name = opt ? opt.label : undefined;
+      }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
       notifyChange(f.key, v === '' ? null : Number(v));
     });
-  } else if (f.type === 'rooms_number') {
-    // Rooms (Q500, v4.9.69): a number 1–20. The record stores the
-    // option id (501–520) in no_of_room, like the pull does.
-    inputEl = document.createElement('input');
-    inputEl.type = 'number';
-    inputEl.min = '1'; inputEl.max = '20';
-    inputEl.setAttribute('data-field', 'no_of_room');
-    inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; width:100%;';
-    const cur = Number(targetObj.no_of_room);
-    inputEl.value = Number.isFinite(cur) && cur >= 501 && cur <= 520 ? String(cur - 500) : '';
-    inputEl.addEventListener('change', (e) => {
-      const n = Math.round(Number(e.target.value));
-      if (Number.isFinite(n) && n >= 1 && n <= 20) {
-        targetObj.no_of_room = 500 + n;
-        targetObj.no_of_room_name = String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
-        e.target.value = String(n);
-      } else {
-        targetObj.no_of_room = undefined;
-        targetObj.no_of_room_name = undefined;
-        e.target.value = '';
-      }
-      toggleWarning(inputEl);
+  } else if (f.type === 'pmt_assets_multi') {
+    // Durable assets (Q47, v4.9.72): the site's multi-answer question
+    // as a checkbox list — the site's exact names, in the site's
+    // order. The preset (fan/bed/mobile/tubewell) shows checked until
+    // the user changes it; every tick re-totals the PMT score (via
+    // syncJsonOutput) and flows to the injector as form_defaults.pmt[47].
+    inputEl = document.createElement('div');
+    inputEl.setAttribute('data-field', f.key);
+    inputEl.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%;';
+    const picked = Array.isArray(targetObj[f.key]) && targetObj[f.key].length
+      ? targetObj[f.key].map(Number) : PMT_ASSET_DEFAULT_IDS;
+    const boxes = [];
+    (PMT_ASSET_OPTIONS || []).forEach((opt) => {
+      const lab = document.createElement('label');
+      lab.style.cssText = 'display:flex; gap:6px; align-items:center; font-size:12px; font-weight:600; color:var(--text-main); cursor:pointer; padding:4px 2px;';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.value = String(opt.id);
+      box.checked = picked.includes(Number(opt.id));
+      box.style.cssText = 'width:18px; height:18px; flex:0 0 auto; accent-color:#2563eb; cursor:pointer;';
+      const txt = document.createElement('span');
+      txt.textContent = `${opt.id} — ${opt.label}`;
+      lab.appendChild(box);
+      lab.appendChild(txt);
+      boxes.push(box);
+      inputEl.appendChild(lab);
+    });
+    inputEl.addEventListener('change', () => {
+      const ids = boxes.filter((b) => b.checked).map((b) => Number(b.value));
+      targetObj[f.key] = ids;
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
-      notifyChange('no_of_room', targetObj.no_of_room ?? null);
+      notifyChange(f.key, ids);
     });
   } else if (f.type === 'pmt_score') {
     // PMT score total (v4.9.69): the running sum of the picked
@@ -6121,7 +6222,12 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const fuelIdForPicks = (raw?.form_defaults && raw.form_defaults.pmt && raw.form_defaults.pmt['548'] !== undefined && raw.form_defaults.pmt['548'] !== null)
     ? Number(raw.form_defaults.pmt['548'])
     : (pmtPulledAnswerId(head.pmt_answers, 548) ?? 550);
-  Object.assign(head, resolveHeadPmtPicks(h, headPrev, stickyHomeCombo(), fuelIdForPicks));
+  // The imported Q47 override is a source for the assets pick, not a
+  // preserved entry — the head pick wins for Q47 now that the panel
+  // owns it (v4.9.72).
+  const importedAssets = (raw?.form_defaults && raw.form_defaults.pmt && raw.form_defaults.pmt['47'] !== undefined && raw.form_defaults.pmt['47'] !== null)
+    ? raw.form_defaults.pmt['47'] : undefined;
+  Object.assign(head, resolveHeadPmtPicks(h, headPrev, stickyHomeCombo(), fuelIdForPicks, importedAssets));
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -6778,6 +6884,7 @@ function blankFormData() {
       is_ssnp_covered: 0, facilities_ids: [],
       is_dss_training_or_financial_benefit: 0,
       pmt_kitchen: 297, pmt_dining: 292, pmt_land: 405, pmt_diesel: 596, pmt_lpg: 590,
+      pmt_assets: [559, 563, 435, 591],
       home_combo: sticky === null ? undefined : sticky,
       pmt_floor: comboParts ? comboParts.floor : undefined,
       pmt_wall: comboParts ? comboParts.wall : undefined,
