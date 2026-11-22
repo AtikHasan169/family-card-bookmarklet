@@ -7,8 +7,56 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v49';
+  // v50 was built (address cascade by name) and set aside by the user
+  // without ever deploying — the next live version is v51.
+  const FC_INJECT_VERSION = 'v51';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
+
+  // --- Profession income table (v51) ---
+  // Typical annual income (Tk) guessed from a member's livelihood
+  // (type-44 ids). User-confirmed 2026-11-22: Agriculture 60000 was
+  // right; the rest lowered for poor applicant families and seasonal
+  // work. A real income always wins over this guess; the head and
+  // students get 0. Income is never summed or scored — this only
+  // fills the required box so the form submits. The panel carries the
+  // same table; keep the two in step (tests/profession_income_test.js
+  // checks they match).
+  const PROFESSION_INCOME = {
+    210: 60000,  // Agriculture
+    211: 84000,  // Business
+    212: 96000,  // Private Job
+    213: 180000, // Govt Job
+    214: 72000,  // Day Laborer
+    215: 120000, // Garment Worker
+    216: 96000,  // Rickshaw/Van Driver
+    217: 96000,  // Transport Worker
+    218: 72000,  // Hotel/Restaurant Worker
+    219: 48000,  // Domestic Worker
+    220: 0,      // Student
+    221: 24000,  // Apprentice
+    222: 0,      // Unemployed
+    223: 0,      // Retired
+    224: 0,      // Elderly/Disabled/Sick
+    225: 0,      // Homemaker
+    275: 0,      // Not Applicable
+    226: 0       // Others
+  };
+  function incomeForProfession(professionId) {
+    const v = PROFESSION_INCOME[Number(professionId)];
+    return v === undefined ? 0 : v;
+  }
+  // The income guess for an earning adult member: the profession
+  // table when the panel resolved a livelihood, else the old rule
+  // (Husband 60000, everyone else 0). A known profession whose table
+  // value is 0 (Unemployed, Homemaker, Others) stays 0 — only "no
+  // profession on file" falls back to the husband default.
+  function incomeGuessForMember(member, relName) {
+    const raw = member && member.livelihood_profession_id;
+    const profId = (raw !== undefined && raw !== null && String(raw).trim() !== '') ? Number(raw) : undefined;
+    if (profId !== undefined) return incomeForProfession(profId);
+    return relName === 'Husband' ? 60000 : 0;
+  }
+  // --- end profession income table ---
 
   // Lookup ids below are the REAL ids from the site's own API
   // (GET getApplicationPageData, captured 2026-11-12) and confirmed by a
@@ -3634,20 +3682,20 @@
           }
 
           // Income: the head and students earn nothing — keep it 0.
-          // The 60000 default is only for an earning (non-student,
-          // non-head) husband.
+          // (v51) Otherwise guess from the profession (the panel's
+          // resolved livelihood, incomeGuessForMember above): a
+          // husband with no profession on file keeps the old 60000,
+          // everyone else with nothing known gets 0. (v48) An empty
+          // income glows red and blocks the form on one variant, so
+          // a guess of 0 still lands instead of empty: the site's own
+          // blank row defaults to 0 (createEmptyFamilyMember) and 0
+          // passes (Number >= 0); income is never summed or scored.
           if (isHeadRow || isStudentRow) {
             setReactive(vmMembers, row, 'estimate_annual_income', 0);
           } else if (relName === 'Husband' && !row.estimate_annual_income) {
-            setReactive(vmMembers, row, 'estimate_annual_income', 60000);
+            setReactive(vmMembers, row, 'estimate_annual_income', incomeGuessForMember(m, relName));
           } else if (isEmptyModelVal(row.estimate_annual_income)) {
-            // (v48) Every other adult with no known income gets 0,
-            // not empty. The site's own blank row defaults to 0
-            // (createEmptyFamilyMember) and one form variant validates
-            // the field as required|numeric|positiveNumber, so an
-            // empty income glows red and blocks the form. 0 passes
-            // (Number >= 0); income is never summed or scored.
-            setReactive(vmMembers, row, 'estimate_annual_income', 0);
+            setReactive(vmMembers, row, 'estimate_annual_income', incomeGuessForMember(m, relName));
           }
 
           const dobOffset = row0IsHead ? idx : idx + 1;

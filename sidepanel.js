@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.72-live';
+const CURRENT_VERSION_TAG = 'v4.9.73-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -106,6 +106,41 @@ const LIVELIHOOD_OPTIONS = [
   { id: 275, label: 'প্রযোজ্য নয় / Not Applicable' },
   { id: 226, label: 'অন্যান্য / Others' }
 ];
+
+// --- Profession income table (v4.9.73) ---
+// Typical annual income (Tk) guessed from a member's livelihood
+// (type-44 ids above). User-confirmed 2026-11-22: Agriculture 60000
+// was right; the rest lowered for poor applicant families and
+// seasonal work. A real income always wins over this guess; the head
+// and students get 0. Income is never summed or scored — this only
+// fills the required box so the form submits. The injector carries
+// the same table; keep the two in step (tests/profession_income_test.js
+// checks they match).
+const PROFESSION_INCOME = {
+  210: 60000,  // Agriculture
+  211: 84000,  // Business
+  212: 96000,  // Private Job
+  213: 180000, // Govt Job
+  214: 72000,  // Day Laborer
+  215: 120000, // Garment Worker
+  216: 96000,  // Rickshaw/Van Driver
+  217: 96000,  // Transport Worker
+  218: 72000,  // Hotel/Restaurant Worker
+  219: 48000,  // Domestic Worker
+  220: 0,      // Student
+  221: 24000,  // Apprentice
+  222: 0,      // Unemployed
+  223: 0,      // Retired
+  224: 0,      // Elderly/Disabled/Sick
+  225: 0,      // Homemaker
+  275: 0,      // Not Applicable
+  226: 0       // Others
+};
+function incomeForProfession(professionId) {
+  const v = PROFESSION_INCOME[Number(professionId)];
+  return v === undefined ? 0 : v;
+}
+// --- end profession income table ---
 
 // Marital status (type-32 list, real ids from the site's lookup).
 const MARITAL_OPTIONS = [
@@ -3127,7 +3162,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     GOV_CARD_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     const curIds = Array.isArray(targetObj.facilities_ids) ? targetObj.facilities_ids.map(v => String(v)) : [];
@@ -3216,7 +3251,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     EDUCATION_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.education_status_id !== undefined && targetObj.education_status_id !== null && String(targetObj.education_status_id).trim() !== '' ? String(targetObj.education_status_id) : '';
@@ -3241,7 +3276,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     DISABILITY_TYPE_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.disability_type_id !== undefined && targetObj.disability_type_id !== null && String(targetObj.disability_type_id).trim() !== '' ? String(targetObj.disability_type_id) : '';
@@ -3266,7 +3301,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     MFS_PROVIDER_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.mfs_provider_id !== undefined && targetObj.mfs_provider_id !== null && String(targetObj.mfs_provider_id).trim() !== '' ? String(targetObj.mfs_provider_id) : '';
@@ -3358,7 +3393,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     (f.options || []).forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj[f.key] !== undefined && targetObj[f.key] !== null && String(targetObj[f.key]).trim() !== '' ? String(targetObj[f.key]) : '';
@@ -3384,20 +3419,20 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     // syncJsonOutput) and flows to the injector as form_defaults.pmt[47].
     inputEl = document.createElement('div');
     inputEl.setAttribute('data-field', f.key);
-    inputEl.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%;';
+    inputEl.style.cssText = 'display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; width:100%;';
     const picked = Array.isArray(targetObj[f.key]) && targetObj[f.key].length
       ? targetObj[f.key].map(Number) : PMT_ASSET_DEFAULT_IDS;
     const boxes = [];
     (PMT_ASSET_OPTIONS || []).forEach((opt) => {
       const lab = document.createElement('label');
-      lab.style.cssText = 'display:flex; gap:6px; align-items:center; font-size:12px; font-weight:600; color:var(--text-main); cursor:pointer; padding:4px 2px;';
+      lab.style.cssText = 'display:flex; gap:4px; align-items:center; font-size:11px; font-weight:600; color:var(--text-main); cursor:pointer; padding:3px 2px;';
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.value = String(opt.id);
       box.checked = picked.includes(Number(opt.id));
-      box.style.cssText = 'width:18px; height:18px; flex:0 0 auto; accent-color:#2563eb; cursor:pointer;';
+      box.style.cssText = 'width:16px; height:16px; flex:0 0 auto; accent-color:#2563eb; cursor:pointer;';
       const txt = document.createElement('span');
-      txt.textContent = `${opt.id} — ${opt.label}`;
+      txt.textContent = opt.label;
       lab.appendChild(box);
       lab.appendChild(txt);
       boxes.push(box);
@@ -3433,7 +3468,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     HEALTH_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     const defHealth = (targetObj.is_disabled === 1 || targetObj.is_disabled === '1') ? '206' : '203';
@@ -3458,7 +3493,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     PROFESSION_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.profession !== undefined && targetObj.profession !== null && String(targetObj.profession).trim() !== '' ? String(targetObj.profession) : '';
@@ -3483,7 +3518,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     LIVELIHOOD_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.livelihood_profession_id !== undefined && targetObj.livelihood_profession_id !== null && String(targetObj.livelihood_profession_id).trim() !== '' ? String(targetObj.livelihood_profession_id) : '';
@@ -3508,7 +3543,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     MARITAL_OPTIONS.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj.marital_status !== undefined && targetObj.marital_status !== null && String(targetObj.marital_status).trim() !== '' ? String(targetObj.marital_status) : '';
@@ -3535,7 +3570,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     opts.forEach((opt) => {
       const o = document.createElement('option');
       o.value = String(opt.id);
-      o.textContent = `${opt.id} — ${opt.label}`;
+      o.textContent = opt.label;
       inputEl.appendChild(o);
     });
     inputEl.value = targetObj[f.key] !== undefined && targetObj[f.key] !== null && String(targetObj[f.key]).trim() !== '' ? String(targetObj[f.key]) : '';
@@ -3566,7 +3601,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       const map = typeof f.labelMap === 'string' ? LABEL_MAPS[f.labelMap] : f.labelMap;
       if (Array.isArray(map)) {
         const hit = map.find((o) => o && Number(o.id) === Number(v));
-        if (hit) shown = `${hit.id} — ${hit.label}`;
+        if (hit) shown = hit.label;
       } else if (map && typeof map === 'object') {
         const hit = map[Number(v)] ?? map[String(v)];
         if (hit !== undefined) shown = String(hit);
@@ -6355,16 +6390,23 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     // can be edited: a blank income gets the red field-warning in the
     // card, and the site's income field is required on one form
     // variant, so an empty income glows red there too. A real income
-    // wins; otherwise the Husband defaults to 60000 (the injector's
-    // default) and everyone else to 0 — the value the form gets.
-    // This reverses the v4.9.65 hiding: the blank it left behind was
-    // the red field the user reported ("show 0, so we can edit it").
+    // wins; otherwise the guess comes from the profession (v4.9.73,
+    // PROFESSION_INCOME above): a student-age member (4–24) still
+    // gets 0, like the injector, and with no profession on file the
+    // old rule stands (Husband 60000, everyone else 0) — so a son
+    // with no income still shows 0. This reverses the v4.9.65 hiding:
+    // the blank it left behind was the red field the user reported
+    // ("show 0, so we can edit it").
     if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '') {
       entry.estimate_annual_income = Number(m.estimate_annual_income);
     } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '') {
       entry.estimate_annual_income = Number(prevM2.estimate_annual_income);
     } else {
-      entry.estimate_annual_income = rel === 'Husband' ? 60000 : 0;
+      const isStudentAge = entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
+      const profId = entry.livelihood_profession_id !== undefined && entry.livelihood_profession_id !== null && String(entry.livelihood_profession_id).trim() !== ''
+        ? Number(entry.livelihood_profession_id) : undefined;
+      entry.estimate_annual_income = isStudentAge ? 0
+        : (profId !== undefined ? incomeForProfession(profId) : (rel === 'Husband' ? 60000 : 0));
     }
     if (m?.is_gov_job_holder === 0 || m?.is_gov_job_holder === 1 || m?.is_gov_job_holder === '0' || m?.is_gov_job_holder === '1') {
       entry.is_gov_job_holder = Number(m.is_gov_job_holder);
@@ -7272,20 +7314,20 @@ function renderExtractedCards(data) {
 }
 
 const KNOWN_KEY_OPTIONS = {
-  verification_type: [{ value: 1, label: '1 — NID (জাতীয় পরিচয়পত্র)' }, { value: 2, label: '2 — BRN (জন্ম নিবন্ধন)' }],
-  gender: [{ value: 1, label: '1 — Male (পুরুষ)' }, { value: 2, label: '2 — Female (মহিলা)' }, { value: 3, label: '3 — Other (অন্যান্য)' }],
-  gender_id: [{ value: 1, label: '1 — Male (পুরুষ)' }, { value: 2, label: '2 — Female (মহিলা)' }, { value: 3, label: '3 — Other (অন্যান্য)' }],
-  religion: RELIGION_OPTIONS.map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
-  religion_id: RELIGION_OPTIONS.map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
-  relationship_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
-  relation_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: `${r.id} — ${r.label}` })),
-  is_member_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
-  is_disabled: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
-  disability_type_id: DISABILITY_TYPE_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
-  health_condition_id: HEALTH_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
-  mfs_provider_id: MFS_PROVIDER_OPTIONS.map(o => ({ value: o.id, label: `${o.id} — ${o.label}` })),
-  is_gov_job_holder: [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }],
-  is_ethnic: [{ value: 0, label: '0 — না (No)' }, { value: 1, label: '1 — হ্যাঁ (Yes)' }],
+  verification_type: [{ value: 1, label: 'NID (জাতীয় পরিচয়পত্র)' }, { value: 2, label: 'BRN (জন্ম নিবন্ধন)' }],
+  gender: [{ value: 1, label: 'Male (পুরুষ)' }, { value: 2, label: 'Female (মহিলা)' }, { value: 3, label: 'Other (অন্যান্য)' }],
+  gender_id: [{ value: 1, label: 'Male (পুরুষ)' }, { value: 2, label: 'Female (মহিলা)' }, { value: 3, label: 'Other (অন্যান্য)' }],
+  religion: RELIGION_OPTIONS.map(r => ({ value: r.id, label: r.label })),
+  religion_id: RELIGION_OPTIONS.map(r => ({ value: r.id, label: r.label })),
+  relationship_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: r.label })),
+  relation_id: RELATION_OPTIONS.filter(r => r.id !== null).map(r => ({ value: r.id, label: r.label })),
+  is_member_disabled: [{ value: 0, label: 'No (না)' }, { value: 1, label: 'Yes (হ্যাঁ)' }],
+  is_disabled: [{ value: 0, label: 'No (না)' }, { value: 1, label: 'Yes (হ্যাঁ)' }],
+  disability_type_id: DISABILITY_TYPE_OPTIONS.map(o => ({ value: o.id, label: o.label })),
+  health_condition_id: HEALTH_OPTIONS.map(o => ({ value: o.id, label: o.label })),
+  mfs_provider_id: MFS_PROVIDER_OPTIONS.map(o => ({ value: o.id, label: o.label })),
+  is_gov_job_holder: [{ value: 0, label: 'No (না)' }, { value: 1, label: 'Yes (হ্যাঁ)' }],
+  is_ethnic: [{ value: 0, label: 'না (No)' }, { value: 1, label: 'হ্যাঁ (Yes)' }],
   location_type: AREA_TYPE_OPTIONS
 };
 
@@ -7299,7 +7341,7 @@ function guessOptionsForKey(key, val, vueOptions = {}) {
   if (KNOWN_KEY_OPTIONS[key]) return KNOWN_KEY_OPTIONS[key];
   if (typeof val === 'boolean') return [{ value: 'true', label: 'true (হ্যাঁ)' }, { value: 'false', label: 'false (না)' }];
   if (/^(is_|has_)/i.test(key) && (val === 0 || val === 1 || val === '0' || val === '1')) {
-    return [{ value: 0, label: '0 — No (না)' }, { value: 1, label: '1 — Yes (হ্যাঁ)' }];
+    return [{ value: 0, label: 'No (না)' }, { value: 1, label: 'Yes (হ্যাঁ)' }];
   }
   const baseName = key.replace(/_id$/i, '');
   for (const [optKey, list] of Object.entries(vueOptions)) {
