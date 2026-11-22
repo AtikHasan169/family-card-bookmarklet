@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.68-live';
+const CURRENT_VERSION_TAG = 'v4.9.69-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -175,6 +175,23 @@ const HEAD_FIELDS = [
   // (Bkash/Nagad/...) via form_defaults.program_fields.
   { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
   { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
+  // PMT leftover picks (v4.9.69): the questions Auto-Fill + presets
+  // leave behind. Unsectioned so they always show (also on a New
+  // Form). Labels are the site's own question text, word for word
+  // (user 2026-11-22). The floor/wall/roof rows hide unless the
+  // home combo is "other" — a combo pick sets all three.
+  { key: 'home_combo', label: 'বাড়ি কেমন (Home made of)', type: 'home_combo_select' },
+  { key: 'pmt_floor', label: 'খানার প্রধান বসতঘরের মেঝে বা ফ্লোর কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_FLOOR_OPTIONS },
+  { key: 'pmt_wall', label: 'খানার প্রধান ঘরের দেয়াল কি দিয়ে তৈরী?', type: 'pmt_option_select', options: PMT_WALL_OPTIONS },
+  { key: 'pmt_roof', label: 'খানার প্রধান ঘরের ছাদ কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_ROOF_OPTIONS },
+  { key: 'pmt_kitchen', label: 'খানায় কি পৃথক রান্নাঘর আছে?', type: 'pmt_option_select', options: PMT_KITCHEN_OPTIONS },
+  { key: 'pmt_dining', label: 'খানায় কি পৃথক খাবার ঘর/কক্ষ আছে?', type: 'pmt_option_select', options: PMT_DINING_OPTIONS },
+  { key: 'pmt_land', label: 'খানার সকল সদস্যের মালিকানাধীন মোট জমির পরিমাণ কত?', type: 'pmt_option_select', options: PMT_LAND_OPTIONS },
+  { key: 'pmt_occupation', label: 'খানার কোন সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?', type: 'pmt_option_select', options: PMT_OCCUPATION_OPTIONS },
+  { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'rooms_number' },
+  { key: 'pmt_lpg', label: 'খানায় রান্নার জ্বালানির প্রধান উপকরণ এলপিজি গ্যাস হলে প্রতিমাসে এলপিজি গ্যাস ব্যবহারের পরিমান', type: 'pmt_option_select', options: PMT_LPG_OPTIONS },
+  { key: 'pmt_diesel', label: 'কৃষি কাজে ডিজেল ব্যবহার হলে তার মাসিক আনুমানিক পরিমাণ', type: 'pmt_option_select', options: PMT_DIESEL_OPTIONS },
+  { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
@@ -343,6 +360,379 @@ const MFS_PROVIDER_OPTIONS = [
   { id: 683, label: 'এমক্যাশ (MCash)' },
   { id: 684, label: 'কোনো হিসাব নেই (No Account)' }
 ];
+// --- PMT leftover picks (v4.9.69) ---
+// The PMT questions Auto-Fill + presets leave behind, now picked on
+// the head card. Every option name is the site's own wording from
+// getApplicationPageData (pmt.json) — nothing is renamed or
+// paraphrased (user 2026-11-22, re Q22: the site asks "খানার কোন
+// সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?" with
+// "কৃষি খাতে শ্রম / অকৃষি খাতে শ্রম / শ্রমিক/দিনমজুর নেই"). The
+// combo labels are the user's own confirmed words for the three
+// materials together; the separate floor/wall/roof selects show the
+// site's full option names.
+// "Home made of" — one pick sets floor (Q536) + wall (Q30) + roof
+// (Q393) together. Order is most-common first (user-confirmed
+// 2026-11-22).
+const HOME_COMBOS = [
+  { floor: 539, wall: 341, roof: 396, label: 'মাটি মেঝে + সিমেন্ট দেয়াল + টিন ছাদ' },
+  { floor: 539, wall: 338, roof: 396, label: 'মাটি মেঝে + টিন দেয়াল + টিন ছাদ' },
+  { floor: 537, wall: 341, roof: 396, label: 'ঢালাই মেঝে + সিমেন্ট দেয়াল + টিন ছাদ' },
+  { floor: 539, wall: 340, roof: 396, label: 'মাটি মেঝে + মাটি দেয়াল + টিন ছাদ' },
+  { floor: 537, wall: 338, roof: 396, label: 'ঢালাই মেঝে + টিন দেয়াল + টিন ছাদ' },
+  { floor: 537, wall: 341, roof: 398, label: 'ঢালাই মেঝে + সিমেন্ট দেয়াল + সিমেন্ট ছাদ' },
+  { floor: 538, wall: 341, roof: 398, label: 'টাইলস মেঝে + সিমেন্ট দেয়াল + সিমেন্ট ছাদ' }
+];
+const HOME_COMBO_OTHER = 'other';
+const HOME_COMBO_STORAGE_KEY = 'fc_pro_home_combo';
+// Leftover PMT option lists — the site's exact option names.
+const PMT_KITCHEN_OPTIONS = [
+  { id: 297, label: 'হ্যা' },
+  { id: 298, label: 'না' }
+];
+const PMT_DINING_OPTIONS = [
+  { id: 291, label: 'হ্যা' },
+  { id: 292, label: 'না' }
+];
+const PMT_LAND_OPTIONS = [
+  { id: 405, label: '০.৫০ একর বা তার কম' },
+  { id: 406, label: '০.৫১-১.৫ একর পর্যন্ত' },
+  { id: 407, label: '১.৫ একর বা তার বেশি' },
+  { id: 408, label: 'কোন জমি নেই' }
+];
+const PMT_OCCUPATION_OPTIONS = [
+  { id: 402, label: 'কৃষি খাতে শ্রম' },
+  { id: 403, label: 'অকৃষি খাতে শ্রম' },
+  { id: 404, label: 'শ্রমিক/দিনমজুর নেই' }
+];
+const PMT_LPG_OPTIONS = [
+  { id: 590, label: '০ কেজি' },
+  { id: 580, label: '০৫ কেজি' },
+  { id: 581, label: '১০ কেজি' },
+  { id: 582, label: '১২ কেজি' },
+  { id: 583, label: '১৫ কেজি' },
+  { id: 584, label: '২০ কেজি' },
+  { id: 585, label: '২৫ কেজি' },
+  { id: 586, label: '৩০ কেজি' },
+  { id: 587, label: '৩৫ কেজি' },
+  { id: 588, label: '৪০ কেজি' },
+  { id: 589, label: '৫০ কেজি' }
+];
+const PMT_DIESEL_OPTIONS = [
+  { id: 596, label: '০ কেজি' },
+  { id: 597, label: '১-৫ কেজি' },
+  { id: 598, label: '৬-১০ কেজি' },
+  { id: 599, label: '১১-১৫ কেজি' },
+  { id: 600, label: '১৬-২০ কেজি' },
+  { id: 601, label: '২১-২৫ কেজি' },
+  { id: 602, label: '২৬-৩০ কেজি' }
+];
+const PMT_FLOOR_OPTIONS = [
+  { id: 537, label: 'ঢালাই (সিমেন্ট/কংক্রিট/ইট /পোড়ামাটি)' },
+  { id: 538, label: 'টাইলস/মোজাইক' },
+  { id: 539, label: 'মাটি' },
+  { id: 540, label: 'কাঠ' },
+  { id: 541, label: 'বাঁশ/চাটাই/তালগাছ/সুপারি গাছের গুড়ি' }
+];
+const PMT_WALL_OPTIONS = [
+  { id: 338, label: 'টিন/কাঠের' },
+  { id: 339, label: 'খড়/বাঁশ' },
+  { id: 340, label: 'মাটির' },
+  { id: 341, label: 'ইট/সিমেন্ট' },
+  { id: 603, label: 'মিশ্র ইট/টিন/বাঁশ/কাঠ/মাটি' }
+];
+const PMT_ROOF_OPTIONS = [
+  { id: 396, label: 'টিন/কাঠ' },
+  { id: 397, label: 'বাঁশ/খড়' },
+  { id: 398, label: 'ইট/সিমেন্ট' },
+  { id: 542, label: 'ট্যালী' }
+];
+// User-confirmed defaults for the leftover picks (2026-11-22):
+// kitchen Yes (a separate kitchen is common), dining No (a dining
+// room is uncommon), land 0.50 acre or less (most common), diesel
+// 0 kg, LPG 0 kg when the fuel is not LPG. Occupation and rooms
+// have no default — picked by hand.
+const PMT_PICK_DEFAULTS = { kitchen: 297, dining: 292, land: 405, diesel: 596, lpg: 590 };
+// PMT scores, non-zero options only (from getApplicationPageData).
+// The running total is the sum of the picked answers' scores:
+// -95 (poorest) to +237 (best-off). It is NOT the government's
+// 0–1000 score — that one is made on the server — so it is never
+// compared to the 777/814 bands.
+const PMT_SCORE_BY_OPTION = {
+  '530': { 531: 12, 532: 12, 533: 12, 535: 12 },
+  '1': { 443: -20, 444: -40, 445: -40, 446: -50, 521: -60, 522: -60, 523: -60, 524: -60, 525: -60 },
+  '7': { 330: -7, 331: -14, 332: -16, 333: -21, 526: -21, 527: -21, 528: -21 },
+  '12': { 440: 4 },
+  '14': { 383: 5, 384: 14 },
+  '18': { 411: 18 },
+  '36': { 297: -5 },
+  '33': { 291: 6 },
+  '393': { 398: 15 },
+  '41': { 386: 7 },
+  '25': { 405: 5, 406: 10, 407: 17 },
+  '29': { 275: 9 },
+  '22': { 402: -9, 403: -4 },
+  '47': { 422: 21, 424: 9, 425: 11, 430: 7, 435: 14, 436: 21, 429: 14, 529: 30, 437: 8 }
+};
+// Household size / children count -> PMT option id (Q1 / Q7).
+const PMT_COUNT_OPTION = {
+  '1': { 1: 442, 2: 443, 3: 444, 4: 445, 5: 446, 6: 521, 7: 522, 8: 523, 9: 524, 10: 525 },
+  '7': { 0: 329, 1: 330, 2: 331, 3: 332, 4: 333, 5: 526, 6: 527, 7: 528 }
+};
+// Education id -> [Q14 score, Q18 score]. Bands: illiterate and
+// Class 1–5 score 0; Class 6–12 scores 5 (head) / 0 (spouse);
+// above Class 13 scores 14 (head) / 18 (spouse).
+const PMT_EDU_SCORE = {
+  88: [0, 0], 188: [0, 0], 189: [0, 0], 190: [0, 0], 191: [0, 0], 199: [0, 0], 94: [0, 0],
+  192: [5, 0], 89: [5, 0], 193: [5, 0], 90: [5, 0], 91: [5, 0],
+  92: [14, 18], 93: [14, 18], 194: [14, 18], 195: [14, 18], 196: [14, 18], 197: [14, 18], 198: [14, 18]
+};
+// Sticky home combination: the last combo the user picked, kept in
+// localStorage as the next family's default (same village, same
+// house type). A storage object can be passed in (tests); otherwise
+// the panel's localStorage is used when it exists.
+function stickyHomeCombo(storage) {
+  try {
+    const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
+    if (!store) return null;
+    const raw = store.getItem(HOME_COMBO_STORAGE_KEY);
+    if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+    const v = Number(raw);
+    return Number.isInteger(v) && v >= 0 && v < HOME_COMBOS.length ? v : null;
+  } catch (_) { return null; }
+}
+function saveStickyHomeCombo(index, storage) {
+  try {
+    const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
+    if (!store) return;
+    if (index === null || index === undefined || index === HOME_COMBO_OTHER) store.removeItem(HOME_COMBO_STORAGE_KEY);
+    else store.setItem(HOME_COMBO_STORAGE_KEY, String(index));
+  } catch (_) {}
+}
+// Which combo (0–6) matches these floor/wall/roof ids, or -1.
+function homeComboIndexForParts(floor, wall, roof) {
+  const f = Number(floor), w = Number(wall), r = Number(roof);
+  if (!f || !w || !r) return -1;
+  return HOME_COMBOS.findIndex((c) => c.floor === f && c.wall === w && c.roof === r);
+}
+// First pulled answer id for a PMT question, or undefined. Pulled
+// answers look like { variable_id, question, answers: [{id, name}] }.
+function pmtPulledAnswerId(pmtAnswers, qid) {
+  if (!Array.isArray(pmtAnswers)) return undefined;
+  const pa = pmtAnswers.find((e) => e && Number(e.variable_id) === Number(qid));
+  if (!pa || !Array.isArray(pa.answers) || !pa.answers.length) return undefined;
+  const id = Number(pa.answers[0] && pa.answers[0].id);
+  return Number.isFinite(id) ? id : undefined;
+}
+// Effective PMT picks for the head: raw (extract/pull) wins, then
+// the same person's previous record, then the pulled draft's
+// answers, then the user defaults (kitchen Yes, dining No, land
+// 0.5 acre, diesel 0, LPG 0 unless the fuel is LPG). The combo:
+// explicit pick, then a pulled floor/wall/roof that matches a combo,
+// then "other" when the pulled parts match no combo, then the
+// sticky combo. fuelId is the effective cooking fuel option id
+// (550 wood unless overridden or pulled as LPG 556).
+function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId) {
+  const raw = rawHead || {};
+  const prev = prevHead || {};
+  const pulled = Array.isArray(raw.pmt_answers) && raw.pmt_answers.length ? raw.pmt_answers : (Array.isArray(prev.pmt_answers) ? prev.pmt_answers : []);
+  const num = (v) => (v === undefined || v === null || String(v).trim() === '' ? undefined : Number(v));
+  const pick = (key, qid, defVal) => {
+    const v = num(raw[key]) ?? num(prev[key]) ?? pmtPulledAnswerId(pulled, qid) ?? defVal;
+    return v === undefined ? undefined : Number(v);
+  };
+  const out = {
+    pmt_kitchen: pick('pmt_kitchen', 36, PMT_PICK_DEFAULTS.kitchen),
+    pmt_dining: pick('pmt_dining', 33, PMT_PICK_DEFAULTS.dining),
+    pmt_land: pick('pmt_land', 25, PMT_PICK_DEFAULTS.land),
+    pmt_occupation: pick('pmt_occupation', 22, undefined),
+    pmt_lpg: pick('pmt_lpg', 579, Number(fuelId) === 556 ? undefined : PMT_PICK_DEFAULTS.lpg),
+    pmt_diesel: pick('pmt_diesel', 595, PMT_PICK_DEFAULTS.diesel)
+  };
+  // Combo + the three material picks.
+  const rawCombo = raw.home_combo ?? prev.home_combo;
+  const pulledFloor = pmtPulledAnswerId(pulled, 536);
+  const pulledWall = pmtPulledAnswerId(pulled, 30);
+  const pulledRoof = pmtPulledAnswerId(pulled, 393);
+  let combo = (rawCombo === undefined || rawCombo === null || String(rawCombo).trim() === '') ? undefined : rawCombo;
+  if (combo === undefined) {
+    const match = homeComboIndexForParts(pulledFloor, pulledWall, pulledRoof);
+    if (match >= 0) combo = match;
+    else if (pulledFloor || pulledWall || pulledRoof) combo = HOME_COMBO_OTHER;
+    else if (stickyCombo !== null && stickyCombo !== undefined) combo = stickyCombo;
+  }
+  out.home_combo = combo;
+  if (combo !== undefined && combo !== HOME_COMBO_OTHER && combo !== '' && HOME_COMBOS[Number(combo)]) {
+    const c = HOME_COMBOS[Number(combo)];
+    out.pmt_floor = c.floor; out.pmt_wall = c.wall; out.pmt_roof = c.roof;
+  } else {
+    out.pmt_floor = num(raw.pmt_floor) ?? num(prev.pmt_floor) ?? pulledFloor;
+    out.pmt_wall = num(raw.pmt_wall) ?? num(prev.pmt_wall) ?? pulledWall;
+    out.pmt_roof = num(raw.pmt_roof) ?? num(prev.pmt_roof) ?? pulledRoof;
+  }
+  return out;
+}
+// form_defaults.pmt entries for the head's picks (the injector's
+// override path). Only set entries have a value; rooms send the
+// option id (501–520), not the count.
+function pmtOverridesFromHead(head) {
+  const h = head || {};
+  const out = {};
+  const set = (qid, v) => { if (v !== undefined && v !== null && String(v).trim() !== '') out[String(qid)] = Number(v); };
+  set(36, h.pmt_kitchen);
+  set(33, h.pmt_dining);
+  set(25, h.pmt_land);
+  set(22, h.pmt_occupation);
+  set(500, h.no_of_room);
+  set(579, h.pmt_lpg);
+  set(595, h.pmt_diesel);
+  set(536, h.pmt_floor);
+  set(30, h.pmt_wall);
+  set(393, h.pmt_roof);
+  return out;
+}
+// Warning text for the home combo: the draft's own floor/wall/roof
+// when they differ from the picked combo. Auto-Fill never
+// overwrites a filled answer, so the draft's values stay — the
+// warning keeps the user from expecting the pick to replace them.
+function homeComboWarningText(head) {
+  const h = head || {};
+  const pulled = Array.isArray(h.pmt_answers) ? h.pmt_answers : [];
+  const f = pmtPulledAnswerId(pulled, 536);
+  const w = pmtPulledAnswerId(pulled, 30);
+  const r = pmtPulledAnswerId(pulled, 393);
+  if (!f && !w && !r) return '';
+  const combo = h.home_combo;
+  let ef, ew, er;
+  if (combo !== undefined && combo !== null && combo !== '' && combo !== HOME_COMBO_OTHER && HOME_COMBOS[Number(combo)]) {
+    const c = HOME_COMBOS[Number(combo)];
+    ef = c.floor; ew = c.wall; er = c.roof;
+  } else {
+    ef = h.pmt_floor; ew = h.pmt_wall; er = h.pmt_roof;
+  }
+  if (Number(ef) === Number(f) && Number(ew) === Number(w) && Number(er) === Number(r)) return '';
+  const nameOf = (list, id) => { const o = (list || []).find((x) => Number(x.id) === Number(id)); return o ? o.label : (id ? String(id) : '—'); };
+  return `Draft-এ আছে: মেঝে ${nameOf(PMT_FLOOR_OPTIONS, f)}, দেয়াল ${nameOf(PMT_WALL_OPTIONS, w)}, ছাদ ${nameOf(PMT_ROOF_OPTIONS, r)} — Auto-Fill এগুলো বদলাবে না।`;
+}
+// DOB (DD-MM-YYYY or YYYY-MM-DD) -> whole years of age, or null.
+// A small local parse so this block stays self-contained for tests.
+function pmtAgeYears(dob) {
+  if (!dob) return null;
+  const s = String(dob).trim();
+  let y, m, d;
+  let mm = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (mm) { d = Number(mm[1]); m = Number(mm[2]); y = Number(mm[3]); }
+  else {
+    mm = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if (!mm) return null;
+    y = Number(mm[1]); m = Number(mm[2]); d = Number(mm[3]);
+  }
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--;
+  return age >= 0 ? age : null;
+}
+// Running PMT score total for the record: the sum of the picked
+// answers' scores (derived + presets + leftover picks), range -95
+// to +237. Precedence per question: form_defaults.pmt override,
+// then the head pick, then the pulled draft's answer, then the
+// derivation / user preset. Questions whose options all score 0
+// (floor, wall, water, fuel, LPG amount, diesel, rooms, ownership,
+// electricity, ethnic) contribute nothing and are skipped.
+function computePmtScoreTotal(data) {
+  const head = (data && data.head) || {};
+  const defs = (data && data.form_defaults) || {};
+  const ov = (defs.pmt && typeof defs.pmt === 'object') ? defs.pmt : {};
+  const pulled = Array.isArray(head.pmt_answers) ? head.pmt_answers : [];
+  const scoreOf = (qid, id) => {
+    const m = PMT_SCORE_BY_OPTION[String(qid)];
+    return (m && m[Number(id)]) || 0;
+  };
+  const overrideIds = (qid) => {
+    const o = ov[qid] ?? ov[String(qid)];
+    if (o === undefined || o === null || o === false) return undefined;
+    return Array.isArray(o) ? o : [o];
+  };
+  const pickId = (qid, headKey, defVal) => {
+    const o = overrideIds(qid);
+    if (o && o.length) return o[0];
+    const h = head[headKey];
+    if (h !== undefined && h !== null && String(h).trim() !== '') return Number(h);
+    const p = pmtPulledAnswerId(pulled, qid);
+    if (p !== undefined) return p;
+    return defVal;
+  };
+  let total = 0;
+  // Location (override, else area type 2/3 = town, 12; else Union/Rural, 0).
+  const locOv = overrideIds(530);
+  if (locOv && locOv.length) total += scoreOf(530, locOv[0]);
+  else total += (Number(defs.area_type_id) === 2 || Number(defs.area_type_id) === 3) ? 12 : 0;
+  // Household size + children (count -> option id, clamped to the list).
+  const size = Number(defs.total_members);
+  if (Number.isFinite(size) && size > 0) {
+    const o = overrideIds(1);
+    total += o && o.length ? scoreOf(1, o[0]) : scoreOf(1, PMT_COUNT_OPTION['1'][Math.min(10, Math.max(1, size))] ?? 442);
+  }
+  const kids = Number(defs.children_under_18);
+  if (Number.isFinite(kids) && kids >= 0) {
+    const o = overrideIds(7);
+    total += o && o.length ? scoreOf(7, o[0]) : scoreOf(7, PMT_COUNT_OPTION['7'][Math.min(7, Math.max(0, kids))] ?? 329);
+  }
+  // Head age band (override, else from the DOB).
+  const ageOv = overrideIds(12);
+  if (ageOv && ageOv.length) total += scoreOf(12, ageOv[0]);
+  else {
+    const age = pmtAgeYears(head.dob);
+    if (age !== null) total += scoreOf(12, age < 41 ? 439 : (age < 60 ? 440 : 441));
+  }
+  // Head + spouse education bands (override, else from the education ids).
+  const edu14Ov = overrideIds(14);
+  if (edu14Ov && edu14Ov.length) total += scoreOf(14, edu14Ov[0]);
+  else {
+    const headEdu = Number(head.education_status_id);
+    if (Number.isFinite(headEdu) && PMT_EDU_SCORE[headEdu]) total += PMT_EDU_SCORE[headEdu][0];
+  }
+  const edu18Ov = overrideIds(18);
+  if (edu18Ov && edu18Ov.length) total += scoreOf(18, edu18Ov[0]);
+  else {
+    const members = Array.isArray(data.family_members) ? data.family_members : [];
+    const spouse = members.find((m) => m && (m.relation === 'Husband' || m.relation === 'Wife'));
+    if (spouse) {
+      const spEdu = Number(spouse.education_status_id);
+      if (Number.isFinite(spEdu) && PMT_EDU_SCORE[spEdu]) total += PMT_EDU_SCORE[spEdu][1];
+    }
+  }
+  // Remittance (override only — the panel never picks Yes; No scores 0).
+  const rem = overrideIds(29);
+  if (rem && rem.length) total += scoreOf(29, rem[0]);
+  // Latrine (preset sanitary +7 unless overridden) + assets (preset
+  // fan/bed/mobile/tubewell = +14 from the mobile, unless overridden).
+  total += scoreOf(41, pickId(41, undefined, 386));
+  const assets = overrideIds(47);
+  const assetIds = (assets && assets.length ? assets : [559, 563, 435, 591]);
+  assetIds.forEach((id) => { total += scoreOf(47, id); });
+  // Leftover picks.
+  total += scoreOf(36, pickId(36, 'pmt_kitchen', PMT_PICK_DEFAULTS.kitchen));
+  total += scoreOf(33, pickId(33, 'pmt_dining', PMT_PICK_DEFAULTS.dining));
+  total += scoreOf(25, pickId(25, 'pmt_land', PMT_PICK_DEFAULTS.land));
+  total += scoreOf(22, pickId(22, 'pmt_occupation', undefined));
+  total += scoreOf(393, pickId(393, 'pmt_roof', undefined));
+  return total;
+}
+// PMT score line: the head card's running total — the sum of the
+// picked answers' scores. Lower = poorer = more eligible. It is the
+// raw total only (-95 to +237), never the government's 0–1000 score,
+// so it is never compared to the 777/814 bands. Read-only; it
+// refreshes from recalculateHouseholdSummary whenever anything changes.
+function pmtScoreLineText() {
+  const data = state.lastExtracted;
+  if (!data) return '—';
+  return `${computePmtScoreTotal(data)} (কম = বেশি গরিব)`;
+}
+function updatePmtScoreLine() {
+  const el = document.querySelector('[data-field="pmt_score_total"]');
+  if (el) el.textContent = pmtScoreLineText();
+}
+// --- end PMT leftover picks ---
 // Health conditions (lookup type 43, v4.9.49): কর্মক্ষম (Able-bodied,
 // 203) is the default — the form's health field — the other options
 // are picked from the same dropdown.
@@ -2154,6 +2544,12 @@ function recalculateHouseholdSummary(data) {
   const prevProgFields = (prevDefaults.program_fields && typeof prevDefaults.program_fields === 'object') ? { ...prevDefaults.program_fields } : {};
   const headMfs = Number(data.head && data.head.mfs_provider_id) || 0;
   if (headMfs) prevProgFields['138'] = headMfs; else delete prevProgFields['138'];
+  // PMT leftover picks (v4.9.69): the head card's picks flow into
+  // form_defaults.pmt — the injector's existing override path.
+  // Preserved pmt entries (e.g. an imported Q47 override) stay; the
+  // head's picks win for the leftover questions.
+  const prevPmt = (prevDefaults.pmt && typeof prevDefaults.pmt === 'object') ? { ...prevDefaults.pmt } : {};
+  Object.assign(prevPmt, pmtOverridesFromHead(data.head || {}));
   data.form_defaults = {
     total_members: effTotal,
     male_count: effMale,
@@ -2173,7 +2569,7 @@ function recalculateHouseholdSummary(data) {
     area_type_label: AREA_TYPE_OPTIONS.find(a => a.value === Number(areaPresets.area_type_id || 1))?.label || 'পল্লী / ইউনিয়ন (Polli / Union)',
     ...(Object.keys(prevOverrides).length ? { count_overrides: prevOverrides } : {}),
     ...(prevDefaults.head_options ? { head_options: prevDefaults.head_options } : {}),
-    ...(prevDefaults.pmt ? { pmt: prevDefaults.pmt } : {}),
+    ...(Object.keys(prevPmt).length ? { pmt: prevPmt } : {}),
     ...(Object.keys(prevProgFields).length ? { program_fields: prevProgFields } : {}),
     ...(prevDefaults.member_options ? { member_options: prevDefaults.member_options } : {})
   };
@@ -2194,6 +2590,8 @@ function recalculateHouseholdSummary(data) {
     bdEl.innerHTML = bdHtml;
     bdEl.style.display = bdHtml ? '' : 'none';
   }
+  // PMT score line (v4.9.69): refresh the head card's running total.
+  updatePmtScoreLine();
 }
 
 function syncJsonOutput() {
@@ -2792,6 +3190,132 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       syncJsonOutput();
       notifyChange('mfs_provider_id', v === '' ? null : Number(v));
     });
+  } else if (f.type === 'home_combo_select') {
+    // "Home made of" (v4.9.69): one pick sets floor + wall + roof.
+    // The combo's three picks ride on the head (pmt_floor/wall/roof)
+    // and reach the form via form_defaults.pmt. "Other" reveals the
+    // separate floor/wall/roof selects instead. A combo pick is also
+    // saved as the next family's default (sticky).
+    const sel = document.createElement('select');
+    sel.setAttribute('data-field', 'home_combo');
+    sel.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    sel.appendChild(blank);
+    HOME_COMBOS.forEach((c, i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = c.label;
+      sel.appendChild(o);
+    });
+    const otherOpt = document.createElement('option');
+    otherOpt.value = HOME_COMBO_OTHER;
+    otherOpt.textContent = 'অন্যরকম (আলাদা করে বাছুন)';
+    sel.appendChild(otherOpt);
+    sel.value = targetObj.home_combo !== undefined && targetObj.home_combo !== null && String(targetObj.home_combo).trim() !== '' ? String(targetObj.home_combo) : '';
+    // Pulled-value warning: the draft's own floor/wall/roof, shown
+    // when they differ from the picked combo — Auto-Fill never
+    // overwrites a filled answer, so the draft's values stay.
+    const warnEl = document.createElement('div');
+    warnEl.setAttribute('data-pmt-warning', '1');
+    warnEl.style.cssText = 'font-size:11px; color:var(--warning, #d97706); margin-top:4px;';
+    const refreshWarning = () => {
+      warnEl.textContent = homeComboWarningText(targetObj);
+      warnEl.style.display = warnEl.textContent ? '' : 'none';
+    };
+    refreshWarning();
+    sel.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (v === '') { targetObj.home_combo = undefined; }
+      else if (v === HOME_COMBO_OTHER) { targetObj.home_combo = HOME_COMBO_OTHER; saveStickyHomeCombo(null); }
+      else {
+        const idx = Number(v);
+        targetObj.home_combo = idx;
+        const c = HOME_COMBOS[idx];
+        targetObj.pmt_floor = c.floor; targetObj.pmt_wall = c.wall; targetObj.pmt_roof = c.roof;
+        saveStickyHomeCombo(idx);
+      }
+      // Show/hide the separate floor/wall/roof rows + refresh their values.
+      if (cardContainer) {
+        const showFallback = v === HOME_COMBO_OTHER;
+        ['pmt_floor', 'pmt_wall', 'pmt_roof'].forEach((k) => {
+          const s = cardContainer.querySelector(`select[data-field="${k}"]`);
+          const row = s ? s.closest('.record-row') : null;
+          if (row) row.style.display = showFallback ? '' : 'none';
+          if (s && showFallback) { s.value = targetObj[k] !== undefined && targetObj[k] !== null ? String(targetObj[k]) : ''; toggleWarning(s); }
+        });
+      }
+      refreshWarning();
+      toggleWarning(sel);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('home_combo', v === '' ? null : v);
+    });
+    // The control is the select; the warning rides under it.
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:100%; min-width:0;';
+    wrap.append(sel, warnEl);
+    inputEl = wrap;
+  } else if (f.type === 'pmt_option_select') {
+    // PMT leftover pick (v4.9.69): a site-exact option list from
+    // f.options. Blank = no pick (the injector then uses its default
+    // or the pulled answer); a pick fills the question via
+    // form_defaults.pmt (wired in recalculateHouseholdSummary).
+    inputEl = document.createElement('select');
+    inputEl.setAttribute('data-field', f.key);
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; cursor:pointer; width:100%;';
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    inputEl.appendChild(blank);
+    (f.options || []).forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = String(opt.id);
+      o.textContent = `${opt.id} — ${opt.label}`;
+      inputEl.appendChild(o);
+    });
+    inputEl.value = targetObj[f.key] !== undefined && targetObj[f.key] !== null && String(targetObj[f.key]).trim() !== '' ? String(targetObj[f.key]) : '';
+    inputEl.addEventListener('change', (e) => {
+      const v = e.target.value;
+      targetObj[f.key] = v === '' ? undefined : Number(v);
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange(f.key, v === '' ? null : Number(v));
+    });
+  } else if (f.type === 'rooms_number') {
+    // Rooms (Q500, v4.9.69): a number 1–20. The record stores the
+    // option id (501–520) in no_of_room, like the pull does.
+    inputEl = document.createElement('input');
+    inputEl.type = 'number';
+    inputEl.min = '1'; inputEl.max = '20';
+    inputEl.setAttribute('data-field', 'no_of_room');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid var(--border); background:var(--surface-muted); color:var(--text-main); border-radius:5px; width:100%;';
+    const cur = Number(targetObj.no_of_room);
+    inputEl.value = Number.isFinite(cur) && cur >= 501 && cur <= 520 ? String(cur - 500) : '';
+    inputEl.addEventListener('change', (e) => {
+      const n = Math.round(Number(e.target.value));
+      if (Number.isFinite(n) && n >= 1 && n <= 20) {
+        targetObj.no_of_room = 500 + n;
+        targetObj.no_of_room_name = String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+        e.target.value = String(n);
+      } else {
+        targetObj.no_of_room = undefined;
+        targetObj.no_of_room_name = undefined;
+        e.target.value = '';
+      }
+      toggleWarning(inputEl);
+      if (onUpdateMeta) onUpdateMeta();
+      syncJsonOutput();
+      notifyChange('no_of_room', targetObj.no_of_room ?? null);
+    });
+  } else if (f.type === 'pmt_score') {
+    // PMT score total (v4.9.69): the running sum of the picked
+    // answers' scores. Read-only — it refreshes from
+    // recalculateHouseholdSummary whenever anything changes.
+    inputEl = document.createElement('div');
+    inputEl.setAttribute('data-field', 'pmt_score_total');
+    inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:600; color:var(--text-main);';
+    inputEl.textContent = pmtScoreLineText();
   } else if (f.type === 'health_select') {
     // Health (type 43, v4.9.49, v4.9.51). Default কর্মক্ষম (203) when the
     // member is not disabled and nothing was picked — the form's own
@@ -5525,6 +6049,15 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   else if (headPrev && Array.isArray(headPrev.program_fields) && headPrev.program_fields.length) head.program_fields = headPrev.program_fields;
   if (preserveOrder && Array.isArray(h.pmt_answers) && h.pmt_answers.length) head.pmt_answers = h.pmt_answers;
   else if (headPrev && Array.isArray(headPrev.pmt_answers) && headPrev.pmt_answers.length) head.pmt_answers = headPrev.pmt_answers;
+  // PMT leftover picks (v4.9.69): the head card's picks — raw (pull /
+  // import) wins, then the same person's previous record, then the
+  // pulled draft's answers, then the user defaults. The fuel (for the
+  // LPG default) is the imported override, else the pulled fuel, else
+  // wood 550.
+  const fuelIdForPicks = (raw?.form_defaults && raw.form_defaults.pmt && raw.form_defaults.pmt['548'] !== undefined && raw.form_defaults.pmt['548'] !== null)
+    ? Number(raw.form_defaults.pmt['548'])
+    : (pmtPulledAnswerId(head.pmt_answers, 548) ?? 550);
+  Object.assign(head, resolveHeadPmtPicks(h, headPrev, stickyHomeCombo(), fuelIdForPicks));
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -5782,6 +6315,20 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
 // bracketed month and copies the clean 15/01/1990, the format the site
 // reads first. An ISO value (1990-01-15) is reordered, not just slashed.
 function copyValueForField(f, targetObj) {
+  // PMT leftover picks (v4.9.69): the score copies as its number;
+  // the combo copies as its label (or its three parts for "other").
+  if (f.key === 'pmt_score_total') {
+    return state.lastExtracted ? String(computePmtScoreTotal(state.lastExtracted)) : '';
+  }
+  if (f.key === 'home_combo') {
+    const c = targetObj.home_combo;
+    if (c !== undefined && c !== null && c !== '' && c !== HOME_COMBO_OTHER && HOME_COMBOS[Number(c)]) return HOME_COMBOS[Number(c)].label;
+    if (c === HOME_COMBO_OTHER) {
+      const nameOf = (list, id) => { const o = (list || []).find((x) => Number(x.id) === Number(id)); return o ? o.label : (id ? String(id) : '—'); };
+      return `মেঝে ${nameOf(PMT_FLOOR_OPTIONS, targetObj.pmt_floor)}, দেয়াল ${nameOf(PMT_WALL_OPTIONS, targetObj.pmt_wall)}, ছাদ ${nameOf(PMT_ROOF_OPTIONS, targetObj.pmt_roof)}`;
+    }
+    return '';
+  }
   // Benefit fields (v4.9.36): cards copy as "162, 163"; Yes/No as words.
   if (f.key === 'facilities_ids') {
     const ids = Array.isArray(targetObj.facilities_ids) ? targetObj.facilities_ids : [];
@@ -6146,6 +6693,11 @@ function makeMemberHead(memberIdx) {
 // name by hand and adds members with Add Member; no photos or AI
 // extract needed.
 function blankFormData() {
+  // PMT leftover picks (v4.9.69): the user defaults — kitchen Yes,
+  // dining No, land 0.5 acre, diesel 0, LPG 0 (fuel is wood); the
+  // home combo is the sticky pick, if any, with its three parts.
+  const sticky = stickyHomeCombo();
+  const comboParts = (sticky !== null && HOME_COMBOS[sticky]) ? HOME_COMBOS[sticky] : null;
   return {
     head: {
       gender: 'Female', gender_id: 2,
@@ -6160,7 +6712,12 @@ function blankFormData() {
       profession: 181, marital_status: 101,
       is_disabled: 0, health_condition_id: 203,
       is_ssnp_covered: 0, facilities_ids: [],
-      is_dss_training_or_financial_benefit: 0
+      is_dss_training_or_financial_benefit: 0,
+      pmt_kitchen: 297, pmt_dining: 292, pmt_land: 405, pmt_diesel: 596, pmt_lpg: 590,
+      home_combo: sticky === null ? undefined : sticky,
+      pmt_floor: comboParts ? comboParts.floor : undefined,
+      pmt_wall: comboParts ? comboParts.wall : undefined,
+      pmt_roof: comboParts ? comboParts.roof : undefined
     },
     family_members: []
   };
@@ -6477,6 +7034,12 @@ function renderExtractedCards(data) {
       }
       // Disability (v4.9.49): the type row only shows when Disabled is Yes.
       if (f.key === 'disability_type_id' && targetObj.is_disabled !== 1 && targetObj.is_disabled !== '1') {
+        r.style.display = 'none';
+      }
+      // PMT fallback (v4.9.69): the separate floor/wall/roof rows only
+      // show when the home combination is "other" — a combo pick sets
+      // all three, so the separate rows would just repeat it.
+      if ((f.key === 'pmt_floor' || f.key === 'pmt_wall' || f.key === 'pmt_roof') && targetObj.home_combo !== HOME_COMBO_OTHER) {
         r.style.display = 'none';
       }
     });

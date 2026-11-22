@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v47';
+  const FC_INJECT_VERSION = 'v49';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -2090,7 +2090,10 @@
    * Everything else (house materials, water, fuel, land, rooms,
    * assets, MFS provider, ...) is FACTUAL household data the
    * bookmarklet does not have — it is left for manual selection
-   * unless preset via overrides:
+   * unless preset via overrides, or covered by a user default
+   * (kitchen Yes 297, dining No 292, land 0.5 acre 405, diesel
+   * 0 kg 596, LPG 0 kg 590 when the fuel is not LPG — all
+   * overridable via form_defaults.pmt):
    *   form_defaults.pmt = { '571': 572, '47': [435, 559] }
    *   form_defaults.program_fields = { '138': 679 }
    * Numeric ids win; strings match option labels; null/false skips.
@@ -2374,6 +2377,14 @@
     derivedPmt.set(40, 399); // drinking water source: টিউবওয়েল (tubewell) — user default; override via form_defaults.pmt
     derivedPmt.set(567, 568); // electricity source: জাতীয় গ্রিড (national grid) — user default; override via form_defaults.pmt
     derivedPmt.set(41, 386); // latrine type: স্যানিটারি/উন্নত ল্যাট্রিন (sanitary) — user default; override via form_defaults.pmt
+    derivedPmt.set(36, 297); // separate kitchen: হ্যা (Yes) — common (user default); override via form_defaults.pmt
+    derivedPmt.set(33, 292); // separate dining room: না (No) — uncommon (user default); override via form_defaults.pmt
+    derivedPmt.set(25, 405); // land: ০.৫০ একর বা তার কম (0.5 acre or less) — most common (user default); override via form_defaults.pmt
+    derivedPmt.set(595, 596); // diesel use: ০ কেজি (0 kg) — most common (user default); override via form_defaults.pmt
+    // LPG amount: ০ কেজি (0 kg) when the cooking fuel is not LPG (the
+    // fuel preset is wood 550; an LPG fuel override 556 leaves the
+    // amount for a manual pick).
+    if (Number(pmtOverrides[548] ?? 550) !== 556) derivedPmt.set(579, 590);
 
     const derivedProg = new Map();
     derivedProg.set(75, { number: counts.maleCount });
@@ -3065,6 +3076,14 @@
     // on a member row — the only mobile on the form is data.mobile on
     // the head form. v4.9.50.)
     if (n(row.is_member_disabled ?? 0) !== (Number(m.is_disabled) === 1 ? 1 : 0)) return false;
+    // Income (v48): a row with an empty income does not fully hold the
+    // member — the site validates the field as required on one form
+    // variant, so an empty income glows red and blocks the form.
+    // Returning false here lets the row loop re-drive the row and the
+    // income 0 land, instead of the refill skipping it forever. (The
+    // income writes are empty-only, so a hand-typed income is never
+    // overwritten.)
+    if (isEmptyModelVal(row.estimate_annual_income)) return false;
     return true;
   }
 
@@ -3621,6 +3640,14 @@
             setReactive(vmMembers, row, 'estimate_annual_income', 0);
           } else if (relName === 'Husband' && !row.estimate_annual_income) {
             setReactive(vmMembers, row, 'estimate_annual_income', 60000);
+          } else if (isEmptyModelVal(row.estimate_annual_income)) {
+            // (v48) Every other adult with no known income gets 0,
+            // not empty. The site's own blank row defaults to 0
+            // (createEmptyFamilyMember) and one form variant validates
+            // the field as required|numeric|positiveNumber, so an
+            // empty income glows red and blocks the form. 0 passes
+            // (Number >= 0); income is never summed or scored.
+            setReactive(vmMembers, row, 'estimate_annual_income', 0);
           }
 
           const dobOffset = row0IsHead ? idx : idx + 1;
