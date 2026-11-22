@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.73-live';
+const CURRENT_VERSION_TAG = 'v4.9.74-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -139,6 +139,18 @@ const PROFESSION_INCOME = {
 function incomeForProfession(professionId) {
   const v = PROFESSION_INCOME[Number(professionId)];
   return v === undefined ? 0 : v;
+}
+// The income a member would show from a profession alone (v4.9.74):
+// student-age (4–24) is always 0; no profession on file falls back
+// to the old Husband 60000 / others 0 rule. A real income is never
+// derived here — normalizeOutput's real-value branches win first,
+// and the card's profession handler only overwrites an income that
+// still equals the old guess (or is blank/0).
+function incomeGuessForMember(entry, profId) {
+  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
+  if (isStudentAge) return 0;
+  if (profId !== undefined && profId !== null && String(profId).trim() !== '') return incomeForProfession(profId);
+  return entry && entry.relation === 'Husband' ? 60000 : 0;
 }
 // --- end profession income table ---
 
@@ -3524,7 +3536,25 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.value = targetObj.livelihood_profession_id !== undefined && targetObj.livelihood_profession_id !== null && String(targetObj.livelihood_profession_id).trim() !== '' ? String(targetObj.livelihood_profession_id) : '';
     inputEl.addEventListener('change', (e) => {
       const v = e.target.value;
+      // (v4.9.74) A profession pick re-derives the income live: the
+      // income was only ever a guess from the OLD profession (or the
+      // no-profession fallback), and nothing recomputed it — picking
+      // a profession left it at 0 until the next Extract/Import/Pull
+      // re-ran normalizeOutput (user 2026-11-22: "I selected the
+      // profession but in panel it stays 0"). A hand-typed income
+      // never moves: it only changes while it is still a guess —
+      // blank, 0, or equal to the old guess.
+      const oldProf = targetObj.livelihood_profession_id;
+      const oldGuess = incomeGuessForMember(targetObj, oldProf);
+      const curIncome = targetObj.estimate_annual_income;
       targetObj.livelihood_profession_id = v === '' ? undefined : Number(v);
+      if (curIncome === undefined || curIncome === null || String(curIncome).trim() === '' || Number(curIncome) === 0 || Number(curIncome) === oldGuess) {
+        targetObj.estimate_annual_income = incomeGuessForMember(targetObj, targetObj.livelihood_profession_id);
+        if (cardContainer) {
+          const incIn = cardContainer.querySelector('input[data-field="estimate_annual_income"]');
+          if (incIn) { incIn.value = displayTextValue(targetObj.estimate_annual_income); toggleWarning(incIn); }
+        }
+      }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
@@ -6402,11 +6432,7 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '') {
       entry.estimate_annual_income = Number(prevM2.estimate_annual_income);
     } else {
-      const isStudentAge = entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
-      const profId = entry.livelihood_profession_id !== undefined && entry.livelihood_profession_id !== null && String(entry.livelihood_profession_id).trim() !== ''
-        ? Number(entry.livelihood_profession_id) : undefined;
-      entry.estimate_annual_income = isStudentAge ? 0
-        : (profId !== undefined ? incomeForProfession(profId) : (rel === 'Husband' ? 60000 : 0));
+      entry.estimate_annual_income = incomeGuessForMember(entry, entry.livelihood_profession_id);
     }
     if (m?.is_gov_job_holder === 0 || m?.is_gov_job_holder === 1 || m?.is_gov_job_holder === '0' || m?.is_gov_job_holder === '1') {
       entry.is_gov_job_holder = Number(m.is_gov_job_holder);
