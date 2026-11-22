@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.70-live';
+const CURRENT_VERSION_TAG = 'v4.9.71-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -4632,10 +4632,14 @@ async function capturePanelPhoto() {
   showBurstPicker();
 }
 
-// The burst picker: thumbnails of the shots, tap one to select it,
-// "Use this shot" sends it to the crop editor, "Retake" shoots
-// another burst. Built in JS (no sidepanel.html change).
+// The burst picker: thumbnails of the shots — tap one and it opens big
+// in the burst preview (v4.9.71) so framing and glare can actually be
+// judged, which the 72px thumbnails never allowed. "Use this shot"
+// sends it to the crop editor, "Retake" shoots another burst. Built
+// in JS (no sidepanel.html change).
 function showBurstPicker() {
+  const pv = $('burstPreview');
+  if (pv) pv.style.display = 'none';
   let picker = $('burstPicker');
   if (!picker) {
     picker = document.createElement('div');
@@ -4649,7 +4653,7 @@ function showBurstPicker() {
   const sharpest = sharpestShotIndex(burstShots);
   picker.innerHTML = '';
   const label = document.createElement('div');
-  label.textContent = 'Pick a shot — ★ is the sharpest:';
+  label.textContent = 'Tap a shot to see it big — ★ is the sharpest:';
   label.style.cssText = 'font-size:13px; font-weight:700; margin-bottom:8px;';
   picker.appendChild(label);
   const row = document.createElement('div');
@@ -4668,7 +4672,11 @@ function showBurstPicker() {
       star.style.cssText = 'position:absolute; left:2px; top:2px; background:rgba(22,163,74,.92); color:#fff; font-size:10px; font-weight:700; padding:2px 5px; border-radius:999px;';
       wrap.appendChild(star);
     }
-    wrap.addEventListener('click', () => { burstSelected = i; showBurstPicker(); });
+    const zoom = document.createElement('span');
+    zoom.textContent = '🔍';
+    zoom.style.cssText = 'position:absolute; right:2px; bottom:2px; background:rgba(15,23,42,.75); color:#fff; font-size:10px; padding:2px 5px; border-radius:999px;';
+    wrap.appendChild(zoom);
+    wrap.addEventListener('click', () => { burstSelected = i; showBurstPreview(i); });
     row.appendChild(wrap);
   });
   picker.appendChild(row);
@@ -4699,9 +4707,64 @@ function showBurstPicker() {
 function hideBurstPicker() {
   const picker = $('burstPicker');
   if (picker) picker.style.display = 'none';
+  const pv = $('burstPreview');
+  if (pv) pv.style.display = 'none';
   const capBtn = $('capturePhotoBtn');
   if (capBtn) { capBtn.style.display = ''; capBtn.disabled = false; capBtn.style.opacity = ''; }
   setCameraHint(frameHintText(), '');
+}
+
+// The burst preview (v4.9.71): tap a thumbnail and the shot opens big
+// enough to judge — framing, glare, whether it is the right page —
+// which the 72px thumbnails never allowed. "Use this shot" sends the
+// previewed shot to the crop editor; "← All shots" goes back to the
+// thumbnails with this shot selected. Built in JS (no sidepanel.html change).
+function showBurstPreview(i) {
+  burstSelected = i;
+  const shot = burstShots[i];
+  if (!shot || !shot.b64) return;
+  const picker = $('burstPicker');
+  if (picker) picker.style.display = 'none';
+  let pv = $('burstPreview');
+  if (!pv) {
+    pv = document.createElement('div');
+    pv.id = 'burstPreview';
+    pv.style.cssText = 'padding:10px 4px 0;';
+    const card = $('cameraModal') && $('cameraModal').querySelector('.dialog-card');
+    const actions = $('cameraModal') && $('cameraModal').querySelector('.dialog-actions');
+    if (card && actions) card.insertBefore(pv, actions);
+    else if (card) card.appendChild(pv);
+  }
+  const sharpest = sharpestShotIndex(burstShots);
+  pv.innerHTML = '';
+  const caption = document.createElement('div');
+  caption.textContent = 'Shot ' + (i + 1) + ' of ' + burstShots.length + (i === sharpest ? ' — ★ Sharpest' : '');
+  caption.style.cssText = 'font-size:13px; font-weight:700; margin-bottom:8px;';
+  pv.appendChild(caption);
+  const img = document.createElement('img');
+  img.src = 'data:image/jpeg;base64,' + shot.b64;
+  img.alt = 'Shot ' + (i + 1) + ' full size';
+  img.style.cssText = 'display:block; width:100%; max-height:60vh; object-fit:contain; border-radius:8px; background:#0f172a;';
+  pv.appendChild(img);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+  const useBtn = document.createElement('button');
+  useBtn.type = 'button';
+  useBtn.className = 'btn';
+  useBtn.textContent = 'Use this shot';
+  useBtn.style.cssText = 'flex:1; background:#2563eb; color:#fff;';
+  useBtn.addEventListener('click', () => { burstSelected = i; useBurstShot(); });
+  btnRow.appendChild(useBtn);
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'btn';
+  backBtn.textContent = '← All shots';
+  backBtn.style.cssText = 'flex:1; background:#475569; color:#fff;';
+  backBtn.addEventListener('click', () => { burstSelected = i; showBurstPicker(); });
+  btnRow.appendChild(backBtn);
+  pv.appendChild(btnRow);
+  pv.style.display = 'block';
+  setCameraHint('Shot ' + (i + 1) + ' of ' + burstShots.length + ' — check it, then Use this shot or go back.', '');
 }
 
 // The chosen burst shot goes through the same path a single Capture
