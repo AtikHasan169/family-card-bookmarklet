@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.64-live';
+const CURRENT_VERSION_TAG = 'v4.9.65-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -275,13 +275,12 @@ const MEMBER_FIELDS = [
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
   { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  // (v38) The rest of the member row's own fields: literacy (the
-  // form's own answer), annual income (the form's real number, not
-  // the panel's 0 / 60000 guess — editable, fills back empty-only),
-  // and the government-job flag.
-  { key: 'literacy_id', label: 'Literacy (সাক্ষরতা)', type: 'info', labelMap: 'LITERACY_LABELS' },
+  // (v38, v4.9.65) Annual income (the form's real number — editable,
+  // fills back empty-only). The Literacy and Govt Job rows are gone
+  // (v4.9.65, user: unnecessary) — the data still flows through
+  // normalizeOutput into the payload, and the injector still fills
+  // literacy from education; the cards just don't show those rows.
   { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
-  { key: 'is_gov_job_holder', label: 'Govt Job? (সরকারি চাকরি)', type: 'info', labelMap: { 0: 'No (না)', 1: 'Yes (হ্যাঁ)' } },
   // Disability (v4.9.49): a disabled member needs the type on the form
   // (lookup type 11). The type row only shows when Disabled is Yes.
   { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
@@ -5462,9 +5461,24 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     } else if (prevM2 && prevM2.literacy_id !== undefined && prevM2.literacy_id !== null && String(prevM2.literacy_id).trim() !== '') {
       entry.literacy_id = Number(prevM2.literacy_id);
     }
-    if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '') {
+    // (v4.9.65) Annual income: the injector's 0 / 60000 defaults do
+    // not live in the panel — a student (age 4-24) gets 0 and an
+    // earning husband gets 60000 from the injector itself, so a pulled
+    // 0 / 60000 for those rows is the guess, not data, and the card
+    // shows it blank. Any other income is kept; a default falls
+    // through to the previous record's value for the same person,
+    // like a missing value does. The form still gets its 0 / 60000
+    // from the injector, so the fill is unchanged.
+    const incomeIsDefault = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return false;
+      if (n === 0 && memAge !== null && memAge >= 4 && memAge <= 24) return true;
+      if (n === 60000 && rel === 'Husband') return true;
+      return false;
+    };
+    if (m?.estimate_annual_income !== undefined && m?.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && !incomeIsDefault(m.estimate_annual_income)) {
       entry.estimate_annual_income = Number(m.estimate_annual_income);
-    } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '') {
+    } else if (prevM2 && prevM2.estimate_annual_income !== undefined && prevM2.estimate_annual_income !== null && String(prevM2.estimate_annual_income).trim() !== '' && !incomeIsDefault(prevM2.estimate_annual_income)) {
       entry.estimate_annual_income = Number(prevM2.estimate_annual_income);
     }
     if (m?.is_gov_job_holder === 0 || m?.is_gov_job_holder === 1 || m?.is_gov_job_holder === '0' || m?.is_gov_job_holder === '1') {
