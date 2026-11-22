@@ -7,7 +7,7 @@
 
   // Version shown in the sidepanel so the user can tell whether the
   // newly uploaded inject.js actually loaded. Bump on every release.
-  const FC_INJECT_VERSION = 'v46';
+  const FC_INJECT_VERSION = 'v47';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // Lookup ids below are the REAL ids from the site's own API
@@ -1282,6 +1282,18 @@
 
   function isEmptyModelVal(v) {
     return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+  }
+
+  // (v47) A blank payload value means "no data", never "clear the
+  // field": the panel sends '' for a missing name / DOB / ID, and
+  // setReactive writes '' straight into the model, wiping a name the
+  // site (NID verification / draft hydration) or the user put there
+  // — the draft then saved empty. A non-blank value still
+  // overwrites, as before: the panel is the source of truth and a
+  // name fixed there must still land. Whitespace-only counts as
+  // blank; numbers (0 included) are never blank.
+  function hasTextVal(v) {
+    return v !== undefined && v !== null && (typeof v !== 'string' || v.trim() !== '');
   }
 
   // Wait (bounded) until every collected select has its API items loaded.
@@ -3149,7 +3161,9 @@
         const dump = payload.full_form_dump;
         if (dump.head_data && headTarget) {
           Object.entries(dump.head_data).forEach(([k, v]) => {
-            if (v !== undefined && typeof v !== 'function') {
+            // (v47) Never write a blank string from a dump — '' means
+            // "empty in the source", not "clear the target".
+            if (v !== undefined && typeof v !== 'function' && hasTextVal(v)) {
               setReactive(vmHead, headTarget, k, v);
             }
           });
@@ -3164,7 +3178,8 @@
             const targetRow = vmMembers.familyMembers[idx];
             if (!targetRow || !rawRow) return;
             Object.entries(rawRow).forEach(([k, v]) => {
-              if (v !== undefined && typeof v !== 'function') {
+              // (v47) Same blank guard as the head dump above.
+              if (v !== undefined && typeof v !== 'function' && hasTextVal(v)) {
                 setReactive(vmMembers, targetRow, k, v);
               }
             });
@@ -3197,25 +3212,32 @@
             : null;
           const headLocked = lockedFieldSet(headRowForLock);
           if (!headLocked.has('verification_type')) setReactive(vmHead, headTarget, 'verification_type', headIsNID ? 1 : 2);
-          if (!headLocked.has('nid') && !headLocked.has('brn_id')) {
+          // (v47) Never write a blank ID / DOB / name over a filled
+          // one: the panel sends '' when it has no value for a
+          // person, and that '' used to wipe a name the site (NID
+          // verification / draft hydration) or the user had put on
+          // the form — the draft then saved empty. A non-blank panel
+          // value still overwrites, as before: the panel is the
+          // source of truth and a name fixed there must still land.
+          if (!headLocked.has('nid') && !headLocked.has('brn_id') && hasTextVal(cleanHeadId)) {
             setReactive(vmHead, headTarget, 'verification_number', cleanHeadId);
             setReactive(vmHead, headTarget, 'nid', headIsNID ? cleanHeadId : '');
             setReactive(vmHead, headTarget, 'brn_id', !headIsNID ? cleanHeadId : '');
           }
-          if (!headLocked.has('dob')) {
+          if (!headLocked.has('dob') && hasTextVal(headModelDob)) {
             setReactive(vmHead, headTarget, 'date_of_birth', headModelDob);
             setReactive(vmHead, headTarget, 'dob', headModelDob);
           }
 
-          if (!headLocked.has('name_bn')) setReactive(vmHead, headTarget, 'name_bn', h.name_bn);
-          if (!headLocked.has('name_en')) setReactive(vmHead, headTarget, 'name_en', h.name_en);
+          if (!headLocked.has('name_bn') && hasTextVal(h.name_bn)) setReactive(vmHead, headTarget, 'name_bn', h.name_bn);
+          if (!headLocked.has('name_en') && hasTextVal(h.name_en)) setReactive(vmHead, headTarget, 'name_en', h.name_en);
           if (!headLocked.has('father_name_bn')) {
-            setReactive(vmHead, headTarget, 'father_name_bn', h.father_name_bn);
-            setReactive(vmHead, headTarget, 'father_name_en', h.father_name_en);
+            if (hasTextVal(h.father_name_bn)) setReactive(vmHead, headTarget, 'father_name_bn', h.father_name_bn);
+            if (hasTextVal(h.father_name_en)) setReactive(vmHead, headTarget, 'father_name_en', h.father_name_en);
           }
           if (!headLocked.has('mother_name_bn')) {
-            setReactive(vmHead, headTarget, 'mother_name_bn', h.mother_name_bn);
-            setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
+            if (hasTextVal(h.mother_name_bn)) setReactive(vmHead, headTarget, 'mother_name_bn', h.mother_name_bn);
+            if (hasTextVal(h.mother_name_en)) setReactive(vmHead, headTarget, 'mother_name_en', h.mother_name_en);
           }
 
           // Phone (v4.9.50): the head's mobile — the form asks for it in
@@ -3511,7 +3533,7 @@
           // site's official value (verification/migration) wins (v26).
           const locked = lockedFieldSet(row);
           if (!locked.has('verification_type')) setReactive(vmMembers, row, 'verification_type', isNID ? 1 : 2);
-          if (!locked.has('nid') && !locked.has('brn_id')) {
+          if (!locked.has('nid') && !locked.has('brn_id') && hasTextVal(cleanId)) {
             if (isNID) {
               setReactive(vmMembers, row, 'nid', cleanId);
               setReactive(vmMembers, row, 'brn_id', '');
@@ -3523,7 +3545,7 @@
             }
           }
 
-          if (!locked.has('dob')) {
+          if (!locked.has('dob') && hasTextVal(memModelDob)) {
             setReactive(vmMembers, row, 'dob', memModelDob);
             setReactive(vmMembers, row, 'date_of_birth', memModelDob);
             if (memAge !== null && 'age' in row) {
@@ -3531,10 +3553,10 @@
             }
           }
 
-          if (!locked.has('name_bn')) setReactive(vmMembers, row, 'name_bn', m.name_bn);
-          if (!locked.has('name_en')) setReactive(vmMembers, row, 'name_en', m.name_en);
-          if (!locked.has('father_name_bn')) setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
-          if (!locked.has('mother_name_bn')) setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
+          if (!locked.has('name_bn') && hasTextVal(m.name_bn)) setReactive(vmMembers, row, 'name_bn', m.name_bn);
+          if (!locked.has('name_en') && hasTextVal(m.name_en)) setReactive(vmMembers, row, 'name_en', m.name_en);
+          if (!locked.has('father_name_bn') && hasTextVal(m.father_name_bn)) setReactive(vmMembers, row, 'father_name_bn', m.father_name_bn);
+          if (!locked.has('mother_name_bn') && hasTextVal(m.mother_name_bn)) setReactive(vmMembers, row, 'mother_name_bn', m.mother_name_bn);
 
           // Relationship is locked for the self/head row — but an empty
           // one still gets filled (filling is not overwriting).
@@ -3703,8 +3725,10 @@
         const maritalVal = headTarget ? (headTarget.marital_status ?? headTarget.maritalStatus) : undefined;
         if (spouse && headTarget && maritalVal !== undefined && maritalVal !== null && maritalVal !== '') {
           if ('spouse_name_bn' in headTarget || 'spouse_name_en' in headTarget) {
-            setReactive(vmHead, headTarget, 'spouse_name_bn', spouse.name_bn);
-            setReactive(vmHead, headTarget, 'spouse_name_en', spouse.name_en);
+            // (v47) Same blank guard: a blank spouse name must not
+            // wipe the one on the form.
+            if (hasTextVal(spouse.name_bn)) setReactive(vmHead, headTarget, 'spouse_name_bn', spouse.name_bn);
+            if (hasTextVal(spouse.name_en)) setReactive(vmHead, headTarget, 'spouse_name_en', spouse.name_en);
           }
           document.querySelectorAll('.v-input, .form-group').forEach(wrap => {
             if (wrap.closest('#fc-floating-root')) return;
@@ -3713,7 +3737,9 @@
             const inp = wrap.querySelector('input[type="text"], input:not([type])');
             if (!inp || inp.disabled || inp.readOnly) return;
             const isBn = /বাংলা|bangla|_bn|\(bn\)/i.test(lbl);
-            setNativeInputValue(inp, isBn ? (spouse.name_bn || '') : (spouse.name_en || ''), wrap.__vue__);
+            const spouseVal = isBn ? spouse.name_bn : spouse.name_en;
+            if (!hasTextVal(spouseVal)) return;
+            setNativeInputValue(inp, spouseVal, wrap.__vue__);
           });
         }
       } catch (_) {}
