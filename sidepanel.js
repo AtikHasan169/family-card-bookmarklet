@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.62-live';
+const CURRENT_VERSION_TAG = 'v4.9.64-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -423,10 +423,11 @@ let freeDrag = null;
 // Last fit computed by drawCropCanvas ({ boundW, boundH, fitScale }) —
 // the Freeform box starts from it, so the box and the drawn photo agree.
 let lastCropFit = null;
-// Perspective detection (auto-scan / live edge view): on by default,
+// Perspective detection (auto-scan / live edge view): off by default,
 // remembered across sessions. Off = plain photo, crop by hand.
-let perspectiveEnabled = true;
-try { perspectiveEnabled = localStorage.getItem('fc_pro_perspective') !== '0'; } catch (_) {}
+// A stored '1' (turned on before) still turns it on.
+let perspectiveEnabled = false;
+try { perspectiveEnabled = localStorage.getItem('fc_pro_perspective') === '1'; } catch (_) {}
 // Banglish auto-transliteration (v4.9.48): on by default, remembered
 // across sessions. Off = typing a Bangla name leaves the English
 // field blank, so it can be typed by hand (New Form).
@@ -1681,24 +1682,27 @@ function applyChildParentNames(data) {
 }
 // --- end DOB derivation pure helpers ---
 
-// --- Bangla name -> Banglish transliteration (v4.9.62) ---
+// --- Bangla name -> Banglish transliteration (v4.9.64) ---
 // Typing a Bangla name fills the matching English (Banglish) field.
 // Pure functions, so they are easy to test. Orthographic
-// transliteration: each consonant carries its inherent 'a' unless a
-// vowel sign (kar), a hasanta (join) or a word-end follows. A
-// word-final consonant that closes a conjunct (চন্দ্র) still takes
-// the 'a' (CHANDRA), while a plain word-final consonant does not
-// (করিম -> KARIM, আব্দুল -> ABDUL). A plain consonant in the middle
-// of a word drops its 'a' only when the next consonant carries a
-// vowel sign (শারমিন -> SHARMIN, সুলতানা -> SULTANA, সরকার ->
-// SARKAR); it keeps the 'a' when the next consonant is word-final
-// (সুজন -> SUJAN, স্বপন -> SWAPAN), when the next consonant is
-// itself hasanta-joined (বসন্ত -> BASANTA), when it is the second
-// half of a conjunct (প্রদীপ -> PRADIP, অঞ্জন -> ANJAN), or before
-// য় (জয়া -> JAYA, বিজয়া -> BIJOYA). The old rule dropped it for
-// every medial consonant and mangled common names (সুজন -> SUJN,
-// জীবন -> JIBN); dropping it for none mangled the other side
-// (শারমিন -> SHARAMIN, ইসলাম -> ISALAM).
+// transliteration: each consonant carries its inherent 'o' unless a
+// vowel sign (kar), a hasanta (join) or a word-end follows — the
+// user writes O more than A (সুমন -> SUMON, রতন -> ROTON, করিম ->
+// KORIM, জীবন -> JIBON). A plain word-final consonant takes no
+// vowel (করিম -> KORIM, আব্দুল -> ABDUL). A plain consonant in the
+// middle of a word drops its 'o' only when the next consonant
+// carries a vowel sign (শারমিন -> SHARMIN, সুলতানা -> SULTANA);
+// it keeps the 'o' when the next consonant is word-final (সুজন ->
+// SUJON), when the next consonant is itself hasanta-joined (বসন্ত
+// -> BOSONTA), or before য় (বিজয়া -> BIJOYA). The old rule
+// dropped it for every medial consonant and mangled common names
+// (সুজন -> SUJN, জীবন -> JIBN); dropping it for none mangled the
+// other side (শারমিন -> SHARAMIN, ইসলাম -> ISALAM). Only the
+// plain inherent vowel is 'o': the conjunct paths keep 'a' — a
+// word-final consonant closing a conjunct (চন্দ্র -> CHANDRA),
+// the স/শ/জ + hasanta + ব block (স্বপন -> SWAPAN, বিশ্বাস ->
+// BISHWAS, উজ্জ্বল -> UJJWAL), and a consonant before a sign
+// (বাংলা -> BANGLA).
 // Conjuncts with their own sound: জ্জ -> ZZ (রাজ্জাক -> RAZZAK,
 // ইজ্জত -> IZZAT), স/শ/জ + hasanta + ব -> SW/SHW/JW (স্বপন ->
 // SWAPAN, স্বাধীন -> SWADHIN, বিশ্বাস -> BISHWAS, ঈশ্বর ->
@@ -1712,7 +1716,9 @@ function applyChildParentNames(data) {
 // words no rule can get right (one spelling, two sounds — আজিজ
 // -> AZIZ but সাজিদ -> SAJID, ছ as S in নেছা/মুরছালিন, জ as Z
 // in রেজা/নজরুল/গাজী, the OY names জয়/বিজয়া/ভয়, and the
-// surnames চৌধুরী/ভূঁইয়া/শেখ) live in BN_NAME_FIXES. The result is
+// surnames চৌধুরী/ভূঁইয়া/শেখ, and the names that keep 'a' —
+// আলম, সরকার, চন্দ্র, প্রদীপ, অঞ্জন, জয়া, ওমর, তসলিমা, সঞ্জয়)
+// live in BN_NAME_FIXES. The result is
 // always uppercase, and মোঃ / মোছাঃ become MD. / MST. like
 // formatEnglishName. If the transliteration is wrong for a name,
 // the user edits the EN field by hand — the panel never overwrites
@@ -1725,9 +1731,9 @@ const BN_NAME_FIXES = {
   'হুসাইন': 'HUSSAIN',
   'মোহাম্মদ': 'MOHAMMAD',
   'মুহাম্মদ': 'MUHAMMAD',
-  'কমল': 'KAMAL',
-  'অমল': 'AMAL',
-  'বিমল': 'BIMAL',
+  'কমল': 'KOMOL',
+  'অমল': 'OMOL',
+  'বিমল': 'BIMOL',
   'রাজ্জাক': 'RAZZAK',
   'আনোয়ার': 'ANOWAR',
   'আনোয়ারা': 'ANOWARA',
@@ -1793,7 +1799,24 @@ const BN_NAME_FIXES = {
   'নয়না': 'NOYONA',
   'অভয়': 'ABHOY',
   'ডালিমন': 'DALIMON',
-  'কুয়াশা': 'KUASHA'
+  'কুয়াশা': 'KUASHA',
+  // Names that keep 'a' under the O-default (v4.9.64) — the rule
+  // would give them 'o' (ALOM, SORKAR, CHONDRA), but the NID
+  // spelling keeps 'a'.
+  'চন্দ্র': 'CHANDRA',
+  'প্রদীপ': 'PRADIP',
+  'অঞ্জন': 'ANJAN',
+  'জয়া': 'JAYA',
+  'সরকার': 'SARKAR',
+  'কাঞ্চন': 'KANCHAN',
+  'অঞ্জলি': 'ANJALI',
+  'আলম': 'ALAM',
+  'রজব': 'RAJAB',
+  'কেশব': 'KESHAB',
+  'ওমর': 'OMAR',
+  'নজিরুল': 'NAJIRUL',
+  'তসলিমা': 'TASLIMA',
+  'সঞ্জয়': 'SANJOY'
 };
 const BN_CONSONANT = {
   'ক': 'K', 'খ': 'KH', 'গ': 'G', 'ঘ': 'GH', 'ঙ': 'NG',
@@ -1921,13 +1944,14 @@ function transliterateBanglaWord(word) {
       else if (next && BN_SIGN[next]) { out += base + 'A' + BN_SIGN[next]; i = j; }
       else if (!next) { out += base + (prev === BN_HASANTA ? 'A' : ''); }
       // A plain consonant in the middle of the word (next is another
-      // consonant): drop the inherent 'a' only when that next
+      // consonant): drop the inherent 'o' only when that next
       // consonant carries a vowel sign — শারমিন -> SHARMIN, সুলতানা
-      // -> SULTANA, সরকার -> SARKAR. Keep it otherwise: next
-      // consonant word-final (সুজন -> SUJAN, স্বপন -> SWAPAN), next
-      // consonant hasanta-joined (বসন্ত -> BASANTA), this consonant
-      // is the second half of a conjunct (প্রদীপ -> PRADIP, অঞ্জন ->
-      // ANJAN), or the next consonant is য় (জয়া -> JAYA).
+      // -> SULTANA. Keep it otherwise: next consonant word-final
+      // (সুজন -> SUJON), next consonant hasanta-joined (বসন্ত ->
+      // BOSONTA), this consonant is the second half of a conjunct,
+      // or the next consonant is য় (বিজয়া -> BIJOYA). Names that
+      // keep 'a' instead (প্রদীপ, অঞ্জন, জয়া, সরকার) live in
+      // BN_NAME_FIXES.
       else {
         let afterNext = chs[j + 1];
         if (afterNext === BN_NUKTA) afterNext = chs[j + 2];
@@ -1935,7 +1959,7 @@ function transliterateBanglaWord(word) {
         // it is য or the standalone U+09DF letter.
         const nextIsGlide = next === 'য' || next === '\u09DF';
         const drops = i > 0 && prev !== BN_HASANTA && !nextIsGlide && afterNext && BN_KAR[afterNext];
-        out += base + (drops ? '' : 'A');
+        out += base + (drops ? '' : 'O');
       }
     } else if (BN_VOWEL[ch]) {
       if (ch === 'ও' && prev && (BN_VOWEL[prev] || BN_KAR[prev])) {
