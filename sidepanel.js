@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.67-live';
+const CURRENT_VERSION_TAG = 'v4.9.68-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -2479,6 +2479,18 @@ function refreshChildParentInputs() {
   });
 }
 
+// --- Text display value (v4.9.68) ---
+// What a text field shows for a stored value. A value of 0 IS a
+// value — String(0) is '0', not empty — so an income of 0 shows "0"
+// in the card. The old `value || ''` swallowed 0, and the card showed
+// the "—" placeholder with a red border even though the record held 0
+// (v4.9.66 set it in the data). Undefined / null / blank still show
+// empty. Used by the card inputs and by Copy.
+function displayTextValue(v) {
+  return v !== undefined && v !== null && String(v).trim() !== '' ? String(v) : '';
+}
+// --- end Text display value ---
+
 function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange) {
   const notifyChange = (key, value) => { if (typeof onChange === 'function') onChange(key, value); };
   let inputEl;
@@ -2939,7 +2951,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl = document.createElement('input');
     inputEl.type = 'text';
     inputEl.setAttribute('data-field', f.key);
-    inputEl.value = targetObj[f.key] || '';
+    inputEl.value = displayTextValue(targetObj[f.key]);
     inputEl.placeholder = f.key === 'dob' ? 'e.g. 15011990' : '—';
     inputEl.style.cssText = 'padding:4px 8px; font-size:12.5px; font-weight:550; border:1px solid transparent; background:transparent; border-radius:5px; width:100%;';
     if (f.key.endsWith('_en')) inputEl.style.textTransform = 'uppercase';
@@ -2989,7 +3001,7 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // Bangla conjunct typing is never disturbed mid-word). On blur,
       // show the stored value, so the field matches what will fill.
       if (f.key === 'nid' || f.key === 'nid_or_brn' || f.key.endsWith('_bn') || f.key.endsWith('_en')) {
-        inputEl.value = targetObj[f.key] || '';
+        inputEl.value = displayTextValue(targetObj[f.key]);
       }
       toggleWarning(inputEl);
       // NID/BRN (v4.9.47): a finished 13-digit NID converts to 17
@@ -5781,7 +5793,7 @@ function copyValueForField(f, targetObj) {
     if (v === 0 || v === '0') return 'No';
     return '';
   }
-  const v = targetObj[f.key] || '';
+  const v = displayTextValue(targetObj[f.key]);
   if (f.key !== 'dob') return v;
   const s = String(v).replace(/\[.*?\]/g, '').trim();
   const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
