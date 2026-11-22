@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.61-live';
+const CURRENT_VERSION_TAG = 'v4.9.62-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1681,19 +1681,42 @@ function applyChildParentNames(data) {
 }
 // --- end DOB derivation pure helpers ---
 
-// --- Bangla name -> Banglish transliteration (v4.9.40) ---
+// --- Bangla name -> Banglish transliteration (v4.9.62) ---
 // Typing a Bangla name fills the matching English (Banglish) field.
 // Pure functions, so they are easy to test. Orthographic
 // transliteration: each consonant carries its inherent 'a' unless a
 // vowel sign (kar), a hasanta (join) or a word-end follows. A
 // word-final consonant that closes a conjunct (চন্দ্র) still takes
 // the 'a' (CHANDRA), while a plain word-final consonant does not
-// (করিম -> KARIM, আব্দুল -> ABDUL). Common name words the plain rule
-// gets wrong are fixed by BN_NAME_FIXES (বেগম -> BEGUM, রহমান ->
-// RAHMAN, পারভীন -> PARVIN). The result is always uppercase, and
-// মোঃ / মোছাঃ become MD. / MST. like formatEnglishName. If the
-// transliteration is wrong for a name, the user edits the EN field
-// by hand — the panel never overwrites a hand-edited EN value.
+// (করিম -> KARIM, আব্দুল -> ABDUL). A plain consonant in the middle
+// of a word drops its 'a' only when the next consonant carries a
+// vowel sign (শারমিন -> SHARMIN, সুলতানা -> SULTANA, সরকার ->
+// SARKAR); it keeps the 'a' when the next consonant is word-final
+// (সুজন -> SUJAN, স্বপন -> SWAPAN), when the next consonant is
+// itself hasanta-joined (বসন্ত -> BASANTA), when it is the second
+// half of a conjunct (প্রদীপ -> PRADIP, অঞ্জন -> ANJAN), or before
+// য় (জয়া -> JAYA, বিজয়া -> BIJOYA). The old rule dropped it for
+// every medial consonant and mangled common names (সুজন -> SUJN,
+// জীবন -> JIBN); dropping it for none mangled the other side
+// (শারমিন -> SHARAMIN, ইসলাম -> ISALAM).
+// Conjuncts with their own sound: জ্জ -> ZZ (রাজ্জাক -> RAZZAK,
+// ইজ্জত -> IZZAT), স/শ/জ + hasanta + ব -> SW/SHW/JW (স্বপন ->
+// SWAPAN, স্বাধীন -> SWADHIN, বিশ্বাস -> BISHWAS, ঈশ্বর ->
+// ISHWAR), word-initial ইউ -> YU (ইউসুফ -> YUSUF, ইউনুস ->
+// YUNUS) and ইয় -> YA (ইয়াসিন -> YASIN, ইয়াকুব -> YAKUB), and
+// ো/ু + য় -> W (আনোয়ার -> ANOWAR, জুয়েল -> JUWEL, মনোয়ারা ->
+// MONOWARA). A standalone ও after a vowel is a W glide too
+// (তাওহীদ -> TAWHID, আওলাদ -> AWLAD). The য় rules are scoped
+// to after ো/ু/ও on purpose: মায়া -> MAYA and আয়েশা -> AYESHA
+// keep YA/YE, and a bare য় -> W would break both. Common name
+// words no rule can get right (one spelling, two sounds — আজিজ
+// -> AZIZ but সাজিদ -> SAJID, ছ as S in নেছা/মুরছালিন, জ as Z
+// in রেজা/নজরুল/গাজী, the OY names জয়/বিজয়া/ভয়, and the
+// surnames চৌধুরী/ভূঁইয়া/শেখ) live in BN_NAME_FIXES. The result is
+// always uppercase, and মোঃ / মোছাঃ become MD. / MST. like
+// formatEnglishName. If the transliteration is wrong for a name,
+// the user edits the EN field by hand — the panel never overwrites
+// a hand-edited EN value.
 const BN_NAME_FIXES = {
   'বেগম': 'BEGUM',
   'রহমান': 'RAHMAN',
@@ -1704,7 +1727,73 @@ const BN_NAME_FIXES = {
   'মুহাম্মদ': 'MUHAMMAD',
   'কমল': 'KAMAL',
   'অমল': 'AMAL',
-  'বিমল': 'BIMAL'
+  'বিমল': 'BIMAL',
+  'রাজ্জাক': 'RAZZAK',
+  'আনোয়ার': 'ANOWAR',
+  'আনোয়ারা': 'ANOWARA',
+  'মনোয়ারা': 'MONOWARA',
+  'নেছা': 'NESA',
+  'হোসাইন': 'HOSSAIN',
+  'ইউসুফ': 'YUSUF',
+  'ইউনুস': 'YUNUS',
+  'স্বপন': 'SWAPAN',
+  'উজ্জ্বল': 'UJJWAL',
+  'উজ্জ্বলা': 'UJJWALA',
+  'তানভীর': 'TANVIR',
+  'পারভেজ': 'PARVEZ',
+  'শাহনোয়াজ': 'SHAHNAWAZ',
+  'আজিজ': 'AZIZ',
+  'আজম': 'AZAM',
+  'রেজা': 'REZA',
+  'রেজাউল': 'REZAUL',
+  'নজরুল': 'NAZRUL',
+  'ফজল': 'FAZL',
+  'নাজমুল': 'NAZMUL',
+  'ওয়াজেদ': 'WAZED',
+  'মোয়াজ্জেম': 'MOAZZEM',
+  'বিজয়া': 'BIJOYA',
+  'বিজয়': 'BIJOY',
+  'অজয়': 'AJOY',
+  'জয়': 'JOY',
+  'সুজয়': 'SUJOY',
+  'জয়নাল': 'JOYNAL',
+  'শাহনাওয়াজ': 'SHAHNAWAZ',
+  // ছ as S (the user's own drafts spell it so), জ as Z, the
+  // OY names no rule can spell, and the surnames.
+  'মুরছালিন': 'MURSALIN',
+  'মুছা': 'MUSA',
+  'ছালাম': 'SALAM',
+  'ছাত্তার': 'SATTAR',
+  'আইয়ুব': 'AYUB',
+  'ইলিয়াস': 'ILIAS',
+  'জিয়া': 'ZIA',
+  'জিয়াউর': 'ZIAUR',
+  'আজিজুল': 'AZIZUL',
+  'আজাদ': 'AZAD',
+  'ফজলুল': 'FAZLUL',
+  'সাজ্জাদ': 'SAJJAD',
+  'ইকবাল': 'IQBAL',
+  'মিজান': 'MIZAN',
+  'মিজানুর': 'MIZANUR',
+  'রমজান': 'RAMZAN',
+  'আলমগীর': 'ALAMGIR',
+  'গাজী': 'GAZI',
+  'কাজী': 'KAZI',
+  'মির্জা': 'MIRZA',
+  'সৈয়দ': 'SYED',
+  'চৌধুরী': 'CHOWDHURY',
+  'ভূঁইয়া': 'BHUIYAN',
+  'শেখ': 'SHEIKH',
+  'চক্রবর্তী': 'CHAKRABARTY',
+  'আওয়াজ': 'AWAZ',
+  'স্নেহা': 'SNEHA',
+  'স্মৃতি': 'SMRITI',
+  'ভয়': 'BHOY',
+  'নয়ন': 'NOYON',
+  'নয়না': 'NOYONA',
+  'অভয়': 'ABHOY',
+  'ডালিমন': 'DALIMON',
+  'কুয়াশা': 'KUASHA'
 };
 const BN_CONSONANT = {
   'ক': 'K', 'খ': 'KH', 'গ': 'G', 'ঘ': 'GH', 'ঙ': 'NG',
@@ -1742,7 +1831,83 @@ function transliterateBanglaWord(word) {
   for (let i = 0; i < chs.length; i++) {
     const ch = chs[i];
     const prev = chs[i - 1];
+    // Word-initial ইউ -> YU (ইউসুফ -> YUSUF): two vowels in a row
+    // would otherwise come out IU.
+    if (i === 0 && ch === 'ই' && (chs[1] === 'উ' || chs[1] === 'ু')) {
+      out += 'YU';
+      i = 1;
+      continue;
+    }
+    // Word-initial ইয় -> YA (ইয়াসিন -> YASIN, ইয়াসমিন ->
+    // YASMIN, ইয়াকুব -> YAKUB): the য় is silent as a
+    // consonant here, the ই is the Y.
+    if (i === 0 && ch === 'ই' && chs[1] === 'য়') {
+      out += 'Y';
+      i = 1;
+      continue;
+    }
+    if (i === 0 && ch === 'ই' && chs[1] === 'য' && chs[2] === BN_NUKTA) {
+      out += 'Y';
+      i = 2;
+      continue;
+    }
+    // ও + য়া -> WA (ওয়াসিম -> WASIM, আওয়াল -> AWAL): the ও is
+    // the W's vowel, not a separate O — without this, ওয়াসিম
+    // comes out OWASIM.
+    if (ch === 'ও' && chs[i + 1] === 'য' && chs[i + 2] === BN_NUKTA && chs[i + 3] === 'া') {
+      out += 'WA';
+      i = i + 3;
+      continue;
+    }
+    if (ch === 'ও' && chs[i + 1] === '\u09DF' && chs[i + 2] === 'া') {
+      out += 'WA';
+      i = i + 2;
+      continue;
+    }
     if (BN_CONSONANT[ch]) {
+      // জ্জ -> ZZ (রাজ্জাক -> RAZZAK, ইজ্জত -> IZZAT): both halves
+      // of the geminate are Z. Not applied when the second জ opens
+      // another conjunct (জ্জ্ব, as in উজ্জ্বল — covered by
+      // BN_NAME_FIXES), where the J sound stays.
+      if (ch === 'জ' && chs[i + 1] === BN_HASANTA && chs[i + 2] === 'জ' && chs[i + 3] !== BN_HASANTA) {
+        const after2 = chs[i + 3];
+        if (after2 && BN_KAR[after2]) { out += 'ZZ' + BN_KAR[after2]; i = i + 3; }
+        else if (after2 && BN_SIGN[after2]) { out += 'ZZA' + BN_SIGN[after2]; i = i + 3; }
+        else if (!after2) { out += 'ZZ'; i = i + 2; }
+        else { out += 'ZZA'; i = i + 2; }
+        continue;
+      }
+      // স/শ/জ + hasanta + ব -> SW/SHW/JW (স্বপন -> SWAPAN,
+      // স্বাধীন -> SWADHIN, বিশ্বাস -> BISHWAS, ঈশ্বর -> ISHWAR,
+      // অশ্বিনী -> ASHWINI, উজ্জ্বল -> UJJWAL via the জ্জ rule
+      // falling through here).
+      if ((ch === 'স' || ch === 'শ' || ch === 'জ') && chs[i + 1] === BN_HASANTA && chs[i + 2] === 'ব') {
+        const afterB = chs[i + 3];
+        const bw = BN_CONSONANT[ch] + 'W';
+        if (afterB && BN_KAR[afterB]) { out += bw + BN_KAR[afterB]; i = i + 3; }
+        else { out += bw + 'A'; i = i + 2; }
+        continue;
+      }
+      // ো/ু + য় -> W (আনোয়ার -> ANOWAR, জুয়েল -> JUWEL,
+      // মনোয়ারা -> MONOWARA). The য় is য + nukta in real text
+      // (or the standalone U+09DF letter); the following kar
+      // rides along. Scoped to after ো/ু/ও on purpose: মায়া ->
+      // MAYA and আয়েশা -> AYESHA keep YA/YE. Known limit:
+      // native খোয়া/ধোয়া-style words come out KHOWA/DHOWA —
+      // they are not person names; কুয়াশা is covered by
+      // BN_NAME_FIXES (KUASHA, not KUWASHA).
+      if (prev === 'ো' || prev === 'ু' || prev === 'ও') {
+        if (ch === 'য' && chs[i + 1] === BN_NUKTA && chs[i + 2] && BN_KAR[chs[i + 2]]) {
+          out += 'W' + BN_KAR[chs[i + 2]];
+          i = i + 2;
+          continue;
+        }
+        if (ch === '\u09DF' && chs[i + 1] && BN_KAR[chs[i + 1]]) {
+          out += 'W' + BN_KAR[chs[i + 1]];
+          i = i + 1;
+          continue;
+        }
+      }
       // A nukta right after the consonant changes its sound.
       let base = BN_CONSONANT[ch];
       let j = i + 1;
@@ -1755,14 +1920,33 @@ function transliterateBanglaWord(word) {
       else if (next === BN_HASANTA) { out += base; i = j; }
       else if (next && BN_SIGN[next]) { out += base + 'A' + BN_SIGN[next]; i = j; }
       else if (!next) { out += base + (prev === BN_HASANTA ? 'A' : ''); }
-      // A consonant in the middle of a word, followed by another
-      // consonant, drops its inherent 'a' (Bengali schwa deletion:
-      // শারমিন -> SHARMIN, সুলতানা -> SULTANA). Only a word-initial
-      // consonant keeps it (করিম -> KARIM). Sanskrit-derived names
-      // that keep it (কমল -> KAMAL) live in BN_NAME_FIXES.
-      else { out += base + (i === 0 ? 'A' : ''); }
+      // A plain consonant in the middle of the word (next is another
+      // consonant): drop the inherent 'a' only when that next
+      // consonant carries a vowel sign — শারমিন -> SHARMIN, সুলতানা
+      // -> SULTANA, সরকার -> SARKAR. Keep it otherwise: next
+      // consonant word-final (সুজন -> SUJAN, স্বপন -> SWAPAN), next
+      // consonant hasanta-joined (বসন্ত -> BASANTA), this consonant
+      // is the second half of a conjunct (প্রদীপ -> PRADIP, অঞ্জন ->
+      // ANJAN), or the next consonant is য় (জয়া -> JAYA).
+      else {
+        let afterNext = chs[j + 1];
+        if (afterNext === BN_NUKTA) afterNext = chs[j + 2];
+        // The next consonant is য/য় (a glide, either spelling) if
+        // it is য or the standalone U+09DF letter.
+        const nextIsGlide = next === 'য' || next === '\u09DF';
+        const drops = i > 0 && prev !== BN_HASANTA && !nextIsGlide && afterNext && BN_KAR[afterNext];
+        out += base + (drops ? '' : 'A');
+      }
     } else if (BN_VOWEL[ch]) {
-      out += BN_VOWEL[ch];
+      if (ch === 'ও' && prev && (BN_VOWEL[prev] || BN_KAR[prev])) {
+        // A standalone ও after a vowel is a W glide (তাওহীদ ->
+        // TAWHID, আওলাদ -> AWLAD). Before য় it is handled
+        // above (ওয়াসিম -> WASIM, দেওয়ান -> DEWAN);
+        // word-initially it stays O (ওমর -> OMAR, ওসমান -> OSMAN).
+        out += 'W';
+      } else {
+        out += BN_VOWEL[ch];
+      }
     } else if (BN_KAR[ch]) {
       out += BN_KAR[ch];
     } else if (BN_SIGN[ch]) {
