@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.69-live';
+const CURRENT_VERSION_TAG = 'v4.9.70-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -150,216 +150,6 @@ function hasPulledSections(targetObj) {
   });
 }
 
-const HEAD_FIELDS = [
-  // Order (v4.9.41): identity first — name, then the parents' names
-  // right under it (as on the BD NID card), then gender / religion /
-  // DOB, then the fields the DOB derives (education / profession /
-  // marital). DOB stays before NID, as on the BD NID card.
-  { key: 'name_bn', label: 'Name (BN)' },
-  { key: 'name_en', label: 'Name (EN)' },
-  { key: 'father_name_bn', label: 'Father (BN)' },
-  { key: 'father_name_en', label: 'Father (EN)' },
-  { key: 'mother_name_bn', label: 'Mother (BN)' },
-  { key: 'mother_name_en', label: 'Mother (EN)' },
-  { key: 'gender', label: 'Gender', type: 'gender_select' },
-  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
-  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid', label: 'NID / BRN No' },
-  // Doc Type under the number (v4.9.54): the number is typed first
-  // and the type follows it — 17 digits flip it to BRN live — so the
-  // user never has to pick the type before typing the number.
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
-  // Phone + MFS (v4.9.49, v4.9.50): the head's mobile number fills the
-  // form's ONE mobile field, data.mobile (the form never asks for a
-  // mobile anywhere else); the MFS pick fills PMT field 138
-  // (Bkash/Nagad/...) via form_defaults.program_fields.
-  { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
-  { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
-  // PMT leftover picks (v4.9.69): the questions Auto-Fill + presets
-  // leave behind. Unsectioned so they always show (also on a New
-  // Form). Labels are the site's own question text, word for word
-  // (user 2026-11-22). The floor/wall/roof rows hide unless the
-  // home combo is "other" — a combo pick sets all three.
-  { key: 'home_combo', label: 'বাড়ি কেমন (Home made of)', type: 'home_combo_select' },
-  { key: 'pmt_floor', label: 'খানার প্রধান বসতঘরের মেঝে বা ফ্লোর কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_FLOOR_OPTIONS },
-  { key: 'pmt_wall', label: 'খানার প্রধান ঘরের দেয়াল কি দিয়ে তৈরী?', type: 'pmt_option_select', options: PMT_WALL_OPTIONS },
-  { key: 'pmt_roof', label: 'খানার প্রধান ঘরের ছাদ কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_ROOF_OPTIONS },
-  { key: 'pmt_kitchen', label: 'খানায় কি পৃথক রান্নাঘর আছে?', type: 'pmt_option_select', options: PMT_KITCHEN_OPTIONS },
-  { key: 'pmt_dining', label: 'খানায় কি পৃথক খাবার ঘর/কক্ষ আছে?', type: 'pmt_option_select', options: PMT_DINING_OPTIONS },
-  { key: 'pmt_land', label: 'খানার সকল সদস্যের মালিকানাধীন মোট জমির পরিমাণ কত?', type: 'pmt_option_select', options: PMT_LAND_OPTIONS },
-  { key: 'pmt_occupation', label: 'খানার কোন সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?', type: 'pmt_option_select', options: PMT_OCCUPATION_OPTIONS },
-  { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'rooms_number' },
-  { key: 'pmt_lpg', label: 'খানায় রান্নার জ্বালানির প্রধান উপকরণ এলপিজি গ্যাস হলে প্রতিমাসে এলপিজি গ্যাস ব্যবহারের পরিমান', type: 'pmt_option_select', options: PMT_LPG_OPTIONS },
-  { key: 'pmt_diesel', label: 'কৃষি কাজে ডিজেল ব্যবহার হলে তার মাসিক আনুমানিক পরিমাণ', type: 'pmt_option_select', options: PMT_DIESEL_OPTIONS },
-  { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
-  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
-  { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
-  { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  // Disability + Health (v4.9.50): the head is a person too — the same
-  // Disabled / Disability Type / Health fields as a member card. They
-  // ride on the head member row (the head form itself has no health
-  // or disability fields); the form's health select is required.
-  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
-  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
-  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
-  // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
-  // head is the one the Halnagad check reports on.
-  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
-  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
-  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' },
-  // (v38) All-tabs pull: the rest of the form, organised in sections
-  // matching the site's tabs. Text fields are editable and fill back
-  // (empty-only); 'info' fields show the name the pull resolved from
-  // the site's own lists (the panel has no such list to offer a
-  // dropdown from, so the name is shown, not edited — the id rides
-  // on the record for Auto-Fill).
-  { key: 'spouse_name_bn', label: 'Spouse (BN)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'spouse_name_en', label: 'Spouse (EN)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'identification_mark', label: 'ID Mark (শনাক্তকরণ চিহ্ন)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'nationality', label: 'Nationality (জাতীয়তা)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'email', label: 'Email (ইমেইল)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'mobile_operator', label: 'Mobile Operator', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'disability_id', label: 'Disability (প্রতিবন্ধিতা)', type: 'info', labelMap: 'DISABILITY_TYPE_OPTIONS', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'house_size', label: 'Household Size (খানার সদস্য)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'no_of_room_name', label: 'No. of Rooms (কক্ষ সংখ্যা)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'nominee_bn', label: 'Nominee (BN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_en', label: 'Nominee (EN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_verification_number', label: 'Nominee NID/BRN', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_date_of_birth', label: 'Nominee DOB', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_address', label: 'Nominee Address', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_relation_with_beneficiary', label: 'Nominee Relation', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_nationality', label: 'Nominee Nationality', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'account_type', label: 'Account Type', type: 'account_type_select', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'bank_name', label: 'Bank', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'branch_name', label: 'Branch', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'bank_division_name', label: 'Bank Division', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'bank_district_name', label: 'Bank District', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'account_name', label: 'Account Name', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'account_owner', label: 'Account Owner', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'account_number', label: 'Account Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'mfs_number', label: 'MFS Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'ঠিকানা (Address)' },
-  { key: 'address_division_name', label: 'Division', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_district_name', label: 'District', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_union_name', label: 'Union', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_pouro_name', label: 'Pouroshava', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_city_name', label: 'City', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_ward_name', label: 'Ward', type: 'info', section: 'ঠিকানা (Address)' },
-  { key: 'address_post_code', label: 'Post Code', section: 'ঠিকানা (Address)' },
-  { key: 'address_text', label: 'Address (ঠিকানা)', section: 'ঠিকানা (Address)' },
-  { key: 'permanent_address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_division_name', label: 'Division', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_district_name', label: 'District', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_union_name', label: 'Union', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_pouro_name', label: 'Pouroshava', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_city_name', label: 'City', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_ward_name', label: 'Ward', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_post_code', label: 'Post Code', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'permanent_address_text', label: 'Address (ঠিকানা)', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
-  { key: 'program_male', label: 'Male Members (পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_female', label: 'Female Members (নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_hijra', label: 'Hijra Members (হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_abroad_male', label: 'Abroad — Male (বিদেশে পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_abroad_female', label: 'Abroad — Female (বিদেশে নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_abroad_hijra', label: 'Abroad — Hijra (বিদেশে হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' }
-];
-
-const MEMBER_FIELDS = [
-  { key: 'relation', label: 'Relation', type: 'rel_select' },
-  { key: 'name_bn', label: 'Name (BN)' },
-  { key: 'name_en', label: 'Name (EN)' },
-  // Parents' names (v4.9.41): right under the name, as on the BD NID
-  // card — not down below the derived fields.
-  { key: 'father_name_bn', label: 'Father (BN)' },
-  { key: 'mother_name_bn', label: 'Mother (BN)' },
-  { key: 'gender', label: 'Gender', type: 'gender_select' },
-  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
-  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
-  { key: 'nid_or_brn', label: 'NID / BRN No' },
-  // Doc Type under the number (v4.9.54): the number is typed first
-  // and the type follows it — 17 digits flip it to BRN live — so the
-  // user never has to pick the type before typing the number.
-  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
-  // (No member Mobile: the form asks for a mobile number in ONE place
-  // only — data.mobile on the head form. Member rows never render a
-  // mobile input, so the member card has no Mobile field. v4.9.50.)
-  // Education / profession / marital (v4.9.39): same three the head card
-  // has, so a member's derived values (e.g. the husband's Agriculture)
-  // are visible and changeable offline. Profession here is the type-44
-  // livelihood list; marital uses the site's typo key maritial_status_id.
-  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
-  { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
-  { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  // (v38, v4.9.65) Annual income (the form's real number — editable,
-  // fills back empty-only). The Literacy and Govt Job rows are gone
-  // (v4.9.65, user: unnecessary) — the data still flows through
-  // normalizeOutput into the payload, and the injector still fills
-  // literacy from education; the cards just don't show those rows.
-  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
-  // Disability (v4.9.49): a disabled member needs the type on the form
-  // (lookup type 11). The type row only shows when Disabled is Yes.
-  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
-  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
-  // Health (v4.9.49): কর্মক্ষম (Able-bodied, 203) is the default —
-  // the form's health field (type 43) — the other options are picked
-  // from here. A disabled member shows blank instead of the
-  // able-bodied default, so the right option gets picked.
-  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
-  // Benefit (v4.9.36): whether this member already receives another
-  // programme (SSNP), which card, and whether they got DSS training /
-  // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
-  // detection fills them in automatically for the head.
-  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
-  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
-  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' }
-];
-// Government Card types (lookup type 42). 185 (NO Card) is not offered
-// — it means "no card", which is SSNP No.
-const GOV_CARD_OPTIONS = [
-  { id: 162, label: 'Social Welfare Allowance (সমাজকল্যাণ ভাতা)' },
-  { id: 163, label: 'VGF / VGD' },
-  { id: 164, label: 'Ration Card' },
-  { id: 165, label: 'Fertilizer Card' },
-  { id: 166, label: 'TCB Card' },
-  { id: 167, label: 'Muktijoddha Card' },
-  { id: 168, label: 'Scholarship Card' },
-  { id: 169, label: 'Migrant Workers Welfare Card' },
-  { id: 170, label: 'Pension Card' },
-  { id: 171, label: 'Agriculture Card' },
-  { id: 172, label: 'Fishermen Card' }
-];
-// Disability types (lookup type 11, v4.9.49). The form needs the type
-// when a member is disabled; the AI cannot know it from an NID photo,
-// so the user picks it by hand on the card.
-const DISABILITY_TYPE_OPTIONS = [
-  { id: 247, label: 'শারীরিক প্রতিবন্ধিতা (Physical)' },
-  { id: 248, label: 'দৃষ্টি প্রতিবন্ধিতা (Visual)' },
-  { id: 249, label: 'শ্রবণ প্রতিবন্ধিতা (Hearing)' },
-  { id: 250, label: 'বাক প্রতিবন্ধিতা (Speech)' },
-  { id: 251, label: 'বুদ্ধি প্রতিবন্ধিতা (Intellectual)' },
-  { id: 252, label: 'মানসিক প্রতিবন্ধিতা (Mental)' },
-  { id: 253, label: 'অটিজম (Autism)' },
-  { id: 254, label: 'শ্রবণ-দৃষ্টিপ্রতিবন্ধিতা (Deaf-blind)' },
-  { id: 255, label: 'মস্তিষ্কের ক্ষতিজনিত (Cerebral palsy)' },
-  { id: 256, label: 'বহুমাত্রিক (Multiple)' },
-  { id: 257, label: 'ডাউন সিনড্রোম (Down Syndrome)' },
-  { id: 258, label: 'অন্যান্য (Others)' }
-];
-
-// MFS providers (PMT field 138, v4.9.49): which mobile banking the
-// head's mobile number has an account in. Picked by hand on the head
-// card — the injector never guesses it; the pick reaches the form via
-// form_defaults.program_fields['138'].
-const MFS_PROVIDER_OPTIONS = [
-  { id: 679, label: 'বিকাশ (Bkash)' },
-  { id: 680, label: 'নগদ (Nagad)' },
-  { id: 681, label: 'রকেট (Rocket)' },
-  { id: 682, label: 'উপায় (Upay)' },
-  { id: 683, label: 'এমক্যাশ (MCash)' },
-  { id: 684, label: 'কোনো হিসাব নেই (No Account)' }
-];
 // --- PMT leftover picks (v4.9.69) ---
 // The PMT questions Auto-Fill + presets leave behind, now picked on
 // the head card. Every option name is the site's own wording from
@@ -733,6 +523,217 @@ function updatePmtScoreLine() {
   if (el) el.textContent = pmtScoreLineText();
 }
 // --- end PMT leftover picks ---
+
+const HEAD_FIELDS = [
+  // Order (v4.9.41): identity first — name, then the parents' names
+  // right under it (as on the BD NID card), then gender / religion /
+  // DOB, then the fields the DOB derives (education / profession /
+  // marital). DOB stays before NID, as on the BD NID card.
+  { key: 'name_bn', label: 'Name (BN)' },
+  { key: 'name_en', label: 'Name (EN)' },
+  { key: 'father_name_bn', label: 'Father (BN)' },
+  { key: 'father_name_en', label: 'Father (EN)' },
+  { key: 'mother_name_bn', label: 'Mother (BN)' },
+  { key: 'mother_name_en', label: 'Mother (EN)' },
+  { key: 'gender', label: 'Gender', type: 'gender_select' },
+  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
+  { key: 'nid', label: 'NID / BRN No' },
+  // Doc Type under the number (v4.9.54): the number is typed first
+  // and the type follows it — 17 digits flip it to BRN live — so the
+  // user never has to pick the type before typing the number.
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  // Phone + MFS (v4.9.49, v4.9.50): the head's mobile number fills the
+  // form's ONE mobile field, data.mobile (the form never asks for a
+  // mobile anywhere else); the MFS pick fills PMT field 138
+  // (Bkash/Nagad/...) via form_defaults.program_fields.
+  { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
+  { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
+  // PMT leftover picks (v4.9.69): the questions Auto-Fill + presets
+  // leave behind. Unsectioned so they always show (also on a New
+  // Form). Labels are the site's own question text, word for word
+  // (user 2026-11-22). The floor/wall/roof rows hide unless the
+  // home combo is "other" — a combo pick sets all three.
+  { key: 'home_combo', label: 'বাড়ি কেমন (Home made of)', type: 'home_combo_select' },
+  { key: 'pmt_floor', label: 'খানার প্রধান বসতঘরের মেঝে বা ফ্লোর কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_FLOOR_OPTIONS },
+  { key: 'pmt_wall', label: 'খানার প্রধান ঘরের দেয়াল কি দিয়ে তৈরী?', type: 'pmt_option_select', options: PMT_WALL_OPTIONS },
+  { key: 'pmt_roof', label: 'খানার প্রধান ঘরের ছাদ কি দিয়ে তৈরী', type: 'pmt_option_select', options: PMT_ROOF_OPTIONS },
+  { key: 'pmt_kitchen', label: 'খানায় কি পৃথক রান্নাঘর আছে?', type: 'pmt_option_select', options: PMT_KITCHEN_OPTIONS },
+  { key: 'pmt_dining', label: 'খানায় কি পৃথক খাবার ঘর/কক্ষ আছে?', type: 'pmt_option_select', options: PMT_DINING_OPTIONS },
+  { key: 'pmt_land', label: 'খানার সকল সদস্যের মালিকানাধীন মোট জমির পরিমাণ কত?', type: 'pmt_option_select', options: PMT_LAND_OPTIONS },
+  { key: 'pmt_occupation', label: 'খানার কোন সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?', type: 'pmt_option_select', options: PMT_OCCUPATION_OPTIONS },
+  { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'rooms_number' },
+  { key: 'pmt_lpg', label: 'খানায় রান্নার জ্বালানির প্রধান উপকরণ এলপিজি গ্যাস হলে প্রতিমাসে এলপিজি গ্যাস ব্যবহারের পরিমান', type: 'pmt_option_select', options: PMT_LPG_OPTIONS },
+  { key: 'pmt_diesel', label: 'কৃষি কাজে ডিজেল ব্যবহার হলে তার মাসিক আনুমানিক পরিমাণ', type: 'pmt_option_select', options: PMT_DIESEL_OPTIONS },
+  { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
+  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
+  { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
+  { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  // Disability + Health (v4.9.50): the head is a person too — the same
+  // Disabled / Disability Type / Health fields as a member card. They
+  // ride on the head member row (the head form itself has no health
+  // or disability fields); the form's health select is required.
+  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
+  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
+  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
+  // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
+  // head is the one the Halnagad check reports on.
+  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
+  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' },
+  // (v38) All-tabs pull: the rest of the form, organised in sections
+  // matching the site's tabs. Text fields are editable and fill back
+  // (empty-only); 'info' fields show the name the pull resolved from
+  // the site's own lists (the panel has no such list to offer a
+  // dropdown from, so the name is shown, not edited — the id rides
+  // on the record for Auto-Fill).
+  { key: 'spouse_name_bn', label: 'Spouse (BN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'spouse_name_en', label: 'Spouse (EN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'identification_mark', label: 'ID Mark (শনাক্তকরণ চিহ্ন)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nationality', label: 'Nationality (জাতীয়তা)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'email', label: 'Email (ইমেইল)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'mobile_operator', label: 'Mobile Operator', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'disability_id', label: 'Disability (প্রতিবন্ধিতা)', type: 'info', labelMap: 'DISABILITY_TYPE_OPTIONS', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'house_size', label: 'Household Size (খানার সদস্য)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'no_of_room_name', label: 'No. of Rooms (কক্ষ সংখ্যা)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nominee_bn', label: 'Nominee (BN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_en', label: 'Nominee (EN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_verification_number', label: 'Nominee NID/BRN', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_date_of_birth', label: 'Nominee DOB', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_address', label: 'Nominee Address', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_relation_with_beneficiary', label: 'Nominee Relation', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_nationality', label: 'Nominee Nationality', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'account_type', label: 'Account Type', type: 'account_type_select', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_name', label: 'Bank', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'branch_name', label: 'Branch', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_division_name', label: 'Bank Division', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'bank_district_name', label: 'Bank District', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_name', label: 'Account Name', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_owner', label: 'Account Owner', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'account_number', label: 'Account Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'mfs_number', label: 'MFS Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
+  { key: 'address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'ঠিকানা (Address)' },
+  { key: 'address_division_name', label: 'Division', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_district_name', label: 'District', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_union_name', label: 'Union', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_pouro_name', label: 'Pouroshava', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_city_name', label: 'City', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_ward_name', label: 'Ward', type: 'info', section: 'ঠিকানা (Address)' },
+  { key: 'address_post_code', label: 'Post Code', section: 'ঠিকানা (Address)' },
+  { key: 'address_text', label: 'Address (ঠিকানা)', section: 'ঠিকানা (Address)' },
+  { key: 'permanent_address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_division_name', label: 'Division', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_district_name', label: 'District', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_thana_name', label: 'Thana/Upazila', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_union_name', label: 'Union', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_pouro_name', label: 'Pouroshava', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_city_name', label: 'City', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_ward_name', label: 'Ward', type: 'info', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_post_code', label: 'Post Code', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'permanent_address_text', label: 'Address (ঠিকানা)', section: 'স্থায়ী ঠিকানা (Permanent Address)' },
+  { key: 'program_male', label: 'Male Members (পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_female', label: 'Female Members (নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_hijra', label: 'Hijra Members (হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_male', label: 'Abroad — Male (বিদেশে পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_female', label: 'Abroad — Female (বিদেশে নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'program_abroad_hijra', label: 'Abroad — Hijra (বিদেশে হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' }
+];
+
+const MEMBER_FIELDS = [
+  { key: 'relation', label: 'Relation', type: 'rel_select' },
+  { key: 'name_bn', label: 'Name (BN)' },
+  { key: 'name_en', label: 'Name (EN)' },
+  // Parents' names (v4.9.41): right under the name, as on the BD NID
+  // card — not down below the derived fields.
+  { key: 'father_name_bn', label: 'Father (BN)' },
+  { key: 'mother_name_bn', label: 'Mother (BN)' },
+  { key: 'gender', label: 'Gender', type: 'gender_select' },
+  { key: 'religion', label: 'Religion (ধর্ম)', type: 'religion_select' },
+  { key: 'dob', label: 'DOB (DD-MM-YYYY)' },
+  { key: 'nid_or_brn', label: 'NID / BRN No' },
+  // Doc Type under the number (v4.9.54): the number is typed first
+  // and the type follows it — 17 digits flip it to BRN live — so the
+  // user never has to pick the type before typing the number.
+  { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  // (No member Mobile: the form asks for a mobile number in ONE place
+  // only — data.mobile on the head form. Member rows never render a
+  // mobile input, so the member card has no Mobile field. v4.9.50.)
+  // Education / profession / marital (v4.9.39): same three the head card
+  // has, so a member's derived values (e.g. the husband's Agriculture)
+  // are visible and changeable offline. Profession here is the type-44
+  // livelihood list; marital uses the site's typo key maritial_status_id.
+  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
+  { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
+  { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  // (v38, v4.9.65) Annual income (the form's real number — editable,
+  // fills back empty-only). The Literacy and Govt Job rows are gone
+  // (v4.9.65, user: unnecessary) — the data still flows through
+  // normalizeOutput into the payload, and the injector still fills
+  // literacy from education; the cards just don't show those rows.
+  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
+  // Disability (v4.9.49): a disabled member needs the type on the form
+  // (lookup type 11). The type row only shows when Disabled is Yes.
+  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
+  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
+  // Health (v4.9.49): কর্মক্ষম (Able-bodied, 203) is the default —
+  // the form's health field (type 43) — the other options are picked
+  // from here. A disabled member shows blank instead of the
+  // able-bodied default, so the right option gets picked.
+  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
+  // Benefit (v4.9.36): whether this member already receives another
+  // programme (SSNP), which card, and whether they got DSS training /
+  // a DSS benefit. The injector reads these on Auto-Fill; the Halnagad
+  // detection fills them in automatically for the head.
+  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
+  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' }
+];
+// Government Card types (lookup type 42). 185 (NO Card) is not offered
+// — it means "no card", which is SSNP No.
+const GOV_CARD_OPTIONS = [
+  { id: 162, label: 'Social Welfare Allowance (সমাজকল্যাণ ভাতা)' },
+  { id: 163, label: 'VGF / VGD' },
+  { id: 164, label: 'Ration Card' },
+  { id: 165, label: 'Fertilizer Card' },
+  { id: 166, label: 'TCB Card' },
+  { id: 167, label: 'Muktijoddha Card' },
+  { id: 168, label: 'Scholarship Card' },
+  { id: 169, label: 'Migrant Workers Welfare Card' },
+  { id: 170, label: 'Pension Card' },
+  { id: 171, label: 'Agriculture Card' },
+  { id: 172, label: 'Fishermen Card' }
+];
+// Disability types (lookup type 11, v4.9.49). The form needs the type
+// when a member is disabled; the AI cannot know it from an NID photo,
+// so the user picks it by hand on the card.
+const DISABILITY_TYPE_OPTIONS = [
+  { id: 247, label: 'শারীরিক প্রতিবন্ধিতা (Physical)' },
+  { id: 248, label: 'দৃষ্টি প্রতিবন্ধিতা (Visual)' },
+  { id: 249, label: 'শ্রবণ প্রতিবন্ধিতা (Hearing)' },
+  { id: 250, label: 'বাক প্রতিবন্ধিতা (Speech)' },
+  { id: 251, label: 'বুদ্ধি প্রতিবন্ধিতা (Intellectual)' },
+  { id: 252, label: 'মানসিক প্রতিবন্ধিতা (Mental)' },
+  { id: 253, label: 'অটিজম (Autism)' },
+  { id: 254, label: 'শ্রবণ-দৃষ্টিপ্রতিবন্ধিতা (Deaf-blind)' },
+  { id: 255, label: 'মস্তিষ্কের ক্ষতিজনিত (Cerebral palsy)' },
+  { id: 256, label: 'বহুমাত্রিক (Multiple)' },
+  { id: 257, label: 'ডাউন সিনড্রোম (Down Syndrome)' },
+  { id: 258, label: 'অন্যান্য (Others)' }
+];
+
+// MFS providers (PMT field 138, v4.9.49): which mobile banking the
+// head's mobile number has an account in. Picked by hand on the head
+// card — the injector never guesses it; the pick reaches the form via
+// form_defaults.program_fields['138'].
+const MFS_PROVIDER_OPTIONS = [
+  { id: 679, label: 'বিকাশ (Bkash)' },
+  { id: 680, label: 'নগদ (Nagad)' },
+  { id: 681, label: 'রকেট (Rocket)' },
+  { id: 682, label: 'উপায় (Upay)' },
+  { id: 683, label: 'এমক্যাশ (MCash)' },
+  { id: 684, label: 'কোনো হিসাব নেই (No Account)' }
+];
 // Health conditions (lookup type 43, v4.9.49): কর্মক্ষম (Able-bodied,
 // 203) is the default — the form's health field — the other options
 // are picked from the same dropdown.
