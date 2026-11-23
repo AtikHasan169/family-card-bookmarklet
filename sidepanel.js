@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.75-live';
+const CURRENT_VERSION_TAG = 'v4.9.76-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1038,6 +1038,12 @@ try { perspectiveEnabled = localStorage.getItem('fc_pro_perspective') === '1'; }
 // field blank, so it can be typed by hand (New Form).
 let banglishEnabled = true;
 try { banglishEnabled = localStorage.getItem('fc_pro_banglish') !== '0'; } catch (_) {}
+// Burst capture (v4.9.76): on by default, remembered across sessions.
+// On = one Capture tap takes BURST_SHOTS shots and the picker lets the
+// user choose one; off = one Capture tap takes a single photo straight
+// into the crop editor. A stored '0' (turned off before) turns it off.
+let burstEnabled = true;
+try { burstEnabled = localStorage.getItem('fc_pro_burst') !== '0'; } catch (_) {}
 let panX = 0;
 let panY = 0;
 let isDragging = false;
@@ -1358,6 +1364,7 @@ function initApp() {
   $('switchCameraBtn').addEventListener('click', switchPanelCamera);
   const perspCamBtn = $('perspectiveToggleCamBtn');
   if (perspCamBtn) perspCamBtn.addEventListener('click', togglePerspective);
+  setupBurstToggle();
   const frameBtn = $('frameRotateBtn');
   if (frameBtn) frameBtn.addEventListener('click', toggleFrameOrientation);
   const zoomRange = $('zoomRange');
@@ -4754,7 +4761,7 @@ function openCamera(category) {
 }
 
 // --- Burst sharpness (v4.9.67) ---
-const BURST_SHOTS = 5;
+const BURST_SHOTS = 3; // v4.9.76: was 5 — three shots are enough to pick from, and faster on a slow tablet.
 const BURST_GAP_MS = 120;
 // Laplacian variance: how sharp is this photo? Pure — takes an
 // ImageData-like {width, height, data} (RGBA) and returns a number;
@@ -4865,10 +4872,22 @@ function grabCameraFrame() {
 // Burst (v4.9.67): one Capture tap takes BURST_SHOTS shots, then the
 // picker lets the user choose one — the sharpest is starred, but the
 // user decides. The camera keeps running until a shot is used.
+// Burst off (v4.9.76): one tap takes a single photo straight into
+// the crop editor instead — no picker, no extra shots.
 async function capturePanelPhoto() {
   const video = $('cameraVideo');
   if (!video || !video.videoWidth) {
     setStatus('Camera is not ready yet — wait a second and try again.', 'err');
+    return;
+  }
+  if (!burstEnabled) {
+    const shot = grabCameraFrame();
+    if (!shot.b64) {
+      setStatus('Could not capture this photo — try again.', 'err');
+      setCameraHint(frameHintText(), '');
+      return;
+    }
+    useCameraShot(shot.b64);
     return;
   }
   const runId = ++burstRunId;
@@ -5030,14 +5049,11 @@ function showBurstPreview(i) {
   setCameraHint('Shot ' + (i + 1) + ' of ' + burstShots.length + ' — check it, then Use this shot or go back.', '');
 }
 
-// The chosen burst shot goes through the same path a single Capture
-// used to: retake replaces the old photo in place, otherwise it is
-// added and opens in the crop editor. The other shots are discarded.
-function useBurstShot() {
-  const shot = burstShots[burstSelected];
-  if (!shot || !shot.b64) return;
-  const b64 = shot.b64;
-  burstShots = [];
+// A captured frame — the single shot, or the burst shot the user
+// picked — goes to the crop editor: retake replaces the old photo in
+// place, otherwise it is added. The camera stops either way.
+function useCameraShot(b64) {
+  if (!b64) return;
   const replacing = retakeItem;
   retakeItem = null;
   stopPanelCamera();
@@ -5056,6 +5072,17 @@ function useBurstShot() {
   addImage(panelCameraCategory, b64, 'Camera.jpg', 'camera');
   const item = state[panelCameraCategory][state[panelCameraCategory].length - 1];
   if (item) openCropForImage(item); // straight into the crop editor (no auto-scan for a camera photo)
+}
+
+// The chosen burst shot goes through the same path a single Capture
+// used to: retake replaces the old photo in place, otherwise it is
+// added and opens in the crop editor. The other shots are discarded.
+function useBurstShot() {
+  const shot = burstShots[burstSelected];
+  if (!shot || !shot.b64) return;
+  const b64 = shot.b64;
+  burstShots = [];
+  useCameraShot(b64);
 }
 
 async function switchPanelCamera() {
@@ -5885,6 +5912,50 @@ function togglePerspective() {
     setCameraHint(frameHintText(), '');
     drawCameraFrame();
   }
+}
+
+// Burst toggle (v4.9.76): on = one Capture tap takes BURST_SHOTS
+// shots and the picker lets the user choose; off = one tap takes a
+// single photo. Same blue/grey paint as the perspective toggle, and
+// remembered across sessions like it. Built in JS (no sidepanel.html
+// change), next to the perspective toggle in the camera actions row.
+// The toggle only affects the NEXT capture — a burst already running
+// finishes and shows its picker.
+let burstToggleLabel = null;
+let burstToggleBuilt = false;
+function updateBurstToggle() {
+  const btn = $('burstToggleCamBtn');
+  if (!btn) return;
+  btn.style.background = burstEnabled ? '#2563eb' : '#475569';
+  btn.title = burstEnabled ? 'Burst: On — one tap takes 3 shots, pick the sharpest' : 'Burst: Off — one tap takes a single photo';
+  const label = burstToggleLabel || btn.querySelector('.burst-state');
+  if (label) label.textContent = burstEnabled ? 'On' : 'Off';
+}
+function toggleBurst() {
+  burstEnabled = !burstEnabled;
+  try { localStorage.setItem('fc_pro_burst', burstEnabled ? '1' : '0'); } catch (_) {}
+  updateBurstToggle();
+  setStatus(burstEnabled ? 'Burst on — one tap takes 3 shots.' : 'Burst off — one tap takes a single photo.', 'ok');
+}
+function setupBurstToggle() {
+  if (burstToggleBuilt) return;
+  const perspBtn = $('perspectiveToggleCamBtn');
+  if (!perspBtn || !perspBtn.parentNode) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn';
+  btn.id = 'burstToggleCamBtn';
+  btn.style.cssText = 'background:#2563eb; color:#fff; padding: 8px 10px; font-size:12px; font-weight:600; gap:6px;';
+  btn.textContent = 'Burst ';
+  const label = document.createElement('span');
+  label.className = 'burst-state';
+  label.textContent = 'On';
+  btn.appendChild(label);
+  burstToggleLabel = label;
+  btn.addEventListener('click', toggleBurst);
+  perspBtn.parentNode.insertBefore(btn, perspBtn.nextSibling);
+  burstToggleBuilt = true;
+  updateBurstToggle();
 }
 
 function cropCanvasSize() {
