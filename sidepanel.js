@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.74-live';
+const CURRENT_VERSION_TAG = 'v4.9.75-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -107,26 +107,38 @@ const LIVELIHOOD_OPTIONS = [
   { id: 226, label: 'অন্যান্য / Others' }
 ];
 
-// --- Profession income table (v4.9.73) ---
+// --- Profession income table (v4.9.75) ---
 // Typical annual income (Tk) guessed from a member's livelihood
 // (type-44 ids above). User-confirmed 2026-11-22: Agriculture 60000
 // was right; the rest lowered for poor applicant families and
-// seasonal work. A real income always wins over this guess; the head
-// and students get 0. Income is never summed or scored — this only
-// fills the required box so the form submits. The injector carries
-// the same table; keep the two in step (tests/profession_income_test.js
-// checks they match).
+// seasonal work — then re-checked 2026-11-22 against real wages
+// (BBS ag wage ~620/day, garment minimum 12,500/month, BILS
+// domestic ~5,300/month, rural pedal rickshaw net ~300–500/day):
+// Private Job 96000 -> 120000, Garment 120000 -> 150000, Domestic
+// 48000 -> 60000, Rickshaw/Van 96000 -> 72000 (not every day);
+// Govt Job stays 180000 at the user's call (the new 2026 pay scale
+// doubled it, but he kept the old number). A real income always
+// wins over this guess; the head and students get 0. Income is never
+// summed or scored — this only fills the required box so the form
+// submits. The injector carries the same table; keep the two in
+// step (tests/profession_income_test.js checks they match).
+// (v4.9.75) A guess is no longer one fixed number: each table value
+// is the middle of a +/-7% range (INCOME_RANGE_PCT), rolled once
+// when the income is first guessed and then kept — so families stop
+// looking identical, but the same family always shows the same
+// number. 0-value professions stay exactly 0.
+const INCOME_RANGE_PCT = 0.07;
 const PROFESSION_INCOME = {
   210: 60000,  // Agriculture
   211: 84000,  // Business
-  212: 96000,  // Private Job
+  212: 120000, // Private Job
   213: 180000, // Govt Job
   214: 72000,  // Day Laborer
-  215: 120000, // Garment Worker
-  216: 96000,  // Rickshaw/Van Driver
+  215: 150000, // Garment Worker
+  216: 72000,  // Rickshaw/Van Driver
   217: 96000,  // Transport Worker
   218: 72000,  // Hotel/Restaurant Worker
-  219: 48000,  // Domestic Worker
+  219: 60000,  // Domestic Worker
   220: 0,      // Student
   221: 24000,  // Apprentice
   222: 0,      // Unemployed
@@ -140,13 +152,81 @@ function incomeForProfession(professionId) {
   const v = PROFESSION_INCOME[Number(professionId)];
   return v === undefined ? 0 : v;
 }
-// The income a member would show from a profession alone (v4.9.74):
-// student-age (4–24) is always 0; no profession on file falls back
-// to the old Husband 60000 / others 0 rule. A real income is never
-// derived here — normalizeOutput's real-value branches win first,
-// and the card's profession handler only overwrites an income that
-// still equals the old guess (or is blank/0).
+// The +/-7% range around a table value, rounded to the nearest 1000
+// so the number still looks like a real yearly income. 0 stays 0.
+function incomeRangeFor(mid) {
+  const m = Number(mid) || 0;
+  if (m === 0) return { low: 0, high: 0 };
+  return {
+    low: Math.round(m * (1 - INCOME_RANGE_PCT) / 1000) * 1000,
+    high: Math.round(m * (1 + INCOME_RANGE_PCT) / 1000) * 1000
+  };
+}
+// Roll one multiple of 1000 inside the range. Callers roll ONCE and
+// store the result as the person's income — never re-roll a stored
+// value, or the panel and the form would disagree.
+function rollIncome(mid) {
+  const r = incomeRangeFor(mid);
+  if (r.low === r.high) return r.low;
+  const steps = Math.round((r.high - r.low) / 1000);
+  return r.low + Math.floor(Math.random() * (steps + 1)) * 1000;
+}
+// The rolled guess for a profession id (0 for a 0-value profession
+// or an unknown id).
+function incomeGuessForProfession(professionId) {
+  return rollIncome(incomeForProfession(professionId));
+}
+// Is this number still a guess from this profession — i.e. inside
+// its range? The card handlers use it to tell a guess from a
+// hand-typed income (a hand-typed number that happens to land inside
+// the range is treated as a guess, the same trade-off as the old
+// exact-match check).
+function isGuessedIncome(value, mid) {
+  const r = incomeRangeFor(mid);
+  return Number(value) >= r.low && Number(value) <= r.high;
+}
+// Head profession income (type-34 ids, v4.9.75): the head card never
+// had an income row, so the head always showed 0. User-confirmed
+// 2026-11-22, lowered from the member values ("make lower for
+// head"): Farmer 36000, Business 60000, Service 72000, Day Laborer
+// 48000, Laborer 48000; Housewife/Student/Unemployed/Others 0.
+// Same +/-7% roll as members; the head uses her profession table
+// directly, with no student-age override (Student is 0 in the table).
+const HEAD_PROFESSION_INCOME = {
+  151: 36000, // Farmer (site spells it "Farmar")
+  149: 60000, // Business
+  107: 72000, // Service
+  150: 48000, // Day Laborer
+  109: 48000, // Laborer
+  181: 0,     // House Wife
+  106: 0,     // Student
+  108: 0,     // Unemployed
+  110: 0      // Others
+};
+function incomeForHeadProfession(professionId) {
+  const v = HEAD_PROFESSION_INCOME[Number(professionId)];
+  return v === undefined ? 0 : v;
+}
+function incomeGuessForHeadProfession(professionId) {
+  return rollIncome(incomeForHeadProfession(professionId));
+}
+// The income a member would show from a profession alone (v4.9.74,
+// rolled since v4.9.75): student-age (4–24) is always 0; no
+// profession on file falls back to the old Husband 60000 / others 0
+// rule, rolled the same way. A real income is never derived here —
+// normalizeOutput's real-value branches win first, and the card's
+// profession handler only overwrites an income that is still a guess
+// (blank, 0, or inside the old profession's range).
 function incomeGuessForMember(entry, profId) {
+  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
+  if (isStudentAge) return 0;
+  if (profId !== undefined && profId !== null && String(profId).trim() !== '') return incomeGuessForProfession(profId);
+  return entry && entry.relation === 'Husband' ? rollIncome(60000) : 0;
+}
+// The midpoint behind incomeGuessForMember — for the card handler's
+// "is this still a guess" check, which tests range membership instead
+// of equality now that guesses are rolled (v4.9.75).
+function incomeGuessMidForMember(entry, profId) {
   const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
   if (isStudentAge) return 0;
   if (profId !== undefined && profId !== null && String(profId).trim() !== '') return incomeForProfession(profId);
@@ -702,6 +782,7 @@ const HEAD_FIELDS = [
   { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
+  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
   { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
   // Disability + Health (v4.9.50): the head is a person too — the same
   // Disabled / Disability Type / Health fields as a member card. They
@@ -3511,7 +3592,21 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
     inputEl.value = targetObj.profession !== undefined && targetObj.profession !== null && String(targetObj.profession).trim() !== '' ? String(targetObj.profession) : '';
     inputEl.addEventListener('change', (e) => {
       const v = e.target.value;
+      // (v4.9.75) A profession pick re-derives the head income live,
+      // like the member livelihood handler (v4.9.74): only while the
+      // current income is still a guess — blank, 0, or inside the OLD
+      // profession's +/-7% range. A hand-typed income never moves.
+      const oldProf = targetObj.profession;
+      const oldMid = incomeForHeadProfession(oldProf);
+      const curIncome = targetObj.estimate_annual_income;
       targetObj.profession = v === '' ? undefined : Number(v);
+      if (curIncome === undefined || curIncome === null || String(curIncome).trim() === '' || Number(curIncome) === 0 || isGuessedIncome(Number(curIncome), oldMid)) {
+        targetObj.estimate_annual_income = incomeGuessForHeadProfession(targetObj.profession);
+        if (cardContainer) {
+          const incIn = cardContainer.querySelector('input[data-field="estimate_annual_income"]');
+          if (incIn) { incIn.value = displayTextValue(targetObj.estimate_annual_income); toggleWarning(incIn); }
+        }
+      }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
@@ -3543,12 +3638,14 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       // re-ran normalizeOutput (user 2026-11-22: "I selected the
       // profession but in panel it stays 0"). A hand-typed income
       // never moves: it only changes while it is still a guess —
-      // blank, 0, or equal to the old guess.
+      // blank, 0, or inside the old guess's +/-7% range (v4.9.75:
+      // guesses are rolled now, so the check is range membership,
+      // not equality with a fresh roll).
       const oldProf = targetObj.livelihood_profession_id;
-      const oldGuess = incomeGuessForMember(targetObj, oldProf);
+      const oldMid = incomeGuessMidForMember(targetObj, oldProf);
       const curIncome = targetObj.estimate_annual_income;
       targetObj.livelihood_profession_id = v === '' ? undefined : Number(v);
-      if (curIncome === undefined || curIncome === null || String(curIncome).trim() === '' || Number(curIncome) === 0 || Number(curIncome) === oldGuess) {
+      if (curIncome === undefined || curIncome === null || String(curIncome).trim() === '' || Number(curIncome) === 0 || isGuessedIncome(Number(curIncome), oldMid)) {
         targetObj.estimate_annual_income = incomeGuessForMember(targetObj, targetObj.livelihood_profession_id);
         if (cardContainer) {
           const incIn = cardContainer.querySelector('input[data-field="estimate_annual_income"]');
@@ -6199,6 +6296,24 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   // beneficiary is set to Yes after this runs.
   const headSamePerson = !!(prev && prev.head && samePersonId(cleanHeadId, prev.head.nid || prev.head.nid_or_brn));
   const headPrev = headSamePerson ? prev.head : null;
+  // Annual income (v4.9.75): the head card never had an income row,
+  // so every old record carries 0 — a 0 only counts as a real income
+  // for a 0-value head profession (Housewife/Student/Unemployed/
+  // Others). Otherwise a real non-zero income wins, then the same
+  // person's previous income, then the rolled guess from the head
+  // profession table (incomeGuessForHeadProfession). A rolled guess
+  // is stored as the income, so it sticks on the next Extract.
+  const headIncRaw = h.estimate_annual_income;
+  const headIncKnown = headIncRaw !== undefined && headIncRaw !== null && String(headIncRaw).trim() !== '' && Number(headIncRaw) !== 0;
+  if (headIncKnown) {
+    head.estimate_annual_income = Number(headIncRaw);
+  } else if (headPrev && headPrev.estimate_annual_income !== undefined && headPrev.estimate_annual_income !== null && String(headPrev.estimate_annual_income).trim() !== '' && Number(headPrev.estimate_annual_income) !== 0) {
+    head.estimate_annual_income = Number(headPrev.estimate_annual_income);
+  } else if (incomeForHeadProfession(head.profession) === 0) {
+    head.estimate_annual_income = 0;
+  } else {
+    head.estimate_annual_income = incomeGuessForHeadProfession(head.profession);
+  }
   if (preserveOrder && (h.is_ssnp_covered === 0 || h.is_ssnp_covered === 1 || h.is_ssnp_covered === '0' || h.is_ssnp_covered === '1')) {
     head.is_ssnp_covered = Number(h.is_ssnp_covered);
   } else if (headPrev && (headPrev.is_ssnp_covered === 0 || headPrev.is_ssnp_covered === 1)) {

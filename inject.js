@@ -9,29 +9,39 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v51';
+  const FC_INJECT_VERSION = 'v52';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
-  // --- Profession income table (v51) ---
+  // --- Profession income table (v52) ---
   // Typical annual income (Tk) guessed from a member's livelihood
-  // (type-44 ids). User-confirmed 2026-11-22: Agriculture 60000 was
-  // right; the rest lowered for poor applicant families and seasonal
-  // work. A real income always wins over this guess; the head and
-  // students get 0. Income is never summed or scored — this only
-  // fills the required box so the form submits. The panel carries the
-  // same table; keep the two in step (tests/profession_income_test.js
+  // (type-44 ids). User-confirmed 2026-11-22, re-checked against
+  // real wages the same day (BBS ag wage ~620/day, garment minimum
+  // 12,500/month, BILS domestic ~5,300/month, rural pedal rickshaw
+  // net ~300–500/day): Private Job 96000 -> 120000, Garment 120000
+  // -> 150000, Domestic 48000 -> 60000, Rickshaw/Van 96000 -> 72000
+  // (not every day); Govt Job stays 180000 at the user's call. A
+  // real income always wins over this guess; the head and students
+  // get 0. Income is never summed or scored — this only fills the
+  // required box so the form submits. The panel carries the same
+  // table; keep the two in step (tests/profession_income_test.js
   // checks they match).
+  // (v52) A guess is no longer one fixed number: each table value
+  // is the middle of a +/-7% range (INCOME_RANGE_PCT), rolled once
+  // when the income is first guessed and then kept — so families stop
+  // looking identical, but the same family always shows the same
+  // number. 0-value professions stay exactly 0.
+  const INCOME_RANGE_PCT = 0.07;
   const PROFESSION_INCOME = {
     210: 60000,  // Agriculture
     211: 84000,  // Business
-    212: 96000,  // Private Job
+    212: 120000, // Private Job
     213: 180000, // Govt Job
     214: 72000,  // Day Laborer
-    215: 120000, // Garment Worker
-    216: 96000,  // Rickshaw/Van Driver
+    215: 150000, // Garment Worker
+    216: 72000,  // Rickshaw/Van Driver
     217: 96000,  // Transport Worker
     218: 72000,  // Hotel/Restaurant Worker
-    219: 48000,  // Domestic Worker
+    219: 60000,  // Domestic Worker
     220: 0,      // Student
     221: 24000,  // Apprentice
     222: 0,      // Unemployed
@@ -45,16 +55,63 @@
     const v = PROFESSION_INCOME[Number(professionId)];
     return v === undefined ? 0 : v;
   }
+  function incomeRangeFor(mid) {
+    const m = Number(mid) || 0;
+    if (m === 0) return { low: 0, high: 0 };
+    return {
+      low: Math.round(m * (1 - INCOME_RANGE_PCT) / 1000) * 1000,
+      high: Math.round(m * (1 + INCOME_RANGE_PCT) / 1000) * 1000
+    };
+  }
+  function rollIncome(mid) {
+    const r = incomeRangeFor(mid);
+    if (r.low === r.high) return r.low;
+    const steps = Math.round((r.high - r.low) / 1000);
+    return r.low + Math.floor(Math.random() * (steps + 1)) * 1000;
+  }
+  function incomeGuessForProfession(professionId) {
+    return rollIncome(incomeForProfession(professionId));
+  }
+  function isGuessedIncome(value, mid) {
+    const r = incomeRangeFor(mid);
+    return Number(value) >= r.low && Number(value) <= r.high;
+  }
+  // Head profession income (type-34 ids, v52): the head card never
+  // had an income row, so the head always got 0 on Auto-Fill.
+  // User-confirmed 2026-11-22, lowered from the member values:
+  // Farmer 36000, Business 60000, Service 72000, Day Laborer 48000,
+  // Laborer 48000; Housewife/Student/Unemployed/Others 0. Same
+  // +/-7% roll as members; the head uses her profession table
+  // directly, with no student-age override (Student is 0 here).
+  const HEAD_PROFESSION_INCOME = {
+    151: 36000, // Farmer (site spells it "Farmar")
+    149: 60000, // Business
+    107: 72000, // Service
+    150: 48000, // Day Laborer
+    109: 48000, // Laborer
+    181: 0,     // House Wife
+    106: 0,     // Student
+    108: 0,     // Unemployed
+    110: 0      // Others
+  };
+  function incomeForHeadProfession(professionId) {
+    const v = HEAD_PROFESSION_INCOME[Number(professionId)];
+    return v === undefined ? 0 : v;
+  }
+  function incomeGuessForHeadProfession(professionId) {
+    return rollIncome(incomeForHeadProfession(professionId));
+  }
   // The income guess for an earning adult member: the profession
   // table when the panel resolved a livelihood, else the old rule
-  // (Husband 60000, everyone else 0). A known profession whose table
-  // value is 0 (Unemployed, Homemaker, Others) stays 0 — only "no
-  // profession on file" falls back to the husband default.
+  // (Husband 60000, everyone else 0) — both rolled since v52. A
+  // known profession whose table value is 0 (Unemployed, Homemaker,
+  // Others) stays 0 — only "no profession on file" falls back to
+  // the husband default.
   function incomeGuessForMember(member, relName) {
     const raw = member && member.livelihood_profession_id;
     const profId = (raw !== undefined && raw !== null && String(raw).trim() !== '') ? Number(raw) : undefined;
-    if (profId !== undefined) return incomeForProfession(profId);
-    return relName === 'Husband' ? 60000 : 0;
+    if (profId !== undefined) return incomeGuessForProfession(profId);
+    return relName === 'Husband' ? rollIncome(60000) : 0;
   }
   // --- end profession income table ---
 
@@ -3673,28 +3730,45 @@
 
           // Income (v38): the pull now brings the form's own annual
           // income (e.g. 150000 for the husband) — write it back when
-          // the row is empty, instead of the 60000 guess below. The
-          // head/student 0-rule still applies after it.
+          // the row is empty, instead of the guess below. (v52) The
+          // head row is included now: the panel carries the head's
+          // income (real or rolled guess). A blank site row starts at
+          // 0 (createEmptyFamilyMember), so 0 counts as empty here —
+          // otherwise the panel's value would never land on a fresh
+          // form. The student 0-rule still applies after it.
           const isHeadRow = relId === 260 || relName === 'Head/Self';
           const isStudentRow = memAge !== null && memAge >= 4 && memAge <= 24;
-          if (!isHeadRow && !isStudentRow && m.estimate_annual_income !== undefined && m.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && isEmptyModelVal(row.estimate_annual_income)) {
+          if (!isStudentRow && m.estimate_annual_income !== undefined && m.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && (isEmptyModelVal(row.estimate_annual_income) || Number(row.estimate_annual_income) === 0)) {
             setReactive(vmMembers, row, 'estimate_annual_income', Number(m.estimate_annual_income));
           }
 
-          // Income: the head and students earn nothing — keep it 0.
-          // (v51) Otherwise guess from the profession (the panel's
-          // resolved livelihood, incomeGuessForMember above): a
-          // husband with no profession on file keeps the old 60000,
-          // everyone else with nothing known gets 0. (v48) An empty
-          // income glows red and blocks the form on one variant, so
-          // a guess of 0 still lands instead of empty: the site's own
-          // blank row defaults to 0 (createEmptyFamilyMember) and 0
-          // passes (Number >= 0); income is never summed or scored.
-          if (isHeadRow || isStudentRow) {
+          // Income: students earn nothing — keep it 0. (v52) The head
+          // row guesses from her profession table instead of always
+          // 0: a 0 only stands for a 0-value head profession — an old
+          // panel always sent 0, so a 0 with an earning profession is
+          // guessed (incomeGuessForHeadProfession above); the panel's
+          // own value was already written by the branch above when
+          // the row was empty. Otherwise guess from the profession
+          // (the panel's resolved livelihood, incomeGuessForMember
+          // above): a husband with no profession on file keeps the
+          // old 60000 (rolled since v52), everyone else with nothing
+          // known gets 0. (v48) An empty income glows red and blocks
+          // the form on one variant, so a guess of 0 still lands
+          // instead of empty: the site's own blank row defaults to 0
+          // (createEmptyFamilyMember) and 0 passes (Number >= 0);
+          // income is never summed or scored. (v52) A 0 row counts as
+          // empty for the guess too — on a fresh form every row starts
+          // at 0, so without this the guess would never land except
+          // for a husband.
+          if (isHeadRow) {
+            if (isEmptyModelVal(row.estimate_annual_income) || (Number(row.estimate_annual_income) === 0 && incomeForHeadProfession(m.profession) !== 0)) {
+              setReactive(vmMembers, row, 'estimate_annual_income', incomeGuessForHeadProfession(m.profession));
+            }
+          } else if (isStudentRow) {
             setReactive(vmMembers, row, 'estimate_annual_income', 0);
           } else if (relName === 'Husband' && !row.estimate_annual_income) {
             setReactive(vmMembers, row, 'estimate_annual_income', incomeGuessForMember(m, relName));
-          } else if (isEmptyModelVal(row.estimate_annual_income)) {
+          } else if (isEmptyModelVal(row.estimate_annual_income) || Number(row.estimate_annual_income) === 0) {
             setReactive(vmMembers, row, 'estimate_annual_income', incomeGuessForMember(m, relName));
           }
 
