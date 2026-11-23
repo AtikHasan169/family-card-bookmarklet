@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.76-live';
+const CURRENT_VERSION_TAG = 'v4.9.77-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -7011,6 +7011,43 @@ function renderHouseholdSummaryCard(data) {
   wrap.appendChild(card);
 }
 
+// Head-change profession conversion (v4.9.77): the head uses the
+// type-34 `profession`, a member the type-44 `livelihood_profession_id`
+// — the two lists are different ids for the same work, so a head
+// change converts instead of dropping the value (the old code deleted
+// both and the DOB derivation refilled Housewife 181 / Homemaker 225,
+// wiping a real profession). A type-44 id with no type-34 equivalent
+// becomes Labourer 109 (the closest manual work); Service 107 becomes
+// Private Job 212 on the way back (the commoner of the two services).
+const LIVELIHOOD_TO_HEAD_PROFESSION = { 210: 151, 211: 149, 212: 107, 213: 107, 214: 150, 215: 109, 216: 109, 217: 109, 218: 109, 219: 109, 220: 106, 221: 109, 222: 108, 223: 110, 224: 110, 225: 181, 275: 110, 226: 110 };
+const HEAD_TO_LIVELIHOOD_PROFESSION = { 151: 210, 149: 211, 107: 212, 150: 214, 109: 214, 106: 220, 108: 222, 110: 226, 181: 225 };
+function headProfessionForLivelihood(livelihoodId) {
+  if (livelihoodId === undefined || livelihoodId === null || String(livelihoodId).trim() === '') return undefined;
+  const v = LIVELIHOOD_TO_HEAD_PROFESSION[Number(livelihoodId)];
+  return v === undefined ? undefined : v;
+}
+function livelihoodForHeadProfession(professionId) {
+  if (professionId === undefined || professionId === null || String(professionId).trim() === '') return undefined;
+  const v = HEAD_TO_LIVELIHOOD_PROFESSION[Number(professionId)];
+  return v === undefined ? undefined : v;
+}
+
+// Head-only data (v4.9.77): keys that live on the head record but never
+// on a member record — the household's contact, MFS, address, bank,
+// PMT picks and pulled PMT answers. A head change moves the ROLE, not
+// the household, so these move to the new head instead of being dropped
+// with the old head. (The person-level fields — names, DOB, NID,
+// education, marital, income, disability, health, SSNP/DSS — already
+// travel on the record itself.) Text + id keys mirror normalizeOutput's
+// headTextKeys / headIdKeys; the PMT picks come from
+// resolveHeadPmtPicks.
+const HEAD_ONLY_KEYS = [
+  'mobile_number', 'mfs_provider_id', 'mfs_number',
+  'pmt_kitchen', 'pmt_dining', 'pmt_land', 'pmt_occupation', 'pmt_lpg', 'pmt_diesel', 'pmt_assets', 'home_combo', 'pmt_floor', 'pmt_wall', 'pmt_roof', 'pmt_answers', 'program_fields',
+  'spouse_name_bn', 'spouse_name_en', 'identification_mark', 'nationality', 'email', 'account_name', 'account_number', 'address_text', 'address_post_code', 'permanent_address_text', 'permanent_address_post_code', 'nominee_en', 'nominee_bn', 'nominee_verification_number', 'nominee_date_of_birth', 'nominee_address', 'nominee_relation_with_beneficiary', 'nominee_nationality', 'mobile_operator', 'account_type_label', 'bank_name', 'branch_name', 'bank_division_name', 'bank_district_name', 'account_owner', 'address_division_name', 'address_district_name', 'address_thana_name', 'address_union_name', 'address_pouro_name', 'address_city_name', 'address_city_thana_name', 'address_district_pouro_name', 'address_ward_name', 'address_location_type_name', 'address_ward_key', 'permanent_address_division_name', 'permanent_address_district_name', 'permanent_address_thana_name', 'permanent_address_union_name', 'permanent_address_pouro_name', 'permanent_address_city_name', 'permanent_address_city_thana_name', 'permanent_address_district_pouro_name', 'permanent_address_ward_name', 'permanent_address_location_type_name', 'permanent_address_ward_key', 'house_size', 'no_of_room_name',
+  'mobile_operator_id', 'disability_id', 'account_type', 'bank_name_id', 'branch_name_id', 'bank_division_id', 'bank_district_id', 'account_owner_id', 'address_division_id', 'address_district_id', 'address_thana_id', 'address_union_id', 'address_pouro_id', 'address_city_id', 'address_city_thana_id', 'address_district_pouro_id', 'address_ward_id', 'address_location_type_id', 'address_sub_location_type_id', 'permanent_address_division_id', 'permanent_address_district_id', 'permanent_address_thana_id', 'permanent_address_union_id', 'permanent_address_pouro_id', 'permanent_address_city_id', 'permanent_address_city_thana_id', 'permanent_address_district_pouro_id', 'permanent_address_ward_id', 'permanent_address_location_type_id', 'permanent_address_sub_location_type_id', 'no_of_room', 'program_male', 'program_female', 'program_hijra', 'program_abroad_male', 'program_abroad_female', 'program_abroad_hijra'
+];
+
 // Head corrections (v4.9.33): when the user changes the head's
 // education, profession or marital status on the card AFTER a fill,
 // the change is recorded here so the next Auto-Fill overwrites the
@@ -7047,14 +7084,60 @@ function recordHeadCorrection(key, value) {
   saveSessionState();
 }
 
+// Member corrections (v4.9.77): the member-card equivalent of
+// recordHeadCorrection — when the user changes a member's option field
+// on the card after a fill, record it so the injector's option sync
+// overwrites the form's value on the next fill instead of skipping it
+// as "already filled". Keyed by the member's NID/BRN (the person, not
+// the row), so they survive reordering and follow the person if she
+// becomes head. Only the option-sync fields are recorded — SSNP/DSS/
+// cards flow through the row loop's provided-flags, and income through
+// its own differs-rule, so they need no correction. A blank (—) clears
+// the correction. The corrections are cleared on a successful fill (see
+// the FC_AUTOFILL_RESPONSE handler), so a later hand-change on the form
+// is never overwritten by a stale one.
+const MEMBER_CORRECTION_KEYS = ['education_status_id', 'livelihood_profession_id', 'maritial_status_id', 'literacy_id', 'health_condition_id', 'disability_type_id'];
+function recordMemberCorrection(memberRecord, key, value) {
+  if (!memberRecord) return;
+  // The card notifies a marital change as 'marital_status'; the
+  // member row's key is the site's typo 'maritial_status_id'.
+  const normKey = key === 'marital_status' ? 'maritial_status_id' : key;
+  if (!MEMBER_CORRECTION_KEYS.includes(normKey)) return;
+  if (!state.lastExtracted) return;
+  const idKey = String(memberRecord.nid_or_brn || memberRecord.nid || memberRecord.brn_id || '').replace(/\s+/g, '');
+  if (!idKey) return; // no id — nothing to match the correction to
+  const d = state.lastExtracted;
+  d.corrections = d.corrections || {};
+  d.corrections.members = d.corrections.members || {};
+  if (value === null || value === undefined || value === '') {
+    if (d.corrections.members[idKey]) {
+      delete d.corrections.members[idKey][normKey];
+      if (!Object.keys(d.corrections.members[idKey]).length) delete d.corrections.members[idKey];
+    }
+  } else {
+    d.corrections.members[idKey] = d.corrections.members[idKey] || {};
+    d.corrections.members[idKey][normKey] = Number(value);
+  }
+  if (!Object.keys(d.corrections.members).length) delete d.corrections.members;
+  if (!Object.keys(d.corrections).length) delete d.corrections;
+  saveSessionState();
+}
+
 // Head change (v4.9.37): make the member at memberIdx the head. The
 // old head becomes a member at the same position, every other
 // member's relation is recomputed for the new head (null = could not
 // derive, set to Other Relative for the user to pick), and the
-// summary is recalculated. The injector re-detects the Halnagad
-// programme for the new head on the next fill, so the old detection
-// is cleared; head corrections recorded for the old head are cleared
-// too (they belong to that person, not the new head).
+// summary is recalculated. (v4.9.77) The household's head-only data
+// (mobile, MFS, address, bank, PMT picks and pulled PMT answers)
+// moves to the new head, both professions are converted between the
+// type-34 and type-44 lists instead of being dropped, the Halnagad
+// detection is kept (the injector re-detects it for the new head on
+// the next fill), and corrections follow the PERSON — the old head's
+// head-corrections become member corrections keyed by her NID/BRN
+// and the new head's member corrections become head corrections.
+// Deleting the corrections (the old code) lost the user's hand
+// corrections; keeping them under `corrections.head` unchanged would
+// force the OLD head's education/profession/marital onto the NEW head.
 // The head is always a woman (v4.9.47): a male member cannot be made
 // head. Gender comes from the record, falling back to the relation
 // (Son / Husband / ... are male). Pure function, so it is easy to test.
@@ -7080,15 +7163,36 @@ function makeMemberHead(memberIdx) {
   const headRec = { ...newHead, relation: 'Head/Self', relationship_id: 260 };
   const oldHeadRel = recalc.oldHeadNewRel || 'Other Relative';
   const oldHeadRec = { ...oldHead, relation: oldHeadRel, relationship_id: RELATION_ID_MAP[oldHeadRel] || 263 };
-  // Role-specific profession (v4.9.39): the head uses the type-34
+  // Role-specific profession (v4.9.77): the head uses the type-34
   // `profession`, a member the type-44 `livelihood_profession_id`.
-  // Drop the old role's value on each side — the DOB derivation
-  // (in renderExtractedCards' recalculation) refills the new role's
-  // field from the DOB/gender, so a stale type-44 value never lands on
-  // the head form (or a type-34 value on a member row). Education and
-  // marital use the same keys in both roles, so they carry over.
+  // Convert instead of dropping — the old code deleted both and the
+  // DOB derivation refilled Housewife 181 / Homemaker 225, wiping a
+  // real profession (a Farmer head became a Housewife). A blank stays
+  // blank for the derivation to fill. The stale other-role key is
+  // removed, so a type-44 value never lands on the head form (or a
+  // type-34 value on a member row). A converted value is never blank,
+  // so the derivation below leaves it alone.
+  const newLivelihood = newHead.livelihood_profession_id;
   delete headRec.livelihood_profession_id;
+  if (newLivelihood !== undefined && newLivelihood !== null && String(newLivelihood).trim() !== '') {
+    const converted = headProfessionForLivelihood(newLivelihood);
+    if (converted !== undefined) headRec.profession = converted;
+  }
+  const oldProf = oldHead.profession;
   delete oldHeadRec.profession;
+  if (oldProf !== undefined && oldProf !== null && String(oldProf).trim() !== '') {
+    const converted = livelihoodForHeadProfession(oldProf);
+    if (converted !== undefined) oldHeadRec.livelihood_profession_id = converted;
+  }
+  // (v4.9.77) The household's head-only data moves to the new head —
+  // mobile, MFS, address, bank, PMT picks and pulled PMT answers —
+  // and off the old head's member record (it belongs to the role, not
+  // the person). The people themselves already travel on the record
+  // spreads above.
+  for (const k of HEAD_ONLY_KEYS) {
+    if (oldHead[k] !== undefined) headRec[k] = oldHead[k];
+    delete oldHeadRec[k];
+  }
   const members = data.family_members.map((m, i) => {
     if (i === memberIdx) return oldHeadRec;
     const nr = recalc.relsByIdx[i];
@@ -7097,9 +7201,80 @@ function makeMemberHead(memberIdx) {
   });
   data.head = headRec;
   data.family_members = members;
-  state.halnagad = null;
+  // (v4.9.77) The Halnagad detection is kept, not nulled: it is the
+  // household's migration note, and the injector re-detects the
+  // programme for the new head on the next fill (applyHalnagadBenefit
+  // then mirrors it onto her). Nulling it dropped the note the user
+  // had just pulled.
   renderHalnagadNote();
-  if (data.corrections) delete data.corrections;
+  // (v4.9.77) Pulled photos are by PERSON, not by role: the Applicant
+  // Photo (image) and Signature slots depict the OLD head, so they
+  // must not ride along to the new head — the next Auto-Fill would
+  // upload her photo as the new head's. The House Photo is the
+  // household's, so it stays; nominee slots (if any) stay too. The
+  // new head has no photo yet — pull or upload hers.
+  if (Array.isArray(state.pulledImages)) {
+    state.pulledImages = state.pulledImages.filter((im) => im && im.slot !== 'image' && im.slot !== 'signature');
+  }
+  // (v4.9.77) Corrections follow the PERSON, not the role — see the
+  // comment above makeMemberHead. The old head's head-corrections and
+  // head_options become member corrections keyed by her NID/BRN; the
+  // new head's member corrections become head corrections and
+  // head_options. Any other member's corrections are kept as-is.
+  const oldHeadIdKey = String(oldHead.nid_or_brn || oldHead.nid || oldHead.brn_id || '').replace(/\s+/g, '');
+  const newHeadIdKey = String(newHead.nid_or_brn || newHead.nid || newHead.brn_id || '').replace(/\s+/g, '');
+  const nextMembers = (data.corrections && data.corrections.members) ? { ...data.corrections.members } : {};
+  let nextHead = null;
+  const oldHeadCorr = (data.corrections && data.corrections.head) || null;
+  const oldHeadOpts = (data.form_defaults && data.form_defaults.head_options) || null;
+  if (oldHeadIdKey && (oldHeadCorr || oldHeadOpts)) {
+    const mc = { ...(nextMembers[oldHeadIdKey] || {}) };
+    const edu = oldHeadCorr && oldHeadCorr.education_status_id !== undefined ? oldHeadCorr.education_status_id : (oldHeadOpts && oldHeadOpts.education_status);
+    if (edu !== undefined && edu !== null && String(edu).trim() !== '') mc.education_status_id = Number(edu);
+    const prof = oldHeadCorr && oldHeadCorr.profession !== undefined ? oldHeadCorr.profession : (oldHeadOpts && oldHeadOpts.profession);
+    if (prof !== undefined && prof !== null && String(prof).trim() !== '') {
+      const conv = livelihoodForHeadProfession(prof);
+      if (conv !== undefined) mc.livelihood_profession_id = conv;
+    }
+    const mar = oldHeadCorr && oldHeadCorr.marital_status !== undefined ? oldHeadCorr.marital_status : (oldHeadOpts && oldHeadOpts.marital_status);
+    if (mar !== undefined && mar !== null && String(mar).trim() !== '') mc.maritial_status_id = Number(mar);
+    if (Object.keys(mc).length) nextMembers[oldHeadIdKey] = mc;
+    else delete nextMembers[oldHeadIdKey];
+  }
+  const newHeadMemberCorr = (newHeadIdKey && nextMembers[newHeadIdKey]) || null;
+  if (newHeadMemberCorr) {
+    const hc = {};
+    if (newHeadMemberCorr.education_status_id !== undefined && newHeadMemberCorr.education_status_id !== null) hc.education_status_id = Number(newHeadMemberCorr.education_status_id);
+    if (newHeadMemberCorr.livelihood_profession_id !== undefined && newHeadMemberCorr.livelihood_profession_id !== null) {
+      const conv = headProfessionForLivelihood(newHeadMemberCorr.livelihood_profession_id);
+      if (conv !== undefined) hc.profession = conv;
+    }
+    const newMar = newHeadMemberCorr.maritial_status_id !== undefined ? newHeadMemberCorr.maritial_status_id : newHeadMemberCorr.marital_status;
+    if (newMar !== undefined && newMar !== null) hc.marital_status = Number(newMar);
+    if (Object.keys(hc).length) nextHead = hc;
+    delete nextMembers[newHeadIdKey];
+  }
+  const nextCorrections = {};
+  if (nextHead) nextCorrections.head = nextHead;
+  if (Object.keys(nextMembers).length) nextCorrections.members = nextMembers;
+  if (Object.keys(nextCorrections).length) data.corrections = nextCorrections;
+  else delete data.corrections;
+  // form_defaults.head_options mirrors the head corrections (the
+  // persistent copy — the transient corrections are cleared on a
+  // successful fill, the options stay). Move them with the person
+  // too: the new head's become the options, the old head's are gone
+  // (they live on as her member corrections above).
+  if (data.form_defaults) {
+    if (nextHead) {
+      data.form_defaults.head_options = {
+        ...(nextHead.education_status_id !== undefined ? { education_status: nextHead.education_status_id } : {}),
+        ...(nextHead.profession !== undefined ? { profession: nextHead.profession } : {}),
+        ...(nextHead.marital_status !== undefined ? { marital_status: nextHead.marital_status } : {}),
+      };
+    } else {
+      delete data.form_defaults.head_options;
+    }
+  }
   renderExtractedCards(data);
   const unknown = Object.values(recalc.relsByIdx).filter((r) => !r).length + (recalc.oldHeadNewRel ? 0 : 1);
   setStatus(`Head is now ${headRec.name_bn || headRec.name_en || 'the selected member'} — relations recalculated.${unknown ? ` ${unknown} relation(s) could not be worked out and are set to Other Relative — please pick them.` : ' Please check the relations, then Auto-Fill.'}`, 'ok');
@@ -7400,7 +7575,11 @@ function renderExtractedCards(data) {
       kEl.className = 'row-key';
       kEl.textContent = f.label;
 
-      const inputEl = createFieldControl(f, targetObj, refreshHeader, body, isMember ? null : recordHeadCorrection);
+      // (v4.9.77) Member cards record option changes as member
+      // corrections (keyed by the member's NID/BRN), so a corrected
+      // value overwrites the form on the next fill; head cards keep
+      // recording head corrections.
+      const inputEl = createFieldControl(f, targetObj, refreshHeader, body, isMember ? (k, v) => recordMemberCorrection(targetObj, k, v) : recordHeadCorrection);
 
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';

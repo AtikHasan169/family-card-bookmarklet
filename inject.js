@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v52';
+  const FC_INJECT_VERSION = 'v53';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -1695,6 +1695,52 @@
     return { headKeys, rowKeys, pmtQids, count };
   }
 
+  // Member corrections (v53): the member-card equivalent of
+  // HEAD_CORRECTION_MAP. The panel records the member option fields
+  // the user changed on the card after a fill, as
+  // payload.corrections.members[idKey] — idKey is the member's
+  // NID/BRN, whitespace-stripped (the person, not the row, so it
+  // survives reordering and follows her if she becomes head). An
+  // education correction also forces the literacy: literacy follows
+  // the education (v23 rule), and the panel's literacy_id goes stale
+  // when the education is edited on the card, so the sync re-derives
+  // it from the corrected education instead of the stale value.
+  const MEMBER_CORRECTION_MAP = {
+    education_status_id: ['education_status_id', 'literacy_id'],
+    livelihood_profession_id: ['livelihood_profession_id'],
+    maritial_status_id: ['maritial_status_id'],
+    literacy_id: ['literacy_id'],
+    health_condition_id: ['health_condition_id'],
+    disability_type_id: ['disability_type_id'],
+  };
+  function memberCorrectionSets(correctionsMembers, targetMemberList) {
+    const byIdx = new Map();
+    let count = 0;
+    if (correctionsMembers && typeof correctionsMembers === 'object' && Array.isArray(targetMemberList)) {
+      for (let idx = 0; idx < targetMemberList.length; idx++) {
+        const m = targetMemberList[idx];
+        if (!m) continue;
+        const idKey = String(m.nid_or_brn || m.nid || m.brn_id || m.verification_number || '').replace(/\s+/g, '');
+        if (!idKey) continue;
+        const corr = correctionsMembers[idKey];
+        if (!corr || typeof corr !== 'object') continue;
+        const keys = new Set();
+        for (const rawKey of Object.keys(corr)) {
+          // The panel notifies a marital change as 'marital_status'
+          // (the card's key); the member row's key is the site's typo
+          // 'maritial_status_id'.
+          const key = rawKey === 'marital_status' ? 'maritial_status_id' : rawKey;
+          const mapped = MEMBER_CORRECTION_MAP[key];
+          if (!mapped) continue;
+          count++;
+          mapped.forEach(k => keys.add(k));
+        }
+        if (keys.size) byIdx.set(idx, keys);
+      }
+    }
+    return { byIdx, count };
+  }
+
   // --- Halnagad / other-programme benefit + locked personal fields (v26) ---
   // When an NID is verified, the site checks whether the person is already
   // under another programme (POST family-card-halnagad/eligibility). The
@@ -1703,15 +1749,18 @@
   // 'beneficiary' = already receiving). Only a beneficiary counts as
   // covered (SSNP Yes); an applicant is NOT covered yet.
   // Programme name -> Government Card (lookup type 42). Unknown names
-  // map to 0 — the card is left for the user to pick.
+  // map to 0 — the card is left for the user to pick. First-match-wins,
+  // so the most specific phrases go first (v53): a scholarship / student
+  // stipend is checked before disability — "প্রতিবন্ধী শিক্ষার্থীদের
+  // উপবৃত্তি" is a stipend (168), not a disability allowance (162).
   const HALNAGAD_CARD_KEYWORDS = [
+    [/উপবৃত্তি|শিক্ষা|scholarship|stipend|education/i, 168],
     [/বয়স্ক|বিধবা|প্রতিবন্ধী|গর্ভবতী|মাতৃত্ব|old age|widow|disabilit|maternity/i, 162],
     [/ভিজিডি|ভিজিএফ|\bvgd\b|\bvgf\b/i, 163],
     [/রেশন|ration/i, 164],
     [/সার|fertilizer/i, 165],
     [/টিসিবি|\btcb\b/i, 166],
     [/মুক্তিযোদ্ধা|muktijoddha|freedom fighter/i, 167],
-    [/উপবৃত্তি|শিক্ষা|scholarship|stipend|education/i, 168],
     [/প্রবাসী|migrant/i, 169],
     [/পেনশন|pension/i, 170],
     [/কৃষি|agricultur/i, 171],
@@ -1854,14 +1903,31 @@
         if (field.key === 'disability_type_id' && Number(row.is_member_disabled) !== 1) continue;
         // A head correction (v25) overwrites the head row's value even
         // when it is already filled — but only the head row, and only
-        // the corrected fields. Every other row stays empty-only.
-        const isForcedRowField = forceSets.rowKeys.has(field.key) && idx === headRowIdx;
+        // the corrected fields. (v53) A member correction does the
+        // same for its own row: the panel recorded the field the user
+        // changed on that member's card, so the corrected value
+        // overwrites. Every other row stays empty-only, so a hand
+        // correction ON THE FORM survives a re-fill.
+        const memberForcedKeys = (forceSets.memberByIdx && forceSets.memberByIdx.get(idx)) || null;
+        const isForcedRowField = (forceSets.rowKeys.has(field.key) && idx === headRowIdx)
+          || (memberForcedKeys !== null && memberForcedKeys.has(field.key));
         if (onlyEmpty && !isForcedRowField && !isEmptyModelVal(row[field.key])) continue;
         const age = calculateAgeYears(m.dob);
         const genderId = resolveGenderId(m);
         const pats = memberOptionPatterns(m, age, genderId, hasSpouseInHousehold, spousePresence);
         const patterns = field.patternsOf(pats) || [];
         let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
+        // (v53) A corrected education re-derives the literacy: the
+        // panel's literacy_id goes stale when the education is edited
+        // on the card, so ignore it and derive from the corrected
+        // education (the block below does that when overrideVal is
+        // empty). Covers the head row too — its education correction
+        // already forces the literacy field.
+        if (field.key === 'literacy_id') {
+          const eduCorrected = (forceSets.rowKeys.has('education_status_id') && idx === headRowIdx)
+            || (memberForcedKeys !== null && memberForcedKeys.has('education_status_id'));
+          if (eduCorrected) overrideVal = undefined;
+        }
         // Literacy follows the education: নিরক্ষর (88) -> "cannot read
         // or write" (243); Play/KG (188) -> "read only" (242). Class 1+
         // keeps the age-derived "read and write" (241). Literacy is
@@ -3278,6 +3344,31 @@
       if (vmHead && 'panel' in vmHead) vmHead.panel = [0, 1, 2, 3, 4, 5, 6, 7];
       if (vmMembers && 'panel' in vmMembers) vmMembers.panel = [0, 1, 2, 3, 4, 5, 6, 7];
 
+      // (v53) Refill detection, hoisted before the head fill: the head
+      // text fills below overwrite on a re-fill (the panel is the
+      // source of truth), so they need to know whether this form
+      // already holds this payload's people. Same check as the member
+      // block's snapshot (recomputed there after rows are added and
+      // reordered — same result).
+      let isRefill = false;
+      if (vmMembers && Array.isArray(vmMembers.familyMembers)) {
+        const payloadIds = new Set();
+        if (payload.head) {
+          const hid = String(payload.head.nid || payload.head.nid_or_brn || payload.head.brn_id || payload.head.verification_number || '').replace(/\s+/g, '');
+          if (hid) payloadIds.add(hid);
+        }
+        if (Array.isArray(payload.family_members)) {
+          for (const mm of payload.family_members) {
+            const pid = String(mm.nid_or_brn || mm.nid || mm.brn_id || mm.verification_number || '').replace(/\s+/g, '');
+            if (pid) payloadIds.add(pid);
+          }
+        }
+        isRefill = vmMembers.familyMembers.some((r) => {
+          const rid = String((r && (r.verification_number || r.nid || r.brn_id)) || '').replace(/\s+/g, '');
+          return rid && payloadIds.has(rid);
+        });
+      }
+
       const headTarget = getHeadTargetObj(vmHead);
       const familyReligionId = detectFamilyReligionId(payload);
 
@@ -3368,9 +3459,15 @@
           // ONE place only, data.mobile on the head form (required,
           // checkNumberMobile: English digits, 11, starting 01).
           // Member rows never render a mobile input, so only the head
-          // gets one. Never overwrite a filled number.
-          if (!headLocked.has('mobile_number') && h.mobile_number && isEmptyModelVal(headTarget.mobile)) {
-            setReactive(vmHead, headTarget, 'mobile', toEnDigits(String(h.mobile_number)).replace(/\D+/g, ''));
+          // gets one. (v53) A mobile corrected in the panel overwrites
+          // the site's number on a re-fill — the panel is the source
+          // of truth. First fill stays empty-only, and a blank panel
+          // value never overwrites (v47).
+          if (!headLocked.has('mobile_number') && h.mobile_number) {
+            const mob = toEnDigits(String(h.mobile_number)).replace(/\D+/g, '');
+            if (mob && (isEmptyModelVal(headTarget.mobile) || (isRefill && String(headTarget.mobile || '') !== mob))) {
+              setReactive(vmHead, headTarget, 'mobile', mob);
+            }
           }
 
           // (v38) General + bank text fields the pull now brings: the
@@ -3384,8 +3481,16 @@
             ['email', h.email], ['account_name', h.account_name], ['account_number', h.account_number]
           ];
           for (const [key, val] of headTextFields) {
-            if (val !== undefined && val !== null && String(val).trim() !== '' && key in headTarget && isEmptyModelVal(headTarget[key])) {
-              setReactive(vmHead, headTarget, key, String(val).trim());
+            if (val === undefined || val === null || String(val).trim() === '' || !(key in headTarget)) continue;
+            const v = String(val).trim();
+            // (v53) Refill correction: a panel value corrected after
+            // the first fill overwrites the site's value on a re-fill
+            // — the panel is the source of truth. First fill stays
+            // empty-only, and a blank panel value never overwrites
+            // (v47). Nationality stays empty-only: it has exactly one
+            // option (105) and is not a correction target.
+            if (isEmptyModelVal(headTarget[key]) || (isRefill && key !== 'nationality' && String(headTarget[key] ?? '') !== v)) {
+              setReactive(vmHead, headTarget, key, v);
             }
           }
           // (v46) Nationality: the server's applications.nationality
@@ -3410,7 +3515,7 @@
             else natId = 105;
             setReactive(vmHead, headTarget, 'nationality', natId);
           }
-          if (h.mfs_number !== undefined && h.mfs_number !== null && String(h.mfs_number).trim() !== '' && 'mfs_number' in headTarget && isEmptyModelVal(headTarget.mfs_number)) {
+          if (h.mfs_number !== undefined && h.mfs_number !== null && String(h.mfs_number).trim() !== '' && 'mfs_number' in headTarget && (isEmptyModelVal(headTarget.mfs_number) || (isRefill && String(headTarget.mfs_number ?? '') !== String(h.mfs_number).trim()))) {
             setReactive(vmHead, headTarget, 'mfs_number', String(h.mfs_number).trim());
           }
           const afOwnerW = (allVms || []).find((v) => v && v.addressForm);
@@ -3421,8 +3526,10 @@
           ];
           for (const [key, val] of addrTextPairs) {
             if (val === undefined || val === null || String(val).trim() === '') continue;
-            if (key in headTarget && isEmptyModelVal(headTarget[key])) setReactive(vmHead, headTarget, key, String(val).trim());
-            if (afW && key in afW && isEmptyModelVal(afW[key])) setReactive(afOwnerW, afW, key, String(val).trim());
+            const v = String(val).trim();
+            // (v53) Refill correction, as the head text fields above.
+            if (key in headTarget && (isEmptyModelVal(headTarget[key]) || (isRefill && String(headTarget[key] ?? '') !== v))) setReactive(vmHead, headTarget, key, v);
+            if (afW && key in afW && (isEmptyModelVal(afW[key]) || (isRefill && String(afW[key] ?? '') !== v))) setReactive(afOwnerW, afW, key, v);
           }
 
           if (!isVerificationPage) {
@@ -3513,7 +3620,8 @@
 
       let row0IsHead = false;
       let targetMemberList = [];
-      let isRefill = false;
+      // isRefill is declared above (hoisted before the head fill, v53)
+      // and recomputed below after rows are added/reordered.
       let allRowsMatched = false;
       // Benefit (v26): resolved inside the member block below; declared
       // here so the fast path and the result (outside that block) can
@@ -3650,7 +3758,50 @@
 
           // Refill guard: this row already holds this member — leave
           // it (and any hand tweaks) alone instead of re-driving it.
-          if (rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId })) continue;
+          // (v53) But a value the panel corrected after the first
+          // fill must still land: the non-identity writes below run
+          // for a matched row too, each gated so a hand tweak ON THE
+          // FORM is never clobbered — income only when the panel
+          // value is present and differs (a blank never overwrites,
+          // v47; a 0 only when it is a real value for this person),
+          // benefits only when the panel provided them, and the
+          // disability type only when the panel carries one. Option
+          // fields (education / profession / marital / health /
+          // literacy) are forced by the member-corrections path in
+          // the option sync below, not here.
+          const rowMatched = rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId });
+          if (rowMatched) {
+            const isHeadRowM = relId === 260 || relName === 'Head/Self';
+            const isStudentRowM = memAge !== null && memAge >= 4 && memAge <= 24;
+            const benM = (benefits && benefits.byIdx[idx]) || null;
+            if (benM && benM.ssnpProvided && Number(row.is_ssnp_covered) !== benM.ssnp) setReactive(vmMembers, row, 'is_ssnp_covered', benM.ssnp);
+            if (benM && benM.dssProvided && Number(row.is_dss_training_or_financial_benefit) !== benM.dss) setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', benM.dss);
+            if (benM && benM.ssnp === 1 && benM.facilities.length && JSON.stringify(row.facilities_ids || []) !== JSON.stringify(benM.facilities)) {
+              setReactive(vmMembers, row, 'facilities_ids', benM.facilities.slice());
+            } else if (benM && benM.ssnp === 0 && benM.ssnpProvided && Array.isArray(row.facilities_ids) && row.facilities_ids.length) {
+              setReactive(vmMembers, row, 'facilities_ids', []);
+            }
+            if (m.disability_type_id !== undefined && m.disability_type_id !== null && m.disability_type_id !== '' && Number(row.disability_type_id) !== Number(m.disability_type_id)) {
+              setReactive(vmMembers, row, 'disability_type_id', Number(m.disability_type_id));
+            }
+            const panelInc = m.estimate_annual_income;
+            if (panelInc !== undefined && panelInc !== null && String(panelInc).trim() !== '') {
+              const panelIncNum = Number(panelInc);
+              if (Number.isFinite(panelIncNum) && Number(row.estimate_annual_income) !== panelIncNum) {
+                // A 0 only overwrites when it is a real value for
+                // this person — a student row is always 0, and a
+                // 0-value profession earns 0 — so a stale 0 from an
+                // old export never wipes a real income.
+                const zeroValueProf = isHeadRowM
+                  ? (m.profession !== undefined && m.profession !== null && String(m.profession).trim() !== '' && HEAD_PROFESSION_INCOME[Number(m.profession)] === 0)
+                  : (m.livelihood_profession_id !== undefined && m.livelihood_profession_id !== null && String(m.livelihood_profession_id).trim() !== '' && PROFESSION_INCOME[Number(m.livelihood_profession_id)] === 0);
+                if (panelIncNum !== 0 || isStudentRowM || zeroValueProf) {
+                  setReactive(vmMembers, row, 'estimate_annual_income', panelIncNum);
+                }
+              }
+            }
+            continue;
+          }
           allRowsMatched = false;
 
           // A site-locked personal field (Fi) is never overwritten — the
@@ -3796,6 +3947,14 @@
       // is stale. Everything else stays empty-only.
       const correctionsHead = (payload.corrections && payload.corrections.head) || null;
       const correctionSets = headCorrectionSets(correctionsHead);
+      // (v53) Member corrections: the panel records the member option
+      // fields the user changed on the cards, keyed by NID/BRN. They
+      // force the option sync for exactly those rows and fields, and
+      // they skip the fast path — like head corrections, a correction
+      // always runs the passes.
+      const memberSets = memberCorrectionSets((payload.corrections && payload.corrections.members) || null, targetMemberList);
+      correctionSets.memberByIdx = memberSets.byIdx;
+      correctionSets.count += memberSets.count;
       const forcePmt = {
         qids: correctionSets.pmtQids,
         headEduId: (correctionsHead && correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null)
@@ -3808,7 +3967,10 @@
       // wins over a stale value, like program 96 — a changed pick
       // applies on a re-fill instead of staying stuck on the old one.
       if (defs && defs.program_fields && defs.program_fields['138'] !== undefined && defs.program_fields['138'] !== null) forcePmt.qids.add(138);
-      if (correctionSets.count) {
+      // (v53) correctionSets.count now also counts member corrections,
+      // so it no longer implies a head correction exists — guard the
+      // head merge, or a member-only correction crashes here.
+      if (correctionSets.count && correctionsHead) {
         defs.head_options = defs.head_options || {};
         if (correctionsHead.education_status_id !== undefined && correctionsHead.education_status_id !== null) defs.head_options.education_status = Number(correctionsHead.education_status_id);
         if (correctionsHead.profession !== undefined && correctionsHead.profession !== null) defs.head_options.profession = Number(correctionsHead.profession);
