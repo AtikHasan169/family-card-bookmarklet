@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.77-live';
+const CURRENT_VERSION_TAG = 'v4.9.78-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -756,12 +756,49 @@ const HEAD_FIELDS = [
   // and the type follows it — 17 digits flip it to BRN live — so the
   // user never has to pick the type before typing the number.
   { key: 'doc_type', label: 'Doc Type', type: 'doc_select' },
+  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
+  { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
+  // Student? (v4.9.78): the site's own member-row question —
+  // "বর্তমানে শিক্ষার্থী?" — on the person's own card. The profession
+  // drives it (Student => Yes at any age); a hand pick here wins over
+  // the derivation (it is recorded as a correction).
+  { key: 'is_currently_student', label: 'Student? (বর্তমানে শিক্ষার্থী)', type: 'yesno_select' },
+  // (v4.9.78) Marital before income — the member-card field order.
+  { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
+  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
+  // Disability + Health (v4.9.50): the head is a person too — the same
+  // Disabled / Disability Type / Health fields as a member card. They
+  // ride on the head member row (the head form itself has no health
+  // or disability fields); the form's health select is required.
+  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
+  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
+  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
+  // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
+  // head is the one the Halnagad check reports on.
+  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
+  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
+  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' },
+];
+
+// Household / other info (v4.9.78): everything that is NOT one person's
+// personal info — it lives on the head record (the injector reads by
+// record key, never by card, so the payload is unchanged), but it
+// renders in its own card AFTER every person, so the household is
+// verified person by person first and the other info after. Order is
+// the user's: phone + MFS first, then home-made-of, then the rest of
+// the PMT picks + score, then Bank, Address, Permanent Address,
+// Socio-Economic, General, Nominee, and the pulled program/PMT detail
+// (the collapsible, rendered by buildEditableCard for this card).
+const HOUSEHOLD_FIELDS = [
   // Phone + MFS (v4.9.49, v4.9.50): the head's mobile number fills the
   // form's ONE mobile field, data.mobile (the form never asks for a
   // mobile anywhere else); the MFS pick fills PMT field 138
-  // (Bkash/Nagad/...) via form_defaults.program_fields.
+  // (Bkash/Nagad/...) via form_defaults.program_fields. The MFS
+  // number sits here too, right under the provider — phone + Bkash
+  // first, as the user asked.
   { key: 'mobile_number', label: 'Mobile (মোবাইল)' },
   { key: 'mfs_provider_id', label: 'MFS (মোবাইল ব্যাংকিং)', type: 'mfs_select' },
+  { key: 'mfs_number', label: 'MFS Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   // PMT leftover picks (v4.9.69): the questions Auto-Fill + presets
   // leave behind. Unsectioned so they always show (also on a New
   // Form). Labels are the site's own question text, word for word
@@ -780,44 +817,12 @@ const HEAD_FIELDS = [
   { key: 'pmt_diesel', label: 'কৃষি কাজে ডিজেল ব্যবহার হলে তার মাসিক আনুমানিক পরিমাণ', type: 'pmt_option_select', options: PMT_DIESEL_OPTIONS },
   { key: 'pmt_assets', label: 'খানার মালিকানাধীন নিম্নের পরিসম্পদ গুলোর কোনটি আছে ? (একাধিক উত্তর হতে পারে)', type: 'pmt_assets_multi' },
   { key: 'pmt_score_total', label: 'PMT স্কোর', type: 'pmt_score' },
-  { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
-  { key: 'profession', label: 'Profession (পেশা)', type: 'profession_select' },
-  { key: 'estimate_annual_income', label: 'Annual Income (বার্ষিক আয়)' },
-  { key: 'marital_status', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
-  // Disability + Health (v4.9.50): the head is a person too — the same
-  // Disabled / Disability Type / Health fields as a member card. They
-  // ride on the head member row (the head form itself has no health
-  // or disability fields); the form's health select is required.
-  { key: 'is_disabled', label: 'Disabled? (প্রতিবন্ধী)', type: 'yesno_select' },
-  { key: 'disability_type_id', label: 'Disability Type (প্রতিবন্ধিতার ধরণ)', type: 'disability_select' },
-  { key: 'health_condition_id', label: 'Health (স্বাস্থ্য)', type: 'health_select' },
-  // Benefit (v4.9.36): same SSNP / card / DSS fields as a member — the
-  // head is the one the Halnagad check reports on.
-  { key: 'is_ssnp_covered', label: 'SSNP covered? (সামাজিক নিরাপত্তা)', type: 'yesno_select' },
-  { key: 'facilities_ids', label: 'Govt Card(s)', type: 'card_multi' },
-  { key: 'is_dss_training_or_financial_benefit', label: 'DSS training/benefit?', type: 'yesno_select' },
   // (v38) All-tabs pull: the rest of the form, organised in sections
   // matching the site's tabs. Text fields are editable and fill back
   // (empty-only); 'info' fields show the name the pull resolved from
   // the site's own lists (the panel has no such list to offer a
   // dropdown from, so the name is shown, not edited — the id rides
   // on the record for Auto-Fill).
-  { key: 'spouse_name_bn', label: 'Spouse (BN)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'spouse_name_en', label: 'Spouse (EN)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'identification_mark', label: 'ID Mark (শনাক্তকরণ চিহ্ন)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'nationality', label: 'Nationality (জাতীয়তা)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'email', label: 'Email (ইমেইল)', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'mobile_operator', label: 'Mobile Operator', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'disability_id', label: 'Disability (প্রতিবন্ধিতা)', type: 'info', labelMap: 'DISABILITY_TYPE_OPTIONS', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'house_size', label: 'Household Size (খানার সদস্য)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'no_of_room_name', label: 'No. of Rooms (কক্ষ সংখ্যা)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
-  { key: 'nominee_bn', label: 'Nominee (BN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_en', label: 'Nominee (EN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_verification_number', label: 'Nominee NID/BRN', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_date_of_birth', label: 'Nominee DOB', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_address', label: 'Nominee Address', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_relation_with_beneficiary', label: 'Nominee Relation', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
-  { key: 'nominee_nationality', label: 'Nominee Nationality', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
   { key: 'account_type', label: 'Account Type', type: 'account_type_select', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   { key: 'bank_name', label: 'Bank', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   { key: 'branch_name', label: 'Branch', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
@@ -826,7 +831,6 @@ const HEAD_FIELDS = [
   { key: 'account_name', label: 'Account Name', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   { key: 'account_owner', label: 'Account Owner', type: 'info', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   { key: 'account_number', label: 'Account Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
-  { key: 'mfs_number', label: 'MFS Number', section: 'যোগাযোগ ও ব্যাংক (Bank)' },
   { key: 'address_location_type_id', label: 'Location Type', type: 'location_type_select', section: 'ঠিকানা (Address)' },
   { key: 'address_division_name', label: 'Division', type: 'info', section: 'ঠিকানা (Address)' },
   { key: 'address_district_name', label: 'District', type: 'info', section: 'ঠিকানা (Address)' },
@@ -852,7 +856,23 @@ const HEAD_FIELDS = [
   { key: 'program_hijra', label: 'Hijra Members (হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
   { key: 'program_abroad_male', label: 'Abroad — Male (বিদেশে পুরুষ)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
   { key: 'program_abroad_female', label: 'Abroad — Female (বিদেশে নারী)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
-  { key: 'program_abroad_hijra', label: 'Abroad — Hijra (বিদেশে হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' }
+  { key: 'program_abroad_hijra', label: 'Abroad — Hijra (বিদেশে হিজড়া)', type: 'info', section: 'আর্থ-সামাজিক তথ্য (Socio-Economic)' },
+  { key: 'spouse_name_bn', label: 'Spouse (BN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'spouse_name_en', label: 'Spouse (EN)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'identification_mark', label: 'ID Mark (শনাক্তকরণ চিহ্ন)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nationality', label: 'Nationality (জাতীয়তা)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'email', label: 'Email (ইমেইল)', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'mobile_operator', label: 'Mobile Operator', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'disability_id', label: 'Disability (প্রতিবন্ধিতা)', type: 'info', labelMap: 'DISABILITY_TYPE_OPTIONS', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'house_size', label: 'Household Size (খানার সদস্য)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'no_of_room_name', label: 'No. of Rooms (কক্ষ সংখ্যা)', type: 'info', section: 'অতিরিক্ত তথ্য (General)' },
+  { key: 'nominee_bn', label: 'Nominee (BN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_en', label: 'Nominee (EN)', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_verification_number', label: 'Nominee NID/BRN', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_date_of_birth', label: 'Nominee DOB', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_address', label: 'Nominee Address', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_relation_with_beneficiary', label: 'Nominee Relation', section: 'নমিনি (Nominee)', hideWhenEmpty: true },
+  { key: 'nominee_nationality', label: 'Nominee Nationality', section: 'নমিনি (Nominee)', hideWhenEmpty: true }
 ];
 
 const MEMBER_FIELDS = [
@@ -880,6 +900,10 @@ const MEMBER_FIELDS = [
   // livelihood list; marital uses the site's typo key maritial_status_id.
   { key: 'education_status_id', label: 'Education (শিক্ষা)', type: 'edu_select' },
   { key: 'livelihood_profession_id', label: 'Profession (পেশা)', type: 'livelihood_select' },
+  // Student? (v4.9.78): the site's own member-row question —
+  // "বর্তমানে শিক্ষার্থী?" — the profession drives it (Student =>
+  // Yes at any age); a hand pick here wins over the derivation.
+  { key: 'is_currently_student', label: 'Student? (বর্তমানে শিক্ষার্থী)', type: 'yesno_select' },
   { key: 'maritial_status_id', label: 'Marital (বৈবাহিক)', type: 'marital_select' },
   // (v38, v4.9.65) Annual income (the form's real number — editable,
   // fills back empty-only). The Literacy and Govt Job rows are gone
@@ -2123,6 +2147,55 @@ function isBlankVal(v) {
   return v === undefined || v === null || String(v).trim() === '';
 }
 
+// Student flag (v4.9.78): the site's member-row question
+// "বর্তমানে শিক্ষার্থী?" (Currently Student? Age 3–34) rides on the
+// record as `is_currently_student` (1 Yes / 0 No). The injector fills
+// the row radio from it; the panel now stores and shows it on the
+// person's own card, next to the profession. The PROFESSION drives it:
+// Student (member livelihood 220 / head profession 106) => Yes — at
+// any age, so a hand-picked 25+ student still gets Yes. A hand pick
+// of the flag itself wins over the derivation (see studentFlagHandSet).
+//
+// studentFlagHandSet holds the person keys ('head' or the member's
+// nid_or_brn) whose flag was picked BY HAND on the card — for those
+// people the derivation never touches the flag. It is cleared on a
+// Pull/Import/restore (normalizeOutput preserveOrder), because the
+// record the form holds IS the hand value then.
+const studentFlagHandSet = new Set();
+
+function studentIdKey(record, isHead) {
+  return isHead ? 'head' : (record && record.nid_or_brn ? String(record.nid_or_brn) : null);
+}
+
+// The flag a record SHOULD have right now: profession Student => 1,
+// age 0-3 => 0 (the Not Applicable case, 275), otherwise the age rule
+// the injector already used (4-24 => 1, 25+ => 0). The age-24 cap on
+// DERIVING the Student profession itself is NOT changed here (open
+// question for the user) — only the profession=>Yes linkage is new.
+function studentFlagForRecord(record, isHead) {
+  if (!record) return 0;
+  const prof = isHead ? record.profession : record.livelihood_profession_id;
+  if (Number(prof) === (isHead ? 106 : 220)) return 1;
+  const age = calculateAgeYears(record.dob);
+  if (age === null || age < 0) return 0;
+  if (age <= 3) return 0;
+  return age <= 24 ? 1 : 0;
+}
+
+// Sync the record's flag to what it should be. force=true (a hand
+// profession pick) overwrites even a hand-set flag — the profession
+// drives it. force=false (a DOB re-derivation) skips a hand-set flag.
+// Returns true when the flag changed.
+function syncStudentFlag(record, isHead, force) {
+  if (!record) return false;
+  const key = studentIdKey(record, isHead);
+  if (!force && key && studentFlagHandSet.has(key)) return false;
+  const want = studentFlagForRecord(record, isHead);
+  if (Number(record.is_currently_student) === want) return false;
+  record.is_currently_student = want;
+  return true;
+}
+
 // Fill a record's blank education / profession / marital from its DOB.
 // isHead: the head uses the type-34 profession list and the
 // `profession` + `marital_status` keys; a member uses the type-44
@@ -2151,6 +2224,16 @@ function deriveFromDob(targetObj, isHead, hasSpouse, flags) {
       if (isBlankVal(targetObj.maritial_status_id)) { targetObj.maritial_status_id = ids.marital; targetObj.marital_status = ids.marital; filled.push('marital_status'); }
     }
   }
+  // Student flag (v4.9.78): the derived profession may make the person
+  // a student (4-24) — fill the flag when it is still BLANK, unless it
+  // was hand-picked. Like every other field deriveFromDob fills, a
+  // value already on the record (typed on the card, pulled, imported)
+  // is never overwritten here: recalculateHouseholdSummary re-runs
+  // this on every normalizeOutput, and a hand-set No next to a Student
+  // profession must survive it. The profession pick itself syncs the
+  // flag (force=true) when it changes, and a DOB correction re-syncs
+  // it through applyDerivedChange.
+  if (isBlankVal(targetObj.is_currently_student) && syncStudentFlag(targetObj, isHead, false)) filled.push('is_currently_student');
   return filled;
 }
 
@@ -2182,6 +2265,9 @@ function applyDerivedChange(targetObj, oldIds, newIds, isHead) {
   // Keep the two marital spellings in sync.
   if (changed.includes('marital_status') && isHead) targetObj.maritial_status_id = targetObj.marital_status;
   if (changed.includes('maritial_status_id') && !isHead) targetObj.marital_status = targetObj.maritial_status_id;
+  // Student flag (v4.9.78): a profession change (e.g. the age crossing
+  // 24, or a hand-picked Student) re-syncs the flag — unless hand-set.
+  if (syncStudentFlag(targetObj, isHead, false)) changed.push('is_currently_student');
   return changed;
 }
 
@@ -3052,6 +3138,9 @@ function refreshDerivedSelects(cardContainer, targetObj, isHead) {
   setSel('education_status_id', targetObj.education_status_id);
   if (isHead) setSel('profession', targetObj.profession);
   else setSel('livelihood_profession_id', targetObj.livelihood_profession_id);
+  // Student flag (v4.9.78): it rides with the derived values, so a
+  // DOB re-derivation refreshes its select in place too.
+  setSel('is_currently_student', targetObj.is_currently_student);
   setSel('marital_status', targetObj.marital_status !== undefined ? targetObj.marital_status : targetObj.maritial_status_id);
 }
 
@@ -3614,6 +3703,14 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
           if (incIn) { incIn.value = displayTextValue(targetObj.estimate_annual_income); toggleWarning(incIn); }
         }
       }
+      // Student flag (v4.9.78): the profession drives it — picking
+      // Student (106) marks "Student? Yes", picking anything else
+      // clears it. A hand-picked flag is overwritten here: the
+      // profession is the source of truth for the flag.
+      if (syncStudentFlag(targetObj, true, true)) {
+        const stuSel = cardContainer && cardContainer.querySelector('select[data-field="is_currently_student"]');
+        if (stuSel) { stuSel.value = String(targetObj.is_currently_student); toggleWarning(stuSel); }
+      }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
@@ -3658,6 +3755,14 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
           const incIn = cardContainer.querySelector('input[data-field="estimate_annual_income"]');
           if (incIn) { incIn.value = displayTextValue(targetObj.estimate_annual_income); toggleWarning(incIn); }
         }
+      }
+      // Student flag (v4.9.78): the profession drives it — picking
+      // Student (220) marks "Student? Yes", picking anything else
+      // clears it. A hand-picked flag is overwritten here: the
+      // profession is the source of truth for the flag.
+      if (syncStudentFlag(targetObj, false, true)) {
+        const stuSel = cardContainer && cardContainer.querySelector('select[data-field="is_currently_student"]');
+        if (stuSel) { stuSel.value = String(targetObj.is_currently_student); toggleWarning(stuSel); }
       }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
@@ -6300,6 +6405,11 @@ function prevMemberBenefitById(prev, nidOrBrn) {
 
 function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const s = (v) => (v == null ? '' : String(v).trim());
+  // Student flag (v4.9.78): a Pull / Import / session restore carries
+  // the form's own flag values, so any hand-set marks from the
+  // previous session are stale — clear them (the values themselves
+  // are kept by the branches below).
+  if (preserveOrder) studentFlagHandSet.clear();
   const h = raw?.head || {};
   const headDob = normalizeDob(h.dob);
   // 13-digit old NID -> 17 digits with the birth year (v4.9.47); a
@@ -6354,6 +6464,20 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   } else if (h.maritial_status_id !== undefined && h.maritial_status_id !== null && String(h.maritial_status_id).trim() !== '') {
     head.marital_status = Number(h.maritial_status_id);
     head.maritial_status_id = Number(h.maritial_status_id);
+  }
+  // Student flag (v4.9.78): the profession drives it — Student (106)
+  // => Yes at any age, so a hand-picked 25+ student still gets Yes.
+  // A value the user typed on the card wins; a pulled value wins too;
+  // otherwise the age rule (4-24 => Yes, 0-3 => No). The injector's
+  // head member row reads it from this record (targetMemberList[0]).
+  if (h.is_currently_student !== undefined && h.is_currently_student !== null && String(h.is_currently_student).trim() !== '') {
+    head.is_currently_student = Number(h.is_currently_student);
+  } else if (Number(head.profession) === 106) {
+    head.is_currently_student = 1;
+  } else if (prev && prev.head && prev.head.is_currently_student !== undefined && prev.head.is_currently_student !== null && String(prev.head.is_currently_student).trim() !== '') {
+    head.is_currently_student = Number(prev.head.is_currently_student);
+  } else {
+    head.is_currently_student = studentFlagForRecord(head, true);
   }
   // Benefit (v4.9.36, v4.9.49): the head's SSNP / card / DSS, same as
   // a member. Default is No (0) — the user asked for No as the
@@ -6556,6 +6680,18 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       entry.livelihood_profession_id = Number(m.livelihood_profession_id);
     } else if (prevM2 && prevM2.livelihood_profession_id !== undefined && prevM2.livelihood_profession_id !== null && String(prevM2.livelihood_profession_id).trim() !== '') {
       entry.livelihood_profession_id = Number(prevM2.livelihood_profession_id);
+    }
+    // Student flag (v4.9.78): the profession drives it — Student (220)
+    // => Yes at any age. A value typed on the card wins; a pulled
+    // value wins too; otherwise the age rule (4-24 => Yes, 0-3 => No).
+    if (m?.is_currently_student !== undefined && m?.is_currently_student !== null && String(m.is_currently_student).trim() !== '') {
+      entry.is_currently_student = Number(m.is_currently_student);
+    } else if (Number(entry.livelihood_profession_id) === 220) {
+      entry.is_currently_student = 1;
+    } else if (prevM2 && prevM2.is_currently_student !== undefined && prevM2.is_currently_student !== null && String(prevM2.is_currently_student).trim() !== '') {
+      entry.is_currently_student = Number(prevM2.is_currently_student);
+    } else {
+      entry.is_currently_student = studentFlagForRecord(entry, false);
     }
     if (m?.maritial_status_id !== undefined && m?.maritial_status_id !== null && String(m.maritial_status_id).trim() !== '') {
       entry.maritial_status_id = Number(m.maritial_status_id);
@@ -7059,7 +7195,7 @@ const HEAD_ONLY_KEYS = [
 // the injector derive the value again. The corrections are cleared
 // on a successful fill (see the FC_AUTOFILL_RESPONSE handler), so a
 // later hand-change on the form is never overwritten by a stale one.
-const HEAD_CORRECTION_KEYS = ['education_status_id', 'profession', 'marital_status'];
+const HEAD_CORRECTION_KEYS = ['education_status_id', 'profession', 'marital_status', 'is_currently_student'];
 function recordHeadCorrection(key, value) {
   if (!HEAD_CORRECTION_KEYS.includes(key)) return;
   if (!state.lastExtracted) return;
@@ -7079,6 +7215,15 @@ function recordHeadCorrection(key, value) {
     if (key === 'profession') d.form_defaults.head_options.profession = Number(value);
     if (key === 'marital_status') d.form_defaults.head_options.marital_status = Number(value);
   }
+  // Student flag (v4.9.78): a hand pick marks the flag hand-set, so
+  // later derivations leave it alone; clearing the pick un-marks it.
+  // (The injector's head member row reads the flag from the head
+  // record — the correction itself is what forces a re-fill to
+  // re-write the row.)
+  if (key === 'is_currently_student') {
+    if (value === null || value === undefined || value === '') studentFlagHandSet.delete('head');
+    else studentFlagHandSet.add('head');
+  }
   if (!Object.keys(d.corrections.head).length) delete d.corrections.head;
   if (!Object.keys(d.corrections).length) delete d.corrections;
   saveSessionState();
@@ -7096,7 +7241,7 @@ function recordHeadCorrection(key, value) {
 // the correction. The corrections are cleared on a successful fill (see
 // the FC_AUTOFILL_RESPONSE handler), so a later hand-change on the form
 // is never overwritten by a stale one.
-const MEMBER_CORRECTION_KEYS = ['education_status_id', 'livelihood_profession_id', 'maritial_status_id', 'literacy_id', 'health_condition_id', 'disability_type_id'];
+const MEMBER_CORRECTION_KEYS = ['education_status_id', 'livelihood_profession_id', 'maritial_status_id', 'literacy_id', 'health_condition_id', 'disability_type_id', 'is_currently_student'];
 function recordMemberCorrection(memberRecord, key, value) {
   if (!memberRecord) return;
   // The card notifies a marital change as 'marital_status'; the
@@ -7114,9 +7259,14 @@ function recordMemberCorrection(memberRecord, key, value) {
       delete d.corrections.members[idKey][normKey];
       if (!Object.keys(d.corrections.members[idKey]).length) delete d.corrections.members[idKey];
     }
+    // Student flag (v4.9.78): clearing the pick un-marks it hand-set.
+    if (normKey === 'is_currently_student') studentFlagHandSet.delete(idKey);
   } else {
     d.corrections.members[idKey] = d.corrections.members[idKey] || {};
     d.corrections.members[idKey][normKey] = Number(value);
+    // Student flag (v4.9.78): a hand pick marks the flag hand-set, so
+    // later derivations leave it alone.
+    if (normKey === 'is_currently_student') studentFlagHandSet.add(idKey);
   }
   if (!Object.keys(d.corrections.members).length) delete d.corrections.members;
   if (!Object.keys(d.corrections).length) delete d.corrections;
@@ -7238,6 +7388,9 @@ function makeMemberHead(memberIdx) {
     }
     const mar = oldHeadCorr && oldHeadCorr.marital_status !== undefined ? oldHeadCorr.marital_status : (oldHeadOpts && oldHeadOpts.marital_status);
     if (mar !== undefined && mar !== null && String(mar).trim() !== '') mc.maritial_status_id = Number(mar);
+    // Student flag (v4.9.78): follows the PERSON, not the seat — the
+    // old head's hand-set flag becomes her member correction.
+    if (oldHeadCorr && oldHeadCorr.is_currently_student !== undefined && oldHeadCorr.is_currently_student !== null) mc.is_currently_student = Number(oldHeadCorr.is_currently_student);
     if (Object.keys(mc).length) nextMembers[oldHeadIdKey] = mc;
     else delete nextMembers[oldHeadIdKey];
   }
@@ -7251,6 +7404,9 @@ function makeMemberHead(memberIdx) {
     }
     const newMar = newHeadMemberCorr.maritial_status_id !== undefined ? newHeadMemberCorr.maritial_status_id : newHeadMemberCorr.marital_status;
     if (newMar !== undefined && newMar !== null) hc.marital_status = Number(newMar);
+    // Student flag (v4.9.78): follows the PERSON — the new head's
+    // hand-set member flag becomes her head correction.
+    if (newHeadMemberCorr.is_currently_student !== undefined && newHeadMemberCorr.is_currently_student !== null) hc.is_currently_student = Number(newHeadMemberCorr.is_currently_student);
     if (Object.keys(hc).length) nextHead = hc;
     delete nextMembers[newHeadIdKey];
   }
@@ -7310,6 +7466,10 @@ function blankFormData() {
       // needs an age, and the DOB derivation fills it when a DOB is typed.
       profession: 181, marital_status: 101,
       is_disabled: 0, health_condition_id: 203,
+      // Student flag (v4.9.78): a blank head is a Housewife (181), so
+      // No (0) is the right default; a hand-picked Student (106)
+      // flips it to Yes, and the DOB derivation syncs it.
+      is_currently_student: 0,
       is_ssnp_covered: 0, facilities_ids: [],
       is_dss_training_or_financial_benefit: 0,
       pmt_kitchen: 297, pmt_dining: 292, pmt_land: 405, pmt_diesel: 596, pmt_lpg: 590,
@@ -7350,7 +7510,11 @@ function addManualMember() {
     father_name_bn: '', father_name_en: '',
     mother_name_bn: '', mother_name_en: '',
     doc_type: 'NID', dob: '', nid: '', nid_or_brn: '',
-    is_disabled: 0, is_currently_student: 0, health_condition_id: 203,
+    is_disabled: 0, health_condition_id: 203,
+    // Student flag (v4.9.78): NOT defaulted here — a blank member has
+    // no age and no profession yet, so the derivation sets the flag
+    // (4-24 => Yes, 0-3 => No) when a DOB is typed. A 0 here would
+    // have looked like a hand-set No.
     // Annual income starts at 0 (v4.9.66) — a blank income glows red
     // in the card, and 0 is what the form gets for a non-husband.
     estimate_annual_income: 0,
@@ -7480,12 +7644,19 @@ function renderExtractedCards(data) {
 
   renderHouseholdSummaryCard(data);
 
-  const buildEditableCard = (targetObj, fields, isMember = false, memberIdx = 0) => {
+  // (v4.9.78) opts: { household: true } renders a Step 2 household
+  // card (the head record's non-personal fields — mobile, MFS, PMT,
+  // Bank, Address, Socio-Economic, General, Nominee) with a static
+  // title and the pulled program/PMT detail; { title, tag } set that
+  // static header. A household card is tagged data-household, NOT
+  // data-head, so the head-card lookups still find the person card.
+  const buildEditableCard = (targetObj, fields, isMember = false, memberIdx = 0, opts = {}) => {
     const card = document.createElement('div');
     card.className = 'record-card';
     // Tag the card so a change on one card (a parent's name, a DOB)
     // can refresh another card's inputs in place (v4.9.39).
     if (isMember) card.dataset.memberIdx = String(memberIdx);
+    else if (opts.household) card.dataset.household = '1';
     else card.dataset.head = '1';
 
     const headEl = document.createElement('div');
@@ -7495,6 +7666,12 @@ function renderExtractedCards(data) {
     tagSpan.className = 'record-tag';
 
     const refreshHeader = () => {
+      // A household card has a fixed title — it is not a person.
+      if (opts.title) {
+        titleSpan.textContent = opts.title;
+        tagSpan.textContent = opts.tag || '';
+        return;
+      }
       const age = calculateAgeYears(targetObj.dob);
       const isChild = age !== null && age >= 0 && age < 18;
       const ageLabel = age !== null ? ` • ${age}y${isChild ? ' (শিশু <18)' : ''}` : '';
@@ -7550,11 +7727,10 @@ function renderExtractedCards(data) {
     fields.forEach((f) => {
       // (v39) A sectioned field only renders when the record carries
       // pulled website data — a hand-typed New Form has none, so its
-      // head card stays the core fields only (name, parents, gender,
-      // religion, DOB, NID, mobile, education, profession, marital,
-      // disability/health, SSNP/DSS). Typing a value into a section
-      // field by hand brings that section up, since the record then
-      // has the data.
+      // household card stays the always-shown fields only (mobile,
+      // MFS, PMT picks, score). Typing a value into a section field
+      // by hand brings that section up, since the record then has
+      // the data.
       if (f.section && !hasPulledSections(targetObj)) return;
       if (f.hideWhenEmpty && (targetObj[f.key] === undefined || targetObj[f.key] === null || String(targetObj[f.key]).trim() === '')) return;
       if (f.section && f.section !== lastSection) pendingSection = f.section;
@@ -7649,10 +7825,11 @@ function renderExtractedCards(data) {
     });
 
     card.appendChild(body);
-    // (v38) Program + PMT answers the pull brings (head card only):
-    // a collapsible list, so the form's own answers are visible
-    // organised instead of only inside the Raw JSON dump.
-    if (!isMember && ((Array.isArray(targetObj.program_fields) && targetObj.program_fields.length) || (Array.isArray(targetObj.pmt_answers) && targetObj.pmt_answers.length))) {
+    // (v38) Program + PMT answers the pull brings (household card
+    // only, v4.9.78 — it moved there with the other non-personal
+    // info): a collapsible list, so the form's own answers are
+    // visible organised instead of only inside the Raw JSON dump.
+    if (opts.showProgramDetail && ((Array.isArray(targetObj.program_fields) && targetObj.program_fields.length) || (Array.isArray(targetObj.pmt_answers) && targetObj.pmt_answers.length))) {
       const det = document.createElement('details');
       det.style.cssText = 'margin:6px 10px 10px; border:1px solid var(--border); border-radius:6px; padding:6px 8px;';
       const sum = document.createElement('summary');
@@ -7692,6 +7869,15 @@ function renderExtractedCards(data) {
   addBtn.style.cssText = 'width:100%; margin:6px 0 2px; padding:8px; font-weight:700;';
   addBtn.addEventListener('click', addManualMember);
   container.appendChild(addBtn);
+
+  // Household / other info (v4.9.78): Step 2 — everything that is
+  // NOT one person's personal info, on the head record, in the user's
+  // order (mobile + MFS first, then home-made-of, then the rest of
+  // the PMT picks + score, then Bank, Address, Permanent Address,
+  // Socio-Economic, General, Nominee, and the pulled program/PMT
+  // detail). It IS the head record, so its fields still record head
+  // corrections, and the payload is unchanged.
+  if (data.head) container.appendChild(buildEditableCard(data.head, HOUSEHOLD_FIELDS, false, 0, { household: true, title: 'Household & Other Info (পরিবার ও অন্যান্য তথ্য)', tag: 'Mobile • MFS • PMT • Bank • Address', showProgramDetail: true }));
 
   // Cash usage — the 2500 Tk distribution (v4.9.37).
   container.appendChild(buildCashUsageCard(data));

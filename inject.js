@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v53';
+  const FC_INJECT_VERSION = 'v54';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -1540,6 +1540,31 @@
     return clicked;
   }
 
+  // Student flag (v54): the site's member-row question
+  // "বর্তমানে শিক্ষার্থী?" (Currently Student? Age 3–34) is filled
+  // from this — NOT from age alone any more. The PROFESSION drives
+  // it: Student (head profession 106 / member livelihood 220) => Yes
+  // at any age, so a hand-picked 25+ student still gets Yes. A panel
+  // value (is_currently_student on the record — the user typed it, or
+  // the panel derived it from the profession) always wins. Otherwise
+  // the age rule: 4-24 => Yes, 0-3 => No (the Not Applicable case,
+  // livelihood 275), 25+ => No. The age-24 cap on DERIVING the
+  // Student profession itself is NOT changed here (open question) —
+  // only the profession=>Yes linkage is new.
+  function studentFlagForMember(m) {
+    if (!m) return 0;
+    if (m.is_currently_student !== undefined && m.is_currently_student !== null && String(m.is_currently_student).trim() !== '') {
+      return Number(m.is_currently_student) ? 1 : 0;
+    }
+    const isHeadRow = Number(m.relationship_id) === 260 || m.relation === 'Head/Self';
+    const prof = isHeadRow ? m.profession : m.livelihood_profession_id;
+    if (Number(prof) === (isHeadRow ? 106 : 220)) return 1;
+    const a = calculateAgeYears(m.dob);
+    if (a === null || a < 0) return 0;
+    if (a <= 3) return 0;
+    return a <= 24 ? 1 : 0;
+  }
+
   function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold, spousePresence) {
     const relName = m.relation || '';
     const isChild = age !== null && age < 18;
@@ -1678,6 +1703,11 @@
     education_status_id: { head: ['education_status'], row: ['education_status_id', 'literacy_id'], pmt: [14] },
     profession: { head: ['profession'], row: [], pmt: [] },
     marital_status: { head: ['marital_status'], row: ['maritial_status_id'], pmt: [] },
+    // Student flag (v54): the head form has no such field (the
+    // question lives on the member row only), so head: [] — but the
+    // head ROW does, so row: ['is_currently_student']. The count is
+    // what matters: a flag correction skips the fast path.
+    is_currently_student: { head: [], row: ['is_currently_student'], pmt: [] },
   };
   function headCorrectionSets(correctionsHead) {
     const headKeys = new Set(), rowKeys = new Set(), pmtQids = new Set();
@@ -1712,6 +1742,9 @@
     literacy_id: ['literacy_id'],
     health_condition_id: ['health_condition_id'],
     disability_type_id: ['disability_type_id'],
+    // Student flag (v54): a hand-picked flag is a member correction —
+    // it forces the row radio on a re-fill (and skips the fast path).
+    is_currently_student: ['is_currently_student'],
   };
   function memberCorrectionSets(correctionsMembers, targetMemberList) {
     const byIdx = new Map();
@@ -1982,7 +2015,7 @@
 
     // ---- Member radios: model first (0/1 are known), click where mapping is safe.
     const memberRadioFields = [
-      { key: 'is_currently_student', valueOf: (m) => { const a = calculateAgeYears(m.dob); return (a !== null && a >= 4 && a <= 24) ? 1 : 0; } },
+      { key: 'is_currently_student', valueOf: (m) => studentFlagForMember(m) },
       { key: 'is_ssnp_covered', valueOf: () => 0 },
       { key: 'is_dss_training_or_financial_benefit', valueOf: () => 0 }
     ];
@@ -2001,6 +2034,12 @@
         let val, forceIt = false;
         if (field.key === 'is_ssnp_covered' && ben && ben.ssnpProvided) { val = ben.ssnp; forceIt = true; }
         else if (field.key === 'is_dss_training_or_financial_benefit' && ben && ben.dssProvided) { val = ben.dss; forceIt = true; }
+        // Student flag (v54): a panel value (the user typed it, or the
+        // panel derived it from a Student profession) forces the radio
+        // even when the row already has a value — the panel is the
+        // source of truth, and a 25+ hand-picked student must still
+        // land Yes on a re-fill. A plain derivation stays empty-only.
+        else if (field.key === 'is_currently_student' && m.is_currently_student !== undefined && m.is_currently_student !== null && String(m.is_currently_student).trim() !== '') { val = Number(m.is_currently_student) ? 1 : 0; forceIt = true; }
         else { val = (overrideVal === undefined || overrideVal === null) ? field.valueOf(m) : Number(overrideVal); }
         if (onlyEmpty && !forceIt && !isEmptyModelVal(row[field.key])) continue;
         if (String(row[field.key] ?? '') !== String(val)) setReactive(vmMembers, row, field.key, val);
@@ -3861,9 +3900,9 @@
 
           // Yes/No radios whose values are known (0/1). The option sync pass
           // below also clicks the matching radio so change handlers fire.
-          const memAgeForStudent = calculateAgeYears(m.dob);
-          setReactive(vmMembers, row, 'is_currently_student',
-            (memAgeForStudent !== null && memAgeForStudent >= 4 && memAgeForStudent <= 24) ? 1 : 0);
+          // Student? (v54) The profession drives it — Student (106/220)
+          // => Yes at any age; a panel value wins over the age rule.
+          setReactive(vmMembers, row, 'is_currently_student', studentFlagForMember(m));
           // Benefit (v26): the resolved per-member benefit (Halnad /
           // panel / override) wins over the old always-0 default. The
           // radio sync below clicks the matching radio.
