@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.78-live';
+const CURRENT_VERSION_TAG = 'v4.9.80-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -211,14 +211,14 @@ function incomeGuessForHeadProfession(professionId) {
   return rollIncome(incomeForHeadProfession(professionId));
 }
 // The income a member would show from a profession alone (v4.9.74,
-// rolled since v4.9.75): student-age (4–24) is always 0; no
+// rolled since v4.9.75): student-age (6–24) is always 0; no
 // profession on file falls back to the old Husband 60000 / others 0
 // rule, rolled the same way. A real income is never derived here —
 // normalizeOutput's real-value branches win first, and the card's
 // profession handler only overwrites an income that is still a guess
 // (blank, 0, or inside the old profession's range).
 function incomeGuessForMember(entry, profId) {
-  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
+  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 6 && entry.age <= 24;
   if (isStudentAge) return 0;
   if (profId !== undefined && profId !== null && String(profId).trim() !== '') return incomeGuessForProfession(profId);
   return entry && entry.relation === 'Husband' ? rollIncome(60000) : 0;
@@ -227,7 +227,7 @@ function incomeGuessForMember(entry, profId) {
 // "is this still a guess" check, which tests range membership instead
 // of equality now that guesses are rolled (v4.9.75).
 function incomeGuessMidForMember(entry, profId) {
-  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 4 && entry.age <= 24;
+  const isStudentAge = entry && entry.age !== null && entry.age !== undefined && entry.age >= 6 && entry.age <= 24;
   if (isStudentAge) return 0;
   if (profId !== undefined && profId !== null && String(profId).trim() !== '') return incomeForProfession(profId);
   return entry && entry.relation === 'Husband' ? 60000 : 0;
@@ -2089,7 +2089,7 @@ function educationIdForAge(age) {
 // the user chose কৃষিকাজ over দিনমজুর for their families).
 function professionIdForAgeGender(age, gender, isHead) {
   if (age === null || age === undefined || age < 0) return null;
-  if (age < 4) return isHead ? 110 : 275;   // little child: Others / Not Applicable
+  if (age < 6) return isHead ? 110 : 275;   // little child: Others / Not Applicable
   if (age <= 24) return isHead ? 106 : 220; // student age: Student
   if (gender === 'Female') return isHead ? 181 : 225; // Housewife / Homemaker
   return isHead ? 151 : 210;                 // adult male: Farmer / Agriculture
@@ -2167,18 +2167,21 @@ function studentIdKey(record, isHead) {
   return isHead ? 'head' : (record && record.nid_or_brn ? String(record.nid_or_brn) : null);
 }
 
-// The flag a record SHOULD have right now: profession Student => 1,
-// age 0-3 => 0 (the Not Applicable case, 275), otherwise the age rule
-// the injector already used (4-24 => 1, 25+ => 0). The age-24 cap on
+// The flag a record SHOULD have right now: profession Student => 1.
+// (v4.9.80) An explicitly set non-Student profession beats the age
+// rule: the profession the user picked wins — a 6-24-year-old
+// Farmer/Housewife is NOT a student. The age rule (6-24 => 1, 25+ => 0,
+// 0-5 => 0) only applies when no profession is set. The age-24 cap on
 // DERIVING the Student profession itself is NOT changed here (open
-// question for the user) — only the profession=>Yes linkage is new.
+// question for the user).
 function studentFlagForRecord(record, isHead) {
   if (!record) return 0;
   const prof = isHead ? record.profession : record.livelihood_profession_id;
   if (Number(prof) === (isHead ? 106 : 220)) return 1;
+  if (prof !== undefined && prof !== null && String(prof).trim() !== '') return 0;
   const age = calculateAgeYears(record.dob);
   if (age === null || age < 0) return 0;
-  if (age <= 3) return 0;
+  if (age <= 5) return 0;
   return age <= 24 ? 1 : 0;
 }
 
@@ -2225,7 +2228,7 @@ function deriveFromDob(targetObj, isHead, hasSpouse, flags) {
     }
   }
   // Student flag (v4.9.78): the derived profession may make the person
-  // a student (4-24) — fill the flag when it is still BLANK, unless it
+  // a student (6-24) — fill the flag when it is still BLANK, unless it
   // was hand-picked. Like every other field deriveFromDob fills, a
   // value already on the record (typed on the card, pulled, imported)
   // is never overwritten here: recalculateHouseholdSummary re-runs
@@ -6468,9 +6471,17 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   // Student flag (v4.9.78): the profession drives it — Student (106)
   // => Yes at any age, so a hand-picked 25+ student still gets Yes.
   // A value the user typed on the card wins; a pulled value wins too;
-  // otherwise the age rule (4-24 => Yes, 0-3 => No). The injector's
+  // otherwise the age rule (6-24 => Yes, 0-5 => No). The injector's
   // head member row reads it from this record (targetMemberList[0]).
-  if (h.is_currently_student !== undefined && h.is_currently_student !== null && String(h.is_currently_student).trim() !== '') {
+  // (v4.9.80) An explicitly non-Student profession re-derives the flag
+  // to No — a stale Yes (AI-derived from age, or carried over from a
+  // previous session) must not survive the rebuild. A hand-picked flag
+  // still wins, and a Pull/Import/restore (preserveOrder) keeps the
+  // form's own value: the record the form holds IS the hand value then.
+  const headProfSet = head.profession !== undefined && head.profession !== null && String(head.profession).trim() !== '';
+  if (!preserveOrder && headProfSet && Number(head.profession) !== 106 && !studentFlagHandSet.has('head')) {
+    head.is_currently_student = 0;
+  } else if (h.is_currently_student !== undefined && h.is_currently_student !== null && String(h.is_currently_student).trim() !== '') {
     head.is_currently_student = Number(h.is_currently_student);
   } else if (Number(head.profession) === 106) {
     head.is_currently_student = 1;
@@ -6683,8 +6694,16 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     }
     // Student flag (v4.9.78): the profession drives it — Student (220)
     // => Yes at any age. A value typed on the card wins; a pulled
-    // value wins too; otherwise the age rule (4-24 => Yes, 0-3 => No).
-    if (m?.is_currently_student !== undefined && m?.is_currently_student !== null && String(m.is_currently_student).trim() !== '') {
+    // value wins too; otherwise the age rule (6-24 => Yes, 0-5 => No).
+    // (v4.9.80) An explicitly non-Student profession re-derives the
+    // flag to No — a stale Yes must not survive the rebuild. A
+    // hand-picked flag still wins, and a Pull/Import/restore
+    // (preserveOrder) keeps the form's own value.
+    const memberProfSet = entry.livelihood_profession_id !== undefined && entry.livelihood_profession_id !== null && String(entry.livelihood_profession_id).trim() !== '';
+    const memberFlagKey = String(entry.nid_or_brn || '').replace(/\s+/g, '');
+    if (!preserveOrder && memberProfSet && Number(entry.livelihood_profession_id) !== 220 && !studentFlagHandSet.has(memberFlagKey)) {
+      entry.is_currently_student = 0;
+    } else if (m?.is_currently_student !== undefined && m?.is_currently_student !== null && String(m.is_currently_student).trim() !== '') {
       entry.is_currently_student = Number(m.is_currently_student);
     } else if (Number(entry.livelihood_profession_id) === 220) {
       entry.is_currently_student = 1;
@@ -6743,7 +6762,7 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     // card, and the site's income field is required on one form
     // variant, so an empty income glows red there too. A real income
     // wins; otherwise the guess comes from the profession (v4.9.73,
-    // PROFESSION_INCOME above): a student-age member (4–24) still
+    // PROFESSION_INCOME above): a student-age member (6–24) still
     // gets 0, like the injector, and with no profession on file the
     // old rule stands (Husband 60000, everyone else 0) — so a son
     // with no income still shows 0. This reverses the v4.9.65 hiding:
@@ -7513,7 +7532,7 @@ function addManualMember() {
     is_disabled: 0, health_condition_id: 203,
     // Student flag (v4.9.78): NOT defaulted here — a blank member has
     // no age and no profession yet, so the derivation sets the flag
-    // (4-24 => Yes, 0-3 => No) when a DOB is typed. A 0 here would
+    // (6-24 => Yes, 0-5 => No) when a DOB is typed. A 0 here would
     // have looked like a hand-set No.
     // Annual income starts at 0 (v4.9.66) — a blank income glows red
     // in the card, and 0 is what the form gets for a non-husband.

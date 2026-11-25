@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v54';
+  const FC_INJECT_VERSION = 'v56';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -1547,9 +1547,11 @@
   // at any age, so a hand-picked 25+ student still gets Yes. A panel
   // value (is_currently_student on the record — the user typed it, or
   // the panel derived it from the profession) always wins. Otherwise
-  // the age rule: 4-24 => Yes, 0-3 => No (the Not Applicable case,
-  // livelihood 275), 25+ => No. The age-24 cap on DERIVING the
-  // Student profession itself is NOT changed here (open question) —
+  // an explicitly set non-Student profession => No (v56: the
+  // profession the user picked beats the age rule); the age rule
+  // (6-24 => Yes, 0-5 => No, 25+ => No) only applies when no
+  // profession is set. The age-24 cap on DERIVING the Student
+  // profession itself is NOT changed here (open question) —
   // only the profession=>Yes linkage is new.
   function studentFlagForMember(m) {
     if (!m) return 0;
@@ -1559,20 +1561,28 @@
     const isHeadRow = Number(m.relationship_id) === 260 || m.relation === 'Head/Self';
     const prof = isHeadRow ? m.profession : m.livelihood_profession_id;
     if (Number(prof) === (isHeadRow ? 106 : 220)) return 1;
+    // (v56) An explicitly set non-Student profession beats the age
+    // rule — the profession the user picked wins. The age rule only
+    // applies when no profession is set (and only matters when the
+    // panel sent a blank flag; a panel value already won above).
+    if (prof !== undefined && prof !== null && String(prof).trim() !== '') return 0;
     const a = calculateAgeYears(m.dob);
     if (a === null || a < 0) return 0;
-    if (a <= 3) return 0;
+    if (a <= 5) return 0;
     return a <= 24 ? 1 : 0;
   }
 
   function memberOptionPatterns(m, age, genderId, hasSpouseInHousehold, spousePresence) {
     const relName = m.relation || '';
     const isChild = age !== null && age < 18;
-    const isLittleChild = age !== null && age < 4;
-    // Student age for profession/livelihood: 4-24 covers pre-primary
-    // through school, HSC, honours and masters. Kept separate from
-    // isChild so marital status still treats only under-18s as unmarried.
-    const isStudentAge = age !== null && age >= 4 && age <= 24;
+    const isLittleChild = age !== null && age < 6;
+    // Student age for profession/livelihood: 6-24 covers Class 1
+    // through school, HSC, honours and masters. (v4.9.79: school
+    // starts at 6 in Bangladesh — a 4- or 5-year-old has not started
+    // studying yet, so they are Not Applicable, not Student.) Kept
+    // separate from isChild so marital status still treats only
+    // under-18s as unmarried.
+    const isStudentAge = age !== null && age >= 6 && age <= 24;
     const female = isFemaleGenderId(genderId);
     const E = LOOKUP_IDS.education, L = LOOKUP_IDS.livelihood, P = LOOKUP_IDS.profession;
 
@@ -3811,7 +3821,7 @@
           const rowMatched = rowHoldsMember(row, m, { cleanId, isNID, memModelDob, relId, relName, genderId, memReligionId });
           if (rowMatched) {
             const isHeadRowM = relId === 260 || relName === 'Head/Self';
-            const isStudentRowM = memAge !== null && memAge >= 4 && memAge <= 24;
+            const isStudentRowM = memAge !== null && memAge >= 6 && memAge <= 24;
             const benM = (benefits && benefits.byIdx[idx]) || null;
             if (benM && benM.ssnpProvided && Number(row.is_ssnp_covered) !== benM.ssnp) setReactive(vmMembers, row, 'is_ssnp_covered', benM.ssnp);
             if (benM && benM.dssProvided && Number(row.is_dss_training_or_financial_benefit) !== benM.dss) setReactive(vmMembers, row, 'is_dss_training_or_financial_benefit', benM.dss);
@@ -3927,7 +3937,7 @@
           // otherwise the panel's value would never land on a fresh
           // form. The student 0-rule still applies after it.
           const isHeadRow = relId === 260 || relName === 'Head/Self';
-          const isStudentRow = memAge !== null && memAge >= 4 && memAge <= 24;
+          const isStudentRow = memAge !== null && memAge >= 6 && memAge <= 24;
           if (!isStudentRow && m.estimate_annual_income !== undefined && m.estimate_annual_income !== null && String(m.estimate_annual_income).trim() !== '' && (isEmptyModelVal(row.estimate_annual_income) || Number(row.estimate_annual_income) === 0)) {
             setReactive(vmMembers, row, 'estimate_annual_income', Number(m.estimate_annual_income));
           }
