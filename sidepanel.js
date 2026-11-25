@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.80-live';
+const CURRENT_VERSION_TAG = 'v4.9.81-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -2919,6 +2919,17 @@ function addImage(category, base64, name, source) {
   // Capture, so the crop editor never auto-scans it).
   state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: source || 'upload' });
   renderPreviews(category);
+  // (v4.9.81) Fill-while-extracting: as soon as the first photo lands
+  // and there is no record yet, show blank household + cash-usage
+  // cards so the user can fill them while the AI works (or if it
+  // fails) — instead of waiting at an empty results area. The blank
+  // record carries the PMT defaults + sticky home combo + area
+  // presets. This is NOT newBlankForm, which would wipe the photos.
+  if (!state.lastExtracted) {
+    state.lastExtracted = blankFormData();
+    renderExtractedCards(state.lastExtracted);
+    $('autofillBtn').disabled = false;
+  }
   saveSessionState();
 }
 
@@ -6502,6 +6513,19 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   // beneficiary is set to Yes after this runs.
   const headSamePerson = !!(prev && prev.head && samePersonId(cleanHeadId, prev.head.nid || prev.head.nid_or_brn));
   const headPrev = headSamePerson ? prev.head : null;
+  // Household carry (v4.9.81): the head's HOUSEHOLD fields (phone,
+  // MFS, bank, address, nominee, program counts, PMT answers/picks)
+  // may also come from a previous record whose head has NO NID yet —
+  // a blank in-progress form the user typed into while the AI worked.
+  // They are blocked only when the previous head has a DIFFERENT
+  // non-empty NID (a different family), so nothing bleeds across
+  // families. The AI never returns these fields, so raw has no value
+  // and prev should win. Person-level fields (SSNP/card/DSS,
+  // disability/health, income, student flag) keep the strict
+  // same-person headPrev above — those are about the person, not the
+  // household.
+  const prevHeadId = toEnglishDigits(String(prev?.head?.nid || prev?.head?.nid_or_brn || '')).replace(/\s+/g, '');
+  const headHouseholdPrev = (prev && prev.head && (!prevHeadId || samePersonId(cleanHeadId, prevHeadId))) ? prev.head : null;
   // Annual income (v4.9.75): the head card never had an income row,
   // so every old record carries 0 — a 0 only counts as a real income
   // for a 0-value head profession (Housewife/Student/Unemployed/
@@ -6541,18 +6565,19 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   }
   // SSNP No can never carry a card (v4.9.49).
   if (head.is_ssnp_covered !== 1 && Array.isArray(head.facilities_ids) && head.facilities_ids.length) head.facilities_ids = [];
-  // Phone + MFS (v4.9.49): the head's mobile number and MFS provider.
+  // Phone + MFS (v4.9.49, v4.9.81): the head's mobile number and MFS provider.
   // The site rejects Bangla digits in a mobile number, so normalize
   // to English digits here too (the card does it on blur as well). A
-  // previous record's phone/MFS carry over only for the SAME person
-  // (headPrev) — a phone must never bleed across families.
+  // previous record's phone/MFS carry over for the same person — or
+  // from a blank in-progress form with no NID yet (headHouseholdPrev).
+  // A phone must never bleed across families (different non-empty NID).
   const cleanHeadMobile = checkMobileNumber(h.mobile_number).value;
   if (cleanHeadMobile) head.mobile_number = cleanHeadMobile;
-  else if (headPrev && headPrev.mobile_number) head.mobile_number = checkMobileNumber(headPrev.mobile_number).value || headPrev.mobile_number;
+  else if (headHouseholdPrev && headHouseholdPrev.mobile_number) head.mobile_number = checkMobileNumber(headHouseholdPrev.mobile_number).value || headHouseholdPrev.mobile_number;
   if (h.mfs_provider_id !== undefined && h.mfs_provider_id !== null && String(h.mfs_provider_id).trim() !== '') {
     head.mfs_provider_id = Number(h.mfs_provider_id);
-  } else if (headPrev && headPrev.mfs_provider_id !== undefined && headPrev.mfs_provider_id !== null && String(headPrev.mfs_provider_id).trim() !== '') {
-    head.mfs_provider_id = Number(headPrev.mfs_provider_id);
+  } else if (headHouseholdPrev && headHouseholdPrev.mfs_provider_id !== undefined && headHouseholdPrev.mfs_provider_id !== null && String(headHouseholdPrev.mfs_provider_id).trim() !== '') {
+    head.mfs_provider_id = Number(headHouseholdPrev.mfs_provider_id);
   }
   // Disability + Health (v4.9.50): the head card carries the same
   // Disabled / Disability Type / Health fields as a member card — they
@@ -6575,31 +6600,33 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   } else if (headPrev && headPrev.health_condition_id !== undefined && headPrev.health_condition_id !== null && String(headPrev.health_condition_id).trim() !== '') {
     head.health_condition_id = Number(headPrev.health_condition_id);
   }
-  // (v38) All-tabs pull: the extra head fields the injector now
+  // (v38, v4.9.81) All-tabs pull: the extra head fields the injector now
   // sends — general extras, bank, address, nominee, program counts,
   // PMT answers. Text keys keep the trimmed string, id keys keep the
   // number, name keys keep the resolved display name. A previous
-  // record's values carry over only for the SAME person (headPrev),
-  // so nothing bleeds across families.
+  // record's values carry over for the same person — or from a blank
+  // in-progress form with no NID yet (headHouseholdPrev) — so nothing
+  // bleeds across families.
   const headTextKeys = ['spouse_name_bn', 'spouse_name_en', 'identification_mark', 'nationality', 'email', 'account_name', 'account_number', 'mfs_number', 'address_text', 'address_post_code', 'permanent_address_text', 'permanent_address_post_code', 'nominee_en', 'nominee_bn', 'nominee_verification_number', 'nominee_date_of_birth', 'nominee_address', 'nominee_relation_with_beneficiary', 'nominee_nationality', 'mobile_operator', 'account_type_label', 'bank_name', 'branch_name', 'bank_division_name', 'bank_district_name', 'account_owner', 'address_division_name', 'address_district_name', 'address_thana_name', 'address_union_name', 'address_pouro_name', 'address_city_name', 'address_city_thana_name', 'address_district_pouro_name', 'address_ward_name', 'address_location_type_name', 'address_ward_key', 'permanent_address_division_name', 'permanent_address_district_name', 'permanent_address_thana_name', 'permanent_address_union_name', 'permanent_address_pouro_name', 'permanent_address_city_name', 'permanent_address_city_thana_name', 'permanent_address_district_pouro_name', 'permanent_address_ward_name', 'permanent_address_location_type_name', 'permanent_address_ward_key', 'house_size', 'no_of_room_name'];
   const headIdKeys = ['mobile_operator_id', 'disability_id', 'account_type', 'bank_name_id', 'branch_name_id', 'bank_division_id', 'bank_district_id', 'account_owner_id', 'address_division_id', 'address_district_id', 'address_thana_id', 'address_union_id', 'address_pouro_id', 'address_city_id', 'address_city_thana_id', 'address_district_pouro_id', 'address_ward_id', 'address_location_type_id', 'address_sub_location_type_id', 'permanent_address_division_id', 'permanent_address_district_id', 'permanent_address_thana_id', 'permanent_address_union_id', 'permanent_address_pouro_id', 'permanent_address_city_id', 'permanent_address_city_thana_id', 'permanent_address_district_pouro_id', 'permanent_address_ward_id', 'permanent_address_location_type_id', 'permanent_address_sub_location_type_id', 'no_of_room', 'program_male', 'program_female', 'program_hijra', 'program_abroad_male', 'program_abroad_female', 'program_abroad_hijra'];
   for (const k of headTextKeys) {
     if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== '') head[k] = String(h[k]).trim();
-    else if (headPrev && headPrev[k] !== undefined && headPrev[k] !== null && String(headPrev[k]).trim() !== '') head[k] = String(headPrev[k]).trim();
+    else if (headHouseholdPrev && headHouseholdPrev[k] !== undefined && headHouseholdPrev[k] !== null && String(headHouseholdPrev[k]).trim() !== '') head[k] = String(headHouseholdPrev[k]).trim();
   }
   for (const k of headIdKeys) {
     if (h[k] !== undefined && h[k] !== null && String(h[k]).trim() !== '') head[k] = Number(h[k]);
-    else if (headPrev && headPrev[k] !== undefined && headPrev[k] !== null && String(headPrev[k]).trim() !== '') head[k] = Number(headPrev[k]);
+    else if (headHouseholdPrev && headHouseholdPrev[k] !== undefined && headHouseholdPrev[k] !== null && String(headHouseholdPrev[k]).trim() !== '') head[k] = Number(headHouseholdPrev[k]);
   }
   // Bangla names stay Bangla (like the head's own name_bn).
   if (head.spouse_name_bn) head.spouse_name_bn = stripLatinLetters(head.spouse_name_bn);
   if (head.nominee_bn) head.nominee_bn = stripLatinLetters(head.nominee_bn);
   // Program fields + PMT answers are arrays — keep the pull's list,
-  // else the same person's previous list.
+  // else the same person's previous list, else a blank in-progress
+  // form's list (headHouseholdPrev, v4.9.81).
   if (preserveOrder && Array.isArray(h.program_fields) && h.program_fields.length) head.program_fields = h.program_fields;
-  else if (headPrev && Array.isArray(headPrev.program_fields) && headPrev.program_fields.length) head.program_fields = headPrev.program_fields;
+  else if (headHouseholdPrev && Array.isArray(headHouseholdPrev.program_fields) && headHouseholdPrev.program_fields.length) head.program_fields = headHouseholdPrev.program_fields;
   if (preserveOrder && Array.isArray(h.pmt_answers) && h.pmt_answers.length) head.pmt_answers = h.pmt_answers;
-  else if (headPrev && Array.isArray(headPrev.pmt_answers) && headPrev.pmt_answers.length) head.pmt_answers = headPrev.pmt_answers;
+  else if (headHouseholdPrev && Array.isArray(headHouseholdPrev.pmt_answers) && headHouseholdPrev.pmt_answers.length) head.pmt_answers = headHouseholdPrev.pmt_answers;
   // PMT leftover picks (v4.9.69): the head card's picks — raw (pull /
   // import) wins, then the same person's previous record, then the
   // pulled draft's answers, then the user defaults. The fuel (for the
@@ -6613,7 +6640,7 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   // owns it (v4.9.72).
   const importedAssets = (raw?.form_defaults && raw.form_defaults.pmt && raw.form_defaults.pmt['47'] !== undefined && raw.form_defaults.pmt['47'] !== null)
     ? raw.form_defaults.pmt['47'] : undefined;
-  Object.assign(head, resolveHeadPmtPicks(h, headPrev, stickyHomeCombo(), fuelIdForPicks, importedAssets));
+  Object.assign(head, resolveHeadPmtPicks(h, headHouseholdPrev, stickyHomeCombo(), fuelIdForPicks, importedAssets));
 
   const members = Array.isArray(raw?.family_members) ? raw.family_members : [];
   const deduped = [];
@@ -8144,9 +8171,17 @@ async function runExtraction() {
 
   $('extractBtn').style.display = 'none';
   $('stopExtractBtn').style.display = 'inline-flex';
-  setStatus(`Extracting with ${model}...`, 'loading');
+  setStatus(`Extracting with ${model}... — you can fill Household & Cash Usage below meanwhile`, 'loading');
 
   extractionController = new AbortController();
+  // (v4.9.81) 120 s timeout: a hung call on a slow network ends with
+  // an error instead of waiting forever. It aborts through the same
+  // controller the Stop button uses.
+  let extractionTimedOut = false;
+  const extractionTimeout = setTimeout(() => {
+    extractionTimedOut = true;
+    extractionController.abort();
+  }, 120000);
 
   try {
     const parts = [
@@ -8276,12 +8311,15 @@ async function runExtraction() {
     const defs = normalized.form_defaults;
     setStatus(`Ready! Total: ${defs.total_members} (Male: ${defs.male_count}, Female: ${defs.female_count}, Child: ${defs.children_under_18}) • ${defs.religion}`, 'ok');
   } catch (err) {
-    if (err.name === 'AbortError') {
+    if (err.name === 'AbortError' && extractionTimedOut) {
+      setStatus('Extraction timed out after 2 minutes — check your connection and tap Extract to try again.', 'err');
+    } else if (err.name === 'AbortError') {
       setStatus('Extraction cancelled by user.', 'err');
     } else {
       setStatus(`Error: ${err.message}`, 'err');
     }
   } finally {
+    clearTimeout(extractionTimeout);
     $('extractBtn').style.display = 'inline-flex';
     $('stopExtractBtn').style.display = 'none';
     extractionController = null;
