@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v56';
+  const FC_INJECT_VERSION = 'v57';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -4679,8 +4679,74 @@
     return false;
   }
 
+  // (v57) One photo slot's keys on the form, for replacing a photo
+  // the user captured in the panel over the photo already on the
+  // form. The site's own clear methods (clearImage/clearSign/
+  // clearHouseImage) only null data[field] — they leave the stored-
+  // path keys the empty-only guard reads — so the keys are nulled
+  // directly too (the same keys linkPulledPhoto sets, both the mixin
+  // set and the draft set). house_image has no mixin stored key, only
+  // the draft one.
+  const MEDIA_SLOT_KEYS = {
+    image: { stored: ['storedImagePath', 'draftStoredImagePath'], preview: ['imageUrl'], data: ['image', 'imageUrl'], file: ['imageFile'], missing: 'draftApplicantImageMissing' },
+    signature: { stored: ['storedSignaturePath', 'draftStoredSignaturePath'], preview: ['signUrl'], data: ['signature', 'signUrl'], file: ['signatureFile'], missing: null },
+    house_image: { stored: ['draftStoredHouseImagePath'], preview: ['houseImageUrl'], data: ['house_image', 'houseImageUrl'], file: ['houseFile'], missing: 'draftHouseImageMissing' }
+  };
+  function mediaSetKey(mediaVm, k, v) {
+    if (!mediaVm || !k) return;
+    try { if (typeof mediaVm.$set === 'function') mediaVm.$set(mediaVm, k, v); else mediaVm[k] = v; } catch (_) { try { mediaVm[k] = v; } catch (_) {} }
+  }
+  // Snapshot one slot's photo state, so a failed replacement can put
+  // the old photo back exactly as it was.
+  function snapshotMediaSlot(mediaVm, field) {
+    const spec = MEDIA_SLOT_KEYS[field];
+    if (!spec || !mediaVm) return null;
+    const snap = { keys: {}, dataKeys: {}, state: null, missing: undefined };
+    spec.stored.concat(spec.preview).forEach((k) => { try { snap.keys[k] = mediaVm[k]; } catch (_) {} });
+    spec.file.forEach((k) => { try { snap.keys[k] = mediaVm[k]; } catch (_) {} });
+    if (mediaVm.data) spec.data.forEach((k) => { try { snap.dataKeys[k] = mediaVm.data[k]; } catch (_) {} });
+    try { snap.state = mediaVm.mediaUploadState ? mediaVm.mediaUploadState[field] : null; } catch (_) {}
+    if (spec.missing) { try { snap.missing = mediaVm[spec.missing]; } catch (_) {} }
+    return snap;
+  }
+  // Clear one slot on the form (stored paths, preview URLs, picked
+  // files, upload state) so a replacement upload can land. Returns
+  // the snapshot for restoreMediaSlot, or null when there was
+  // nothing to clear.
+  function clearMediaSlot(mediaVm, field) {
+    const spec = MEDIA_SLOT_KEYS[field];
+    if (!spec || !mediaVm) return null;
+    const snap = snapshotMediaSlot(mediaVm, field);
+    spec.stored.concat(spec.preview).forEach((k) => mediaSetKey(mediaVm, k, null));
+    spec.file.forEach((k) => mediaSetKey(mediaVm, k, null));
+    if (mediaVm.data) spec.data.forEach((k) => { try { mediaVm.data[k] = null; } catch (_) {} });
+    try {
+      if (mediaVm.mediaUploadState) {
+        const idle = { status: 'idle', progress: 0, error: null, file: null };
+        if (typeof mediaVm.$set === 'function') mediaVm.$set(mediaVm.mediaUploadState, field, idle);
+        else mediaVm.mediaUploadState[field] = idle;
+      }
+    } catch (_) {}
+    return snap;
+  }
+  // Put a cleared slot back exactly as snapshotMediaSlot found it.
+  function restoreMediaSlot(mediaVm, field, snap) {
+    if (!snap || !mediaVm) return;
+    Object.keys(snap.keys).forEach((k) => mediaSetKey(mediaVm, k, snap.keys[k]));
+    if (mediaVm.data) Object.keys(snap.dataKeys).forEach((k) => { try { mediaVm.data[k] = snap.dataKeys[k]; } catch (_) {} });
+    try {
+      if (mediaVm.mediaUploadState && snap.state) {
+        if (typeof mediaVm.$set === 'function') mediaVm.$set(mediaVm.mediaUploadState, field, snap.state);
+        else mediaVm.mediaUploadState[field] = snap.state;
+      }
+    } catch (_) {}
+    const spec = MEDIA_SLOT_KEYS[field];
+    if (spec && spec.missing && snap.missing !== undefined) mediaSetKey(mediaVm, spec.missing, snap.missing);
+    try { if (typeof mediaVm.syncMediaUploadStateFromStoredPaths === 'function') mediaVm.syncMediaUploadStateFromStoredPaths(); } catch (_) {}
+  }
+
   async function uploadPulledPhotos(payload, vmHead, allVms) {
-    const summary = { attempted: 0, uploaded: 0, linked: 0, skipped: 0, failed: [] };
+    const summary = { attempted: 0, uploaded: 0, linked: 0, skipped: 0, replaced: 0, failed: [] };
     const images = payload && Array.isArray(payload.images) ? payload.images : [];
     if (!images.length) return summary;
     const mediaVm = findUploadMediaVm(vmHead, allVms);
@@ -4692,13 +4758,31 @@
       const field = im && im.slot;
       if (!field || !AUTOFILL_PHOTO_FIELDS.includes(field)) continue;
       if (typeof im.dataUrl !== 'string' || !im.dataUrl) { summary.failed.push({ slot: field, message: 'No photo data' }); continue; }
-      if (mediaSlotHasPhoto(mediaVm, field)) { summary.skipped++; continue; }
+      // (v57) A panel capture marked replace: true is the user
+      // deliberately replacing the photo already on the form — clear
+      // the slot first (the empty-only guard would otherwise skip
+      // it), remembering the old photo so a failed upload puts it
+      // back instead of leaving the slot empty.
+      let oldSlot = null;
+      if (mediaSlotHasPhoto(mediaVm, field)) {
+        if (!im.replace) { summary.skipped++; continue; }
+        oldSlot = clearMediaSlot(mediaVm, field);
+      }
       summary.attempted++;
       try {
         const file = await pulledPhotoToFile(mediaVm, im.dataUrl, field);
         const res = await mediaVm.uploadMediaField(field, file);
-        if (res && res.success) summary.uploaded++;
-        else summary.failed.push({ slot: field, message: (res && res.message) || 'Upload failed' });
+        if (res && res.success) {
+          summary.uploaded++;
+          if (oldSlot) summary.replaced++;
+          // The submit gates read the draft-missing flags (the same
+          // flags linkPulledPhoto clears when it links a photo).
+          const spec = MEDIA_SLOT_KEYS[field];
+          if (spec && spec.missing && spec.missing in mediaVm) mediaSetKey(mediaVm, spec.missing, false);
+        } else {
+          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
+          summary.failed.push({ slot: field, message: (res && res.message) || 'Upload failed' });
+        }
       } catch (e) {
         // Bytes unreachable (the gateway blocks cross-origin reads)
         // — link the file that is already stored instead of failing
@@ -4706,7 +4790,10 @@
         let linked = false;
         try { linked = linkPulledPhoto(mediaVm, im.dataUrl, field); } catch (_) { linked = false; }
         if (linked) summary.linked++;
-        else summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
+        else {
+          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
+          summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
+        }
       }
     }
     return summary;
@@ -4721,7 +4808,8 @@
     // (e.g. the gateway bytes could not be fetched).
     const reason = failed.length && failed[0] && failed[0].message ? ` — ${failed[0].message}` : '';
     const linked = photos.linked || 0;
-    if (photos.uploaded > 0 && linked === 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded.`;
+    const replaced = photos.replaced || 0;
+    if (photos.uploaded > 0 && linked === 0 && !failed.length) return ` Photos: ${photos.uploaded} uploaded${replaced ? ` (${replaced} replaced)` : ''}.`;
     if (linked > 0 && photos.uploaded === 0 && !failed.length) return ` Photos: ${linked} linked.`;
     if (photos.uploaded > 0 || linked > 0 || failed.length) {
       const names = failed.map((f) => f.slot).join(', ');
@@ -4730,6 +4818,7 @@
       // when it is 0 ("0 uploaded, 1 failed") — the wording the
       // status has used since v42.
       if (photos.uploaded > 0 || failed.length) parts.push(`${photos.uploaded} uploaded`);
+      if (replaced > 0) parts.push(`${replaced} replaced`);
       if (linked > 0) parts.push(`${linked} linked`);
       if (failed.length) parts.push(`${failed.length} failed${names ? ` (${names})` : ''}`);
       return ` Photos: ${parts.join(', ')}${reason}.`;

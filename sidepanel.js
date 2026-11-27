@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.81-live';
+const CURRENT_VERSION_TAG = 'v4.9.82-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -288,16 +288,30 @@ function hasPulledSections(targetObj) {
 // materials together; the separate floor/wall/roof selects show the
 // site's full option names.
 // "Home made of" — one pick sets floor (Q536) + wall (Q30) + roof
-// (Q393) together. Order is most-common first (user-confirmed
-// 2026-11-22).
+// (Q393) together. Order is worst-first (bad -> good), by material
+// quality — floor মাটি < ঢালাই < টাইলস, wall মাটি < টিন < সিমেন্ট,
+// roof টিন < সিমেন্ট (user asked 2026-11-25; was most-common-first).
 const HOME_COMBOS = [
-  { floor: 539, wall: 341, roof: 396, label: 'মেঝে মাটি + দেয়াল সিমেন্ট + ছাদ টিন' },
-  { floor: 539, wall: 338, roof: 396, label: 'মেঝে মাটি + দেয়াল টিন + ছাদ টিন' },
-  { floor: 537, wall: 341, roof: 396, label: 'মেঝে ঢালাই + দেয়াল সিমেন্ট + ছাদ টিন' },
   { floor: 539, wall: 340, roof: 396, label: 'মেঝে মাটি + দেয়াল মাটি + ছাদ টিন' },
+  { floor: 539, wall: 338, roof: 396, label: 'মেঝে মাটি + দেয়াল টিন + ছাদ টিন' },
+  { floor: 539, wall: 341, roof: 396, label: 'মেঝে মাটি + দেয়াল সিমেন্ট + ছাদ টিন' },
   { floor: 537, wall: 338, roof: 396, label: 'মেঝে ঢালাই + দেয়াল টিন + ছাদ টিন' },
+  { floor: 537, wall: 341, roof: 396, label: 'মেঝে ঢালাই + দেয়াল সিমেন্ট + ছাদ টিন' },
   { floor: 537, wall: 341, roof: 398, label: 'মেঝে ঢালাই + দেয়াল সিমেন্ট + ছাদ সিমেন্ট' },
   { floor: 538, wall: 341, roof: 398, label: 'মেঝে টাইলস + দেয়াল সিমেন্ট + ছাদ সিমেন্ট' }
+];
+// The combo order before v4.9.82 (most-common-first). A sticky saved
+// by an older panel is a bare index into THIS order — see
+// stickyHomeCombo: it is migrated to the same house, never read as a
+// new-order index.
+const OLD_HOME_COMBO_ORDER = [
+  { floor: 539, wall: 341, roof: 396 },
+  { floor: 539, wall: 338, roof: 396 },
+  { floor: 537, wall: 341, roof: 396 },
+  { floor: 539, wall: 340, roof: 396 },
+  { floor: 537, wall: 338, roof: 396 },
+  { floor: 537, wall: 341, roof: 398 },
+  { floor: 538, wall: 341, roof: 398 }
 ];
 const HOME_COMBO_OTHER = 'other';
 const HOME_COMBO_STORAGE_KEY = 'fc_pro_home_combo';
@@ -457,25 +471,47 @@ const PMT_EDU_SCORE = {
   92: [14, 18], 93: [14, 18], 194: [14, 18], 195: [14, 18], 196: [14, 18], 197: [14, 18], 198: [14, 18]
 };
 // Sticky home combination: the last combo the user picked, kept in
-// localStorage as the next family's default (same village, same
-// house type). A storage object can be passed in (tests); otherwise
-// the panel's localStorage is used when it exists.
+// The sticky home combo, stored by material ids ("floor,wall,roof")
+// instead of a bare index — the list was reordered in v4.9.82
+// (bad -> good), so a bare index saved by an older panel would point
+// at a different house. A bare integer read back is migrated through
+// OLD_HOME_COMBO_ORDER, so the same house survives. A storage object
+// can be passed in (tests); otherwise the panel's localStorage is
+// used when it exists.
+function homeComboKeyForParts(floor, wall, roof) {
+  return `${Number(floor)},${Number(wall)},${Number(roof)}`;
+}
 function stickyHomeCombo(storage) {
   try {
     const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!store) return null;
     const raw = store.getItem(HOME_COMBO_STORAGE_KEY);
     if (raw === null || raw === undefined || String(raw).trim() === '') return null;
-    const v = Number(raw);
-    return Number.isInteger(v) && v >= 0 && v < HOME_COMBOS.length ? v : null;
+    const s = String(raw).trim();
+    if (s.includes(',')) {
+      // New format: "floor,wall,roof" — resolve by the materials.
+      const parts = s.split(',').map((x) => Number(String(x).trim()));
+      if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+      const idx = homeComboIndexForParts(parts[0], parts[1], parts[2]);
+      return idx >= 0 ? idx : null;
+    }
+    // Old format: a bare index into OLD_HOME_COMBO_ORDER — migrate
+    // it to the same house in the new order.
+    const v = Number(s);
+    if (!Number.isInteger(v) || v < 0 || v >= OLD_HOME_COMBO_ORDER.length) return null;
+    const old = OLD_HOME_COMBO_ORDER[v];
+    const idx = homeComboIndexForParts(old.floor, old.wall, old.roof);
+    return idx >= 0 ? idx : null;
   } catch (_) { return null; }
 }
 function saveStickyHomeCombo(index, storage) {
   try {
     const store = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
     if (!store) return;
-    if (index === null || index === undefined || index === HOME_COMBO_OTHER) store.removeItem(HOME_COMBO_STORAGE_KEY);
-    else store.setItem(HOME_COMBO_STORAGE_KEY, String(index));
+    if (index === null || index === undefined || index === HOME_COMBO_OTHER) { store.removeItem(HOME_COMBO_STORAGE_KEY); return; }
+    const c = HOME_COMBOS[Number(index)];
+    if (!c) { store.removeItem(HOME_COMBO_STORAGE_KEY); return; }
+    store.setItem(HOME_COMBO_STORAGE_KEY, homeComboKeyForParts(c.floor, c.wall, c.roof));
   } catch (_) {}
 }
 // Which combo (0–6) matches these floor/wall/roof ids, or -1.
@@ -545,7 +581,25 @@ function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId, importedAss
     pmt_assets: pickMulti('pmt_assets', 47, importedAssets, PMT_ASSET_DEFAULT_IDS)
   };
   // Combo + the three material picks.
-  const rawCombo = raw.home_combo ?? prev.home_combo;
+  let rawCombo = raw.home_combo ?? prev.home_combo;
+  // (v4.9.82) Combo-order migration: a record saved by an older
+  // panel carries a combo index from the OLD order — but it also
+  // carries the three parts that old combo resolved to, and the parts
+  // are what actually goes to the form. When the parts match a
+  // different combo than the index says, trust the parts: the same
+  // house survives the reorder. No parts (a hand-written record) ->
+  // the index is taken as-is, in the new order.
+  if (rawCombo !== undefined && rawCombo !== null && rawCombo !== HOME_COMBO_OTHER && String(rawCombo).trim() !== '') {
+    const idx = Number(rawCombo);
+    if (Number.isInteger(idx)) {
+      const src = (raw.home_combo !== undefined && raw.home_combo !== null && String(raw.home_combo).trim() !== '') ? raw : prev;
+      const f = src ? Number(src.pmt_floor) : 0, w = src ? Number(src.pmt_wall) : 0, r = src ? Number(src.pmt_roof) : 0;
+      if (f && w && r) {
+        const byParts = homeComboIndexForParts(f, w, r);
+        if (byParts >= 0 && byParts !== idx) rawCombo = byParts;
+      }
+    }
+  }
   const pulledFloor = pmtPulledAnswerId(pulled, 536);
   const pulledWall = pmtPulledAnswerId(pulled, 30);
   const pulledRoof = pmtPulledAnswerId(pulled, 393);
@@ -1381,6 +1435,31 @@ function initApp() {
 
   $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
+  // (v4.9.82) Form-photo slot upload: one file per slot, straight
+  // into the crop editor — never into the NID/BRN lists.
+  const photoSlotInput = $('photoSlotUpload');
+  if (photoSlotInput) {
+    photoSlotInput.addEventListener('change', (e) => {
+      const slot = photoSlotUploadTarget;
+      photoSlotUploadTarget = null;
+      const file = e.target.files && e.target.files[0];
+      if (!file || !slot) { if (e.target) e.target.value = ''; return; }
+      if (!file.type.startsWith('image/')) {
+        setStatus('That is not a photo.', 'err');
+        if (e.target) e.target.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const b64 = String(evt.target.result || '').split(',')[1] || '';
+        if (!b64) { setStatus('Could not read this photo.', 'err'); return; }
+        openCropForPhotoSlot(slot, b64, file.name, 'upload');
+      };
+      reader.onerror = () => setStatus('Could not read this photo.', 'err');
+      reader.readAsDataURL(file);
+      if (e.target) e.target.value = '';
+    });
+  }
 
   $('capturePhotoBtn').addEventListener('click', capturePanelPhoto);
   $('cancelCameraBtn').addEventListener('click', cancelPanelCamera);
@@ -4303,7 +4382,12 @@ function showPulledPhoto(item) {
   if (!modal || !item || !item.dataUrl) return;
   setPanelWide(true);
   const cropBtn = modal.querySelector('#fcCropImgBtn');
-  if (cropBtn) cropBtn.style.display = 'none';
+  // (v4.9.82) A photo captured in the panel can be re-cropped here —
+  // a pulled photo cannot (it lives on the form, not in the panel).
+  if (cropBtn) {
+    cropBtn.style.display = item.captured ? '' : 'none';
+    if (item.captured) cropBtn.onclick = () => openCropForImage(item);
+  }
   const restoreBtn = modal.querySelector('#fcRestoreOrigBtn');
   if (restoreBtn) restoreBtn.style.display = 'none';
   viewerZoom = 1;
@@ -4312,7 +4396,9 @@ function showPulledPhoto(item) {
   $('fcZoomResetBtn').textContent = '100%';
   $('fcViewerTitle').textContent = item.name || 'Draft photo';
   const metaBox = $('fcViewerMeta');
-  metaBox.innerHTML = '<div style="color:#a1a1aa; text-align:center; padding:10px;">Pulled from the form — this is the photo the site has on file.</div>';
+  metaBox.innerHTML = item.captured
+    ? '<div style="color:#a1a1aa; text-align:center; padding:10px;">Captured in the panel — Auto-Fill will upload this to the form.</div>'
+    : '<div style="color:#a1a1aa; text-align:center; padding:10px;">Pulled from the form — this is the photo the site has on file.</div>';
   modal.style.display = 'flex';
 }
 
@@ -4322,8 +4408,12 @@ function renderPulledImages() {
   const badge = $('pulledCount');
   if (!card || !grid) return;
   const list = state.pulledImages || [];
-  card.style.display = list.length ? '' : 'none';
+  // (v4.9.82) The card always shows now: the photo-capture rows live
+  // here, so the user can take the form photos even when nothing was
+  // pulled yet. The grid below still only fills when photos exist.
+  card.style.display = '';
   if (badge) badge.textContent = `${list.length} photo(s)`;
+  if (typeof renderFormPhotoSlots === 'function') renderFormPhotoSlots();
   grid.replaceChildren();
   list.forEach((item) => {
     const wrap = document.createElement('div');
@@ -4340,9 +4430,272 @@ function renderPulledImages() {
     label.className = 'thumb-label';
     label.textContent = item.name || 'Photo';
     bar.appendChild(label);
+    if (item.captured) {
+      const chip = document.createElement('span');
+      chip.className = 'thumb-label';
+      chip.style.cssText = 'color:#16a34a; font-weight:700;';
+      chip.textContent = 'Captured';
+      bar.appendChild(chip);
+    }
     wrap.appendChild(bar);
     grid.appendChild(wrap);
   });
+}
+
+// --- Form photos: capture the applicant photo, signature and house
+// photo in the panel (v4.9.82) ---
+// The form needs three photos the AI never sees: the applicant's
+// portrait, her signature, and the house. Before this they could only
+// arrive via Pull Draft — there was no way to take or upload them in
+// the panel. Each slot takes the in-panel camera or a file upload,
+// goes through the crop editor, and lands in state.pulledImages, so
+// Auto-Fill uploads it with the pulled photos (uploadPulledPhotos).
+// Captures NEVER enter state.head/state.other, so the AI never tries
+// to read an ID card from a house photo. Family Card (programme 24)
+// disables the nominee section, so there are no nominee slots here.
+// Size limits are the site's own, verified in app.ea9222ad:
+// previewImage/previewSign reject a file over 200 KB (204800) and
+// previewHouseImage over 512 KB (524288); applyWebcamCapture enforces
+// 204800 the same way. A capture is compressed to fit before it is
+// stored, so the upload cannot be rejected for size.
+const PHOTO_SLOTS = [
+  { slot: 'image', name: 'Applicant photo', maxBytes: 204800 },
+  { slot: 'signature', name: 'Signature', maxBytes: 204800 },
+  { slot: 'house_image', name: 'House photo', maxBytes: 524288 }
+];
+function photoSlotDef(slot) {
+  return PHOTO_SLOTS.find((s) => s.slot === slot) || null;
+}
+function photoSlotMaxBytes(slot) {
+  const d = photoSlotDef(slot);
+  return d ? d.maxBytes : 204800;
+}
+// Byte length of a base64 string — the site's own Tt() math.
+function base64ByteLength(b64) {
+  if (!b64 || typeof b64 !== 'string') return 0;
+  const a = b64.indexOf(',') >= 0 ? b64.slice(b64.indexOf(',') + 1) : b64;
+  const pad = (a.match(/=+$/) || [''])[0].length;
+  return Math.max(0, Math.floor(3 * a.length / 4) - pad);
+}
+// Shrink a base64 JPEG until it fits maxBytes — the site's own Ft()
+// approach: JPEG quality 0.85 down to 0.35 in 0.07 steps, then shrink
+// dimensions by 0.85 (up to 4 rounds, quality steps again each round).
+// A photo that already fits is returned untouched.
+function compressBase64ToLimit(b64, maxBytes) {
+  return new Promise((resolve) => {
+    if (!b64 || base64ByteLength(b64) <= maxBytes) { resolve(b64); return; }
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      const draw = (ww, hh, q) => {
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(ww));
+        cv.height = Math.max(1, Math.round(hh));
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        return cv.toDataURL('image/jpeg', q).split(',')[1] || b64;
+      };
+      let q = 0.85;
+      let out = draw(w, h, q);
+      const qualityPass = () => {
+        while (base64ByteLength(out) > maxBytes && q > 0.35) {
+          q = Math.round(100 * (q - 0.07)) / 100;
+          out = draw(w, h, q);
+        }
+      };
+      qualityPass();
+      let rounds = 0;
+      while (base64ByteLength(out) > maxBytes && rounds < 4) {
+        w = Math.max(90, Math.round(0.85 * w));
+        h = Math.max(100, Math.round(0.85 * h));
+        q = 0.85;
+        out = draw(w, h, q);
+        qualityPass();
+        rounds++;
+      }
+      resolve(out);
+    };
+    img.onerror = () => resolve(b64);
+    img.src = `data:image/jpeg;base64,${b64}`;
+  });
+}
+// Store a captured/uploaded form photo into state.pulledImages.
+// Replaces any entry already in the slot — and marks it replace: true
+// when it replaces a pulled photo, so Auto-Fill uploads it over the
+// photo already on the form instead of skipping the slot (the
+// injector's empty-only guard). A capture never touches
+// state.head/state.other.
+function setPulledPhoto(slot, b64, source) {
+  const def = photoSlotDef(slot);
+  if (!def || !b64) return null;
+  const list = state.pulledImages || (state.pulledImages = []);
+  const existing = list.find((im) => im && im.slot === slot);
+  const entry = {
+    slot,
+    name: def.name,
+    dataUrl: 'data:image/jpeg;base64,' + b64,
+    captured: true,
+    source: source || 'camera',
+    replace: !!existing
+  };
+  if (existing) list[list.indexOf(existing)] = entry;
+  else list.push(entry);
+  renderPulledImages();
+  saveSessionState();
+  return entry;
+}
+// Remove one form photo from the panel (the photo stays on the form
+// itself — with no panel entry for the slot, Auto-Fill leaves the
+// form's photo alone).
+function removePulledPhoto(slot) {
+  if (!slot) return;
+  state.pulledImages = (state.pulledImages || []).filter((im) => im && im.slot !== slot);
+  renderPulledImages();
+  saveSessionState();
+}
+
+// The three capture rows in the Form Photos card: a thumbnail of the
+// photo in the slot (or "No photo yet"), Camera + Upload buttons, and
+// Remove when a photo is there. A row that replaces a pulled photo
+// says so — Auto-Fill will upload the new photo over the old one.
+function renderFormPhotoSlots() {
+  const wrap = $('formPhotoSlots');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  PHOTO_SLOTS.forEach((def) => {
+    const entry = (state.pulledImages || []).find((im) => im && im.slot === def.slot);
+    const row = document.createElement('div');
+    row.className = 'form-photo-row';
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid var(--border);';
+    const thumb = document.createElement('div');
+    thumb.style.cssText = 'flex:0 0 auto; width:64px; height:64px; border-radius:8px; overflow:hidden; background:var(--surface-muted); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;';
+    if (entry) {
+      const img = document.createElement('img');
+      img.src = entry.dataUrl;
+      img.alt = def.name;
+      img.style.cssText = 'display:block; width:100%; height:100%; object-fit:cover; cursor:pointer;';
+      img.addEventListener('click', () => showPulledPhoto(entry));
+      thumb.appendChild(img);
+    } else {
+      const ph = document.createElement('span');
+      ph.style.cssText = 'font-size:11px; color:var(--text-sub); text-align:center; padding:4px;';
+      ph.textContent = 'No photo yet';
+      thumb.appendChild(ph);
+    }
+    row.appendChild(thumb);
+    const mid = document.createElement('div');
+    mid.style.cssText = 'flex:1 1 auto; min-width:0;';
+    const name = document.createElement('div');
+    name.style.cssText = 'font-size:13px; font-weight:700;';
+    name.textContent = def.name;
+    mid.appendChild(name);
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:11px; color:var(--text-sub);';
+    hint.textContent = entry && entry.replace
+      ? 'Replaces the pulled photo on Auto-Fill'
+      : `Max ${Math.round(def.maxBytes / 1024)} KB — Auto-Fill uploads it to the form`;
+    mid.appendChild(hint);
+    row.appendChild(mid);
+    const camBtn = document.createElement('button');
+    camBtn.type = 'button';
+    camBtn.className = 'btn btn-xs';
+    camBtn.style.cssText = 'background:#059669; color:#fff; border-color:#059669;';
+    camBtn.textContent = '📷 Camera';
+    camBtn.addEventListener('click', () => openPhotoSlotCamera(def.slot));
+    row.appendChild(camBtn);
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'btn btn-xs';
+    upBtn.textContent = '📁 Upload';
+    upBtn.addEventListener('click', () => openPhotoSlotUpload(def.slot));
+    row.appendChild(upBtn);
+    if (entry) {
+      const rmBtn = document.createElement('button');
+      rmBtn.type = 'button';
+      rmBtn.className = 'btn btn-xs';
+      rmBtn.textContent = '✕';
+      rmBtn.title = 'Remove this photo from the panel';
+      rmBtn.addEventListener('click', () => removePulledPhoto(def.slot));
+      row.appendChild(rmBtn);
+    }
+    wrap.appendChild(row);
+  });
+}
+
+// The slot the in-panel camera is shooting for (null = an NID/BRN
+// list, 'head'/'other'), and the slot a file upload is for.
+let panelCameraPhotoSlot = null;
+let photoSlotUploadTarget = null;
+// The crop editor destination for a fresh form-photo capture, with
+// its source ('camera' | 'upload') for the Retake label.
+let activePhotoSlot = null;
+let activePhotoSource = null;
+
+// Open the in-panel camera for one form-photo slot. Falls back to
+// the slot's file picker when the camera is blocked or missing.
+async function openPhotoSlotCamera(slot) {
+  if (!photoSlotDef(slot)) return;
+  panelCameraPhotoSlot = slot;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    panelCameraPhotoSlot = null;
+    openPhotoSlotUpload(slot);
+    return;
+  }
+  try {
+    panelCameraDeviceId = null;
+    await startPanelCamera();
+    setPanelWide(true);
+  } catch (_) {
+    panelCameraPhotoSlot = null;
+    stopPanelCamera();
+    setStatus('Camera is blocked here — opening the phone camera instead.', 'err');
+    openPhotoSlotUpload(slot);
+  }
+}
+
+// Open the file picker for one form-photo slot.
+function openPhotoSlotUpload(slot) {
+  if (!photoSlotDef(slot)) return;
+  photoSlotUploadTarget = slot;
+  const input = $('photoSlotUpload');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+// Open the crop editor on a fresh form-photo capture (camera shot or
+// uploaded file). Never auto-scans: a portrait/signature/house photo
+// is not a document. Apply Crop stores it via setPulledPhoto.
+function openCropForPhotoSlot(slot, b64, name, source) {
+  if (!photoSlotDef(slot) || !b64) return;
+  activePhotoSlot = slot;
+  activePhotoSource = source || 'camera';
+  activeCategory = null;
+  activeCropItem = null;
+  activeCropName = name || (photoSlotDef(slot).name + '.jpg');
+  rawImage = new Image();
+  rawImage.onload = () => {
+    autoPickCropRatio();
+    const canvas = $('cropCanvas');
+    applyCropCanvasSize();
+    zoomLevel = 1;
+    rotationAngle = 0;
+    panX = 0;
+    panY = 0;
+    $('zoomRange').value = 1;
+    drawCropCanvas();
+    cropOriginalImage = rawImage;
+    cropAutoScanned = false;
+    updateUndoScanBtn();
+    setRetakeLabel(source === 'camera');
+  };
+  rawImage.onerror = () => {
+    $('cropModal').classList.remove('open');
+    activePhotoSlot = null;
+    activePhotoSource = null;
+    setStatus('Could not load this photo for cropping.', 'err');
+  };
+  $('cropModal').classList.add('open');
+  rawImage.src = 'data:image/jpeg;base64,' + b64;
 }
 
 // (v38) Reset the Draft Photos (from website): the pulled photos
@@ -5173,6 +5526,26 @@ function showBurstPreview(i) {
 // place, otherwise it is added. The camera stops either way.
 function useCameraShot(b64) {
   if (!b64) return;
+  // (v4.9.82) A shot for a form-photo slot goes to the crop editor as
+  // a photo-slot capture — never into the NID/BRN lists. A retake of
+  // a captured photo replaces it in place; a fresh capture opens the
+  // crop editor and Apply stores it via setPulledPhoto.
+  if (panelCameraPhotoSlot) {
+    const slot = panelCameraPhotoSlot;
+    panelCameraPhotoSlot = null;
+    const replacing = (retakeItem && retakeItem.slot === slot) ? retakeItem : null;
+    retakeItem = null;
+    stopPanelCamera();
+    if (replacing) {
+      replacing.dataUrl = 'data:image/jpeg;base64,' + b64;
+      replacing.originalDataUrl = null; // the old original belongs to the old shot
+      replacing.source = 'camera';
+      openCropForImage(replacing);
+      return;
+    }
+    openCropForPhotoSlot(slot, b64, null, 'camera');
+    return;
+  }
   const replacing = retakeItem;
   retakeItem = null;
   stopPanelCamera();
@@ -5295,7 +5668,11 @@ function openCropForImage(item) {
   };
   // Re-cropping always starts from the original photo, never from a
   // previous crop — so a crop you didn't like can simply be done again.
-  rawImage.src = `data:image/jpeg;base64,${item.originalBase64 || item.base64}`;
+  // A form photo (pulledImages entry) keeps its bytes in dataUrl, not
+  // base64 — and its pre-crop original in originalDataUrl.
+  rawImage.src = item.slot
+    ? (item.originalDataUrl || item.dataUrl)
+    : `data:image/jpeg;base64,${item.originalBase64 || item.base64}`;
 }
 
 // --- Document scanner: pure functions (no DOM) — tested by tests/sidepanel_scan_test.js ---
@@ -6257,8 +6634,20 @@ function setupNativeCropper() {
     const item = activeCropItem;
     const cat = (item && itemCategory(item)) || activeCategory || 'head';
     const isCamera = !!item && item.source === 'camera';
+    // (v4.9.82) A form-photo crop cancels back to a retake of that
+    // slot — camera or file picker, same as it was taken. Cancelling
+    // keeps the old photo exactly as it was.
+    const photoSlot = (item && item.slot) || activePhotoSlot;
+    const photoSource = (item && item.slot) ? (item.source || 'camera') : (activePhotoSource || 'camera');
     activeCropItem = null;
     activeCategory = null;
+    activePhotoSlot = null;
+    activePhotoSource = null;
+    if (photoSlot) {
+      if (photoSource === 'camera') openPhotoSlotCamera(photoSlot);
+      else openPhotoSlotUpload(photoSlot);
+      return;
+    }
     if (item && itemCategory(item)) retakeItem = item;
     if (isCamera) {
       openPanelCamera(cat);
@@ -6287,15 +6676,28 @@ function setupNativeCropper() {
     if (activeCropItem) {
       const croppedItem = activeCropItem;
       activeCropItem = null; // claim it before the async downscale, so a tap during the wait can't steal it
-      // Keep the original (first crop only) so a crop you didn't like can
-      // be re-done from the original or undone — the true original is
-      // never lost. Later crops never overwrite it.
-      if (!croppedItem.originalBase64) {
-        croppedItem.originalBase64 = await downscaleBase64(croppedItem.base64);
+      activePhotoSlot = null;
+      activePhotoSource = null;
+      // (v4.9.82) A form photo (pulledImages entry) keeps its bytes in
+      // dataUrl, not base64 — and its pre-crop original in
+      // originalDataUrl, so a re-crop starts from the original. The
+      // cropped photo is compressed to the site's size limit for the
+      // slot before it is stored.
+      if (croppedItem.slot) {
+        if (!croppedItem.originalDataUrl) croppedItem.originalDataUrl = croppedItem.dataUrl;
+        croppedItem.dataUrl = 'data:image/jpeg;base64,' + await compressBase64ToLimit(b64, photoSlotMaxBytes(croppedItem.slot));
+        renderPulledImages();
+      } else {
+        // Keep the original (first crop only) so a crop you didn't like can
+        // be re-done from the original or undone — the true original is
+        // never lost. Later crops never overwrite it.
+        if (!croppedItem.originalBase64) {
+          croppedItem.originalBase64 = await downscaleBase64(croppedItem.base64);
+        }
+        croppedItem.base64 = b64;
+        renderPreviews('head');
+        renderPreviews('other');
       }
-      croppedItem.base64 = b64;
-      renderPreviews('head');
-      renderPreviews('other');
       saveSessionState();
 
       // Cropping queue: advance to the next photo. Otherwise Apply just
@@ -6306,6 +6708,19 @@ function setupNativeCropper() {
       } else {
         setStatus('Image cropped and updated.', 'ok');
       }
+    } else if (activePhotoSlot) {
+      // (v4.9.82) A fresh form-photo capture: compress to the site's
+      // size limit for the slot, then store it in pulledImages — never
+      // in the NID/BRN lists. Replacing a pulled photo marks it so
+      // Auto-Fill uploads it over the form's photo.
+      const slot = activePhotoSlot;
+      const source = activePhotoSource || 'camera';
+      activePhotoSlot = null;
+      activePhotoSource = null;
+      const fitted = await compressBase64ToLimit(b64, photoSlotMaxBytes(slot));
+      setPulledPhoto(slot, fitted, source);
+      const def = photoSlotDef(slot);
+      setStatus(`${def ? def.name : 'Photo'} saved — ready for Auto-Fill.`, 'ok');
     } else if (activeCategory) {
       // Single upload (or retake via the file picker): the photo is only
       // added when Apply Crop is tapped. A retake replaces the old photo
@@ -8741,7 +9156,7 @@ function exportExtractedJson() {
     images: {
       head: state.head.map((it) => ({ name: it.name, base64: it.base64 })),
       other: state.other.map((it) => ({ name: it.name, base64: it.base64 })),
-      pulled: (state.pulledImages || []).map((it) => ({ slot: it.slot, name: it.name, dataUrl: it.dataUrl }))
+      pulled: (state.pulledImages || []).map((it) => ({ slot: it.slot, name: it.name, dataUrl: it.dataUrl, replace: it.replace || undefined, captured: it.captured || undefined }))
     }
   };
   const jsonString = JSON.stringify(exportObj, null, 2);
@@ -8826,7 +9241,13 @@ function restoreImportedImages(images) {
       // get the photo") even though the export had it.
       if (!im || typeof im.dataUrl !== 'string' || !(im.dataUrl.startsWith('data:image') || /^https?:\/\//i.test(im.dataUrl))) return;
       if ((state.pulledImages || []).some((it) => it.dataUrl === im.dataUrl)) return;
-      state.pulledImages.push({ slot: im.slot || 'image', name: im.name || 'Photo', dataUrl: im.dataUrl });
+      // (v4.9.82) A captured photo keeps its replace/captured marks
+      // across the round-trip, so a re-imported capture still
+      // replaces the form's photo on Auto-Fill instead of skipping.
+      const entry = { slot: im.slot || 'image', name: im.name || 'Photo', dataUrl: im.dataUrl };
+      if (im.replace) entry.replace = true;
+      if (im.captured) entry.captured = true;
+      state.pulledImages.push(entry);
       restored++;
     });
   }
