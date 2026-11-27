@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.92-live';
+const CURRENT_VERSION_TAG = 'v4.9.94-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -4516,15 +4516,13 @@ function peopleCardsVisible(data) {
 
 function renderPulledImages() {
   const card = $('pulledCard');
-  const grid = $('pulledPreviews');
   const badge = $('pulledCount');
-  if (!card || !grid) return;
+  if (!card) return;
   // (v4.9.83) Gate: hidden while the form is still blank — no
-  // extraction landed and no photo exists anywhere. The grid and
-  // badge are still emptied so a stale set never lingers behind it.
+  // extraction landed and no photo exists anywhere. The badge is
+  // still zeroed so a stale set never lingers behind it.
   if (!formCardsGateOpen(state.lastExtracted)) {
     card.style.display = 'none';
-    grid.replaceChildren();
     if (badge) badge.textContent = '0 photo(s)';
     return;
   }
@@ -4542,33 +4540,12 @@ function renderPulledImages() {
   const chev = $('pulledChevron');
   if (chev) chev.textContent = collapsed ? '▸' : '▾';
   if (badge) badge.textContent = `${list.length} photo(s)`;
+  // (v4.9.93) The duplicate thumbnail grid below the rows is gone:
+  // every photo showed twice in this card — once in its slot row and
+  // once in the grid — both from the same list. The slot rows are now
+  // the single display for the three photos (tap a row thumbnail to
+  // view, as before).
   if (typeof renderFormPhotoSlots === 'function') renderFormPhotoSlots();
-  grid.replaceChildren();
-  list.forEach((item) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'thumb-item';
-    const img = document.createElement('img');
-    img.src = item.dataUrl;
-    img.title = `${item.name || 'Draft photo'} — tap to view`;
-    img.style.cursor = 'pointer';
-    img.addEventListener('click', () => showPulledPhoto(item));
-    wrap.appendChild(img);
-    const bar = document.createElement('div');
-    bar.className = 'thumb-bar';
-    const label = document.createElement('span');
-    label.className = 'thumb-label';
-    label.textContent = item.name || 'Photo';
-    bar.appendChild(label);
-    if (item.captured) {
-      const chip = document.createElement('span');
-      chip.className = 'thumb-label';
-      chip.style.cssText = 'color:#16a34a; font-weight:700;';
-      chip.textContent = 'Captured';
-      bar.appendChild(chip);
-    }
-    wrap.appendChild(bar);
-    grid.appendChild(wrap);
-  });
 }
 
 // (v4.9.83) Tap the Form Photos header to expand/collapse the empty
@@ -4658,10 +4635,11 @@ function compressBase64ToLimit(b64, maxBytes) {
 }
 // Store a captured/uploaded form photo into state.pulledImages.
 // Replaces any entry already in the slot — and marks it replace: true
-// when it replaces a pulled photo, so Auto-Fill uploads it over the
-// photo already on the form instead of skipping the slot (the
-// injector's empty-only guard). A capture never touches
-// state.head/state.other.
+// for any deliberate camera/upload store, so Auto-Fill uploads it over
+// the photo already on the form instead of skipping the slot (the
+// injector's empty-only guard). A pulled photo keeps replace unset:
+// it IS the form's own photo, so skipping an occupied slot is correct
+// for it. A capture never touches state.head/state.other.
 function setPulledPhoto(slot, b64, source) {
   const def = photoSlotDef(slot);
   if (!def || !b64) return null;
@@ -4673,7 +4651,7 @@ function setPulledPhoto(slot, b64, source) {
     dataUrl: 'data:image/jpeg;base64,' + b64,
     captured: true,
     source: source || 'camera',
-    replace: !!existing
+    replace: source === 'camera' || source === 'upload' || !!existing
   };
   if (existing) list[list.indexOf(existing)] = entry;
   else list.push(entry);
@@ -7155,6 +7133,13 @@ function setupNativeCropper() {
   $('saveCropBtn').addEventListener('click', async () => {
     const canvas = $('cropCanvas');
     if (!canvas) return;
+    // (v4.9.94) Disable Auto-Fill while a crop save is pending: the
+    // modal closes below before the async compress finishes, and an
+    // Auto-Fill clicked in that window sends a payload without the
+    // new photo. Re-enabled in the finally at the end of this
+    // handler, always — including on error.
+    $('autofillBtn').disabled = true;
+    try {
     // (v4.9.86) A slot crop renders once from the original at the
     // site's output size — no re-encode of the display canvas, no
     // black bars, no quality drop. Any other crop keeps the old
@@ -7178,6 +7163,12 @@ function setupNativeCropper() {
       if (croppedItem.slot) {
         if (!croppedItem.originalDataUrl) croppedItem.originalDataUrl = croppedItem.dataUrl;
         croppedItem.dataUrl = 'data:image/jpeg;base64,' + await compressBase64ToLimit(b64, photoSlotMaxBytes(croppedItem.slot));
+        // (v4.9.94) A re-crop is a deliberate edit of a camera/upload
+        // photo — mark it to replace the form's photo on Auto-Fill,
+        // even when the entry was restored from an old export/session
+        // without the flag. A re-cropped pulled photo keeps its flag
+        // (unset): it is the form's own photo.
+        if (croppedItem.source === 'camera' || croppedItem.source === 'upload') croppedItem.replace = true;
         renderPulledImages();
       } else {
         // Keep the original (first crop only) so a crop you didn't like can
@@ -7246,6 +7237,9 @@ function setupNativeCropper() {
         saveSessionState();
         setStatus('Cropped photo added.', 'ok');
       }
+    }
+    } finally {
+      $('autofillBtn').disabled = false;
     }
   });
 }

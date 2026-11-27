@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v58';
+  const FC_INJECT_VERSION = 'v59';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -4756,45 +4756,100 @@
       images.forEach((im) => { if (im && im.slot) summary.failed.push({ slot: im.slot, message: 'Photo upload not available on this form' }); });
       return summary;
     }
+    // (v59) One slot's upload, with a single retry inside the run:
+    // a transient failure (network, timeout, gateway byte-fetch)
+    // used to need a second Auto-Fill click. Returns the outcome
+    // plus, on a successful upload, the stored path right after the
+    // upload (for the re-verification below). A failed replacement
+    // still restores the old photo instead of leaving the slot empty.
+    async function uploadOne(im, field) {
+      let oldSlot = null;
+      let oldPath = null;
+      if (mediaSlotHasPhoto(mediaVm, field)) {
+        if (!im.replace) return { status: 'skipped' };
+        // A replace:true entry is the user deliberately replacing the
+        // photo already on the form — clear the slot first (the
+        // empty-only guard would otherwise skip it), remembering the
+        // old photo so a failed upload puts it back.
+        try { oldPath = mediaVm.getStoredMediaPath(field) || null; } catch (_) { oldPath = null; }
+        oldSlot = clearMediaSlot(mediaVm, field);
+      }
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const file = await pulledPhotoToFile(mediaVm, im.dataUrl, field);
+          const res = await mediaVm.uploadMediaField(field, file);
+          if (res && res.success) {
+            // The submit gates read the draft-missing flags (the same
+            // flags linkPulledPhoto clears when it links a photo).
+            const spec = MEDIA_SLOT_KEYS[field];
+            if (spec && spec.missing && spec.missing in mediaVm) mediaSetKey(mediaVm, spec.missing, false);
+            let newPath = null;
+            try { newPath = mediaVm.getStoredMediaPath(field) || null; } catch (_) { newPath = null; }
+            return { status: 'uploaded', replaced: !!oldSlot, newPath, oldPath };
+          }
+          if (attempt === 0) continue;
+          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
+          return { status: 'failed', message: (res && res.message) || 'Upload failed' };
+        } catch (e) {
+          // Bytes unreachable (the gateway blocks cross-origin reads)
+          // — link the file that is already stored instead of failing
+          // the slot. Only when the link lands does the slot count.
+          let linked = false;
+          try { linked = linkPulledPhoto(mediaVm, im.dataUrl, field); } catch (_) { linked = false; }
+          if (linked) return { status: 'linked', replaced: !!oldSlot };
+          if (attempt === 0) continue;
+          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
+          return { status: 'failed', message: e && e.message ? e.message : 'Upload failed' };
+        }
+      }
+      return { status: 'failed', message: 'Upload failed' };
+    }
+    const uploadedSlots = [];
     for (const im of images) {
       const field = im && im.slot;
       if (!field || !AUTOFILL_PHOTO_FIELDS.includes(field)) continue;
       if (typeof im.dataUrl !== 'string' || !im.dataUrl) { summary.failed.push({ slot: field, message: 'No photo data' }); continue; }
-      // (v57) A panel capture marked replace: true is the user
-      // deliberately replacing the photo already on the form — clear
-      // the slot first (the empty-only guard would otherwise skip
-      // it), remembering the old photo so a failed upload puts it
-      // back instead of leaving the slot empty.
-      let oldSlot = null;
-      if (mediaSlotHasPhoto(mediaVm, field)) {
-        if (!im.replace) { summary.skipped++; continue; }
-        oldSlot = clearMediaSlot(mediaVm, field);
-      }
+      const r = await uploadOne(im, field);
+      if (r.status === 'skipped') { summary.skipped++; continue; }
       summary.attempted++;
-      try {
-        const file = await pulledPhotoToFile(mediaVm, im.dataUrl, field);
-        const res = await mediaVm.uploadMediaField(field, file);
-        if (res && res.success) {
-          summary.uploaded++;
-          if (oldSlot) summary.replaced++;
-          // The submit gates read the draft-missing flags (the same
-          // flags linkPulledPhoto clears when it links a photo).
-          const spec = MEDIA_SLOT_KEYS[field];
-          if (spec && spec.missing && spec.missing in mediaVm) mediaSetKey(mediaVm, spec.missing, false);
+      if (r.status === 'uploaded') {
+        summary.uploaded++;
+        if (r.replaced) summary.replaced++;
+        uploadedSlots.push({ im, field, newPath: r.newPath, oldPath: r.oldPath, replaced: r.replaced });
+      } else if (r.status === 'linked') {
+        summary.linked++;
+        if (r.replaced) summary.replaced++;
+      } else {
+        summary.failed.push({ slot: field, message: r.message || 'Upload failed' });
+      }
+    }
+    // (v59) The site's draft load can land after the upload and
+    // re-apply the server's old stored paths over the new ones — the
+    // status then says "uploaded (replaced)" while the form still
+    // shows the old photo. Give it a brief window to land, then
+    // re-check each uploaded slot: if the stored path no longer
+    // matches the one the upload set, upload once more in the same
+    // run. A re-upload that fails counts the original upload as
+    // lost (the old photo is back) instead of keeping it.
+    const recheck = uploadedSlots.filter((rec) => rec.newPath);
+    if (recheck.length) {
+      await new Promise((r) => setTimeout(r, 1500));
+      for (const rec of recheck) {
+        let cur = null;
+        try { cur = mediaVm.getStoredMediaPath(rec.field) || null; } catch (_) { cur = null; }
+        if (cur === rec.newPath) continue;
+        const r2 = await uploadOne(rec.im, rec.field);
+        if (r2.status === 'uploaded') {
+          // Uploaded again — the counts stay as they were (one
+          // upload, one replacement); the stored path is new now.
+        } else if (r2.status === 'linked') {
+          summary.uploaded--;
+          if (rec.replaced) summary.replaced--;
+          summary.linked++;
         } else {
-          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
-          summary.failed.push({ slot: field, message: (res && res.message) || 'Upload failed' });
-        }
-      } catch (e) {
-        // Bytes unreachable (the gateway blocks cross-origin reads)
-        // — link the file that is already stored instead of failing
-        // the slot. Only when the link lands does the slot count.
-        let linked = false;
-        try { linked = linkPulledPhoto(mediaVm, im.dataUrl, field); } catch (_) { linked = false; }
-        if (linked) summary.linked++;
-        else {
-          if (oldSlot) restoreMediaSlot(mediaVm, field, oldSlot);
-          summary.failed.push({ slot: field, message: e && e.message ? e.message : 'Upload failed' });
+          summary.uploaded--;
+          if (rec.replaced) summary.replaced--;
+          summary.failed.push({ slot: rec.field, message: r2.status === 'skipped' ? 'Photo reverted after upload' : (r2.message || 'Upload failed') + ' (photo reverted after upload)' });
         }
       }
     }
