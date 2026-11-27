@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v59';
+  const FC_INJECT_VERSION = 'v60';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -1760,30 +1760,129 @@
   };
   function memberCorrectionSets(correctionsMembers, targetMemberList) {
     const byIdx = new Map();
+    // (v60) Landing detail: idx -> Map(normalised panel key -> Map(row key
+    // -> expected value)), so the fill result can report which corrections
+    // actually landed. A literacy target of an education correction holds
+    // the literacy DERIVED from the corrected education (88 -> 243,
+    // 188 -> 242, else 241), not the education id itself. Stale keys are
+    // corrections for a person no longer in the list, or with a blank
+    // value (the panel never sends those) — they can never land, so the
+    // panel may clear them instead of carrying them forever.
+    const byIdxDetail = new Map();
+    const staleKeys = [];
     let count = 0;
     if (correctionsMembers && typeof correctionsMembers === 'object' && Array.isArray(targetMemberList)) {
+      const matchedIdKeys = new Set();
       for (let idx = 0; idx < targetMemberList.length; idx++) {
         const m = targetMemberList[idx];
         if (!m) continue;
         const idKey = String(m.nid_or_brn || m.nid || m.brn_id || m.verification_number || '').replace(/\s+/g, '');
         if (!idKey) continue;
+        matchedIdKeys.add(idKey);
         const corr = correctionsMembers[idKey];
         if (!corr || typeof corr !== 'object') continue;
         const keys = new Set();
+        const detail = new Map();
         for (const rawKey of Object.keys(corr)) {
           // The panel notifies a marital change as 'marital_status'
           // (the card's key); the member row's key is the site's typo
           // 'maritial_status_id'.
           const key = rawKey === 'marital_status' ? 'maritial_status_id' : rawKey;
           const mapped = MEMBER_CORRECTION_MAP[key];
-          if (!mapped) continue;
+          if (!mapped) { staleKeys.push('member:' + idKey + ':' + rawKey); continue; }
           count++;
           mapped.forEach(k => keys.add(k));
+          const val = corr[rawKey];
+          if (val === undefined || val === null || String(val).trim() === '') { staleKeys.push('member:' + idKey + ':' + key); continue; }
+          const want = new Map();
+          for (const k of mapped) {
+            if (k === 'literacy_id' && key === 'education_status_id') {
+              const n = Number(val);
+              want.set(k, n === 88 ? 243 : n === 188 ? 242 : 241);
+            } else {
+              want.set(k, val);
+            }
+          }
+          detail.set(key, want);
         }
         if (keys.size) byIdx.set(idx, keys);
+        if (detail.size) byIdxDetail.set(idx, detail);
+      }
+      for (const idKey of Object.keys(correctionsMembers)) {
+        if (!matchedIdKeys.has(idKey)) {
+          const corr = correctionsMembers[idKey];
+          if (corr && typeof corr === 'object') {
+            for (const rawKey of Object.keys(corr)) {
+              staleKeys.push('member:' + idKey + ':' + (rawKey === 'marital_status' ? 'maritial_status_id' : rawKey));
+            }
+          }
+        }
       }
     }
-    return { byIdx, count };
+    return { byIdx, byIdxDetail, staleKeys, count };
+  }
+
+  // Correction landing (v60): a correction counts as applied only when
+  // the form actually holds the corrected value afterwards — on every
+  // model it targets. A head correction is one key ('head:marital_status');
+  // a member correction is one key per person ('member:<id>:maritial_status_id').
+  // A correction that did not land is pending: the panel keeps it for the
+  // next Auto-Fill instead of deleting it after a fill that merely ran.
+  // Only a recorded correction can land here — a derived default (head ->
+  // Married 101, female head -> Housewife 181) is never a correction, so
+  // it can never overwrite a verified Divorced / Widow through this path.
+  // PMT Q14 (the head-education band) is not checked: it follows a
+  // corrected education through the forced PMT pass, and the existing
+  // head-corrections test pins that separately.
+  function correctionLanding(correctionsHead, memberSets, headTarget, memberRows, targetMemberList) {
+    const landed = [], pending = [], stale = [];
+    const numEq = (a, b) => {
+      if (a === undefined || a === null || b === undefined || b === null) return false;
+      if (String(a).trim() === '' || String(b).trim() === '') return false;
+      const na = Number(a), nb = Number(b);
+      return Number.isFinite(na) && Number.isFinite(nb) && na === nb;
+    };
+    const litForEdu = (edu) => (Number(edu) === 88 ? 243 : Number(edu) === 188 ? 242 : 241);
+    if (correctionsHead && typeof correctionsHead === 'object') {
+      const headRowIdx = targetMemberList.findIndex(m => m && ((m.relation || '') === 'Head/Self' || Number(m.relationship_id || m.relation_id || 0) === 260));
+      const headRow = headRowIdx >= 0 ? memberRows[headRowIdx] : null;
+      for (const key of Object.keys(correctionsHead)) {
+        const map = HEAD_CORRECTION_MAP[key];
+        const val = correctionsHead[key];
+        if (!map) { stale.push('head:' + key); continue; }
+        if (val === undefined || val === null || String(val).trim() === '') { stale.push('head:' + key); continue; }
+        let ok = true;
+        for (const hk of map.head) { if (!numEq(headTarget ? headTarget[hk] : undefined, val)) ok = false; }
+        for (const rk of map.row) {
+          if (!headRow) { ok = false; continue; }
+          if (rk === 'literacy_id' && key === 'education_status_id') {
+            if (!numEq(headRow.literacy_id, litForEdu(val))) ok = false;
+          } else if (!numEq(headRow[rk], val)) ok = false;
+        }
+        (ok ? landed : pending).push('head:' + key);
+      }
+    }
+    if (memberSets && memberSets.byIdxDetail) {
+      for (const [idx, detail] of memberSets.byIdxDetail) {
+        const row = memberRows[idx];
+        const m = targetMemberList[idx];
+        const idKey = m ? String(m.nid_or_brn || m.nid || m.brn_id || m.verification_number || '').replace(/\s+/g, '') : '';
+        const eduVal = detail.has('education_status_id') ? detail.get('education_status_id').get('education_status_id') : undefined;
+        for (const [normKey, targets] of detail) {
+          let ok = !!row;
+          for (const [rk, want] of targets) {
+            // An education correction wins over a literacy correction
+            // for the same row: the option sync derives the literacy
+            // from the corrected education, so expect that value.
+            const w = (rk === 'literacy_id' && eduVal !== undefined) ? litForEdu(eduVal) : want;
+            if (!row || !numEq(row[rk], w)) ok = false;
+          }
+          (ok ? landed : pending).push('member:' + idKey + ':' + normKey);
+        }
+      }
+    }
+    if (memberSets && Array.isArray(memberSets.staleKeys)) stale.push(...memberSets.staleKeys);
+    return { landed, pending, stale };
   }
 
   // --- Halnagad / other-programme benefit + locked personal fields (v26) ---
@@ -1940,7 +2039,41 @@
 
     for (const field of memberSelectFields) {
       const sample = firstSelectFor('member', field.key);
-      if (!sample) continue; // field not rendered anywhere (e.g. no disabled member)
+      if (!sample) {
+        // (v60) No rendered control for this field anywhere (its tab was
+        // never opened — the site renders tab content lazily): a corrected
+        // value, or an explicit panel value on an empty row, still has to
+        // land — write it straight into the row models, the same
+        // model-first pattern the PMT/program passes use (the select
+        // renders from the model when its tab opens). A filled row
+        // without a correction is never touched, so a hand-set value on
+        // the form survives. A non-numeric value (a label) cannot be
+        // resolved without a control's items, so it stays pending.
+        for (let idx = 0; idx < targetMemberList.length; idx++) {
+          const m = targetMemberList[idx];
+          const row = memberRows[idx];
+          if (!row) continue;
+          if (field.key === 'disability_type_id' && Number(row.is_member_disabled) !== 1) continue;
+          const memberForcedKeys = (forceSets.memberByIdx && forceSets.memberByIdx.get(idx)) || null;
+          const isForcedRowField = (forceSets.rowKeys.has(field.key) && idx === headRowIdx)
+            || (memberForcedKeys !== null && memberForcedKeys.has(field.key));
+          if (!isForcedRowField && !isEmptyModelVal(row[field.key])) continue;
+          let overrideVal = memberOverrides[field.key] ?? m[field.key] ?? m[field.key.replace(/_id$/, '')];
+          if (field.key === 'literacy_id') {
+            const eduCorrected = (forceSets.rowKeys.has('education_status_id') && idx === headRowIdx)
+              || (memberForcedKeys !== null && memberForcedKeys.has('education_status_id'));
+            if (eduCorrected) {
+              const eduRaw = m.education_status_id ?? m.education_status ?? row.education_status_id;
+              const n = Number(eduRaw);
+              overrideVal = Number.isNaN(n) ? undefined : (n === 88 ? 243 : n === 188 ? 242 : 241);
+            }
+          }
+          const num = Number(overrideVal);
+          if (overrideVal === undefined || overrideVal === null || String(overrideVal).trim() === '' || Number.isNaN(num)) continue;
+          if (String(row[field.key] ?? '') !== String(num)) setReactive(vmMembers, row, field.key, num);
+        }
+        continue; // field not rendered anywhere (e.g. no disabled member)
+      }
       for (let idx = 0; idx < targetMemberList.length; idx++) {
         const m = targetMemberList[idx];
         const row = memberRows[idx];
@@ -2110,6 +2243,19 @@
         for (const scope of ['data', 'form']) {
           for (const key of field.keys) {
             const list = byField.get(scope + '.' + key) || [];
+            // Education: the head member row (সদস্য page) is the source
+            // of truth — it wins over the age derivation, unless an
+            // explicit head override is set. (v60) Profession / marital:
+            // the panel record itself is the fallback — a value the panel
+            // holds explicitly (picked on the card, or pulled from the
+            // draft) must reach the head form, not just a head_options
+            // override. A pulled value never becomes a correction, so it
+            // only fills an EMPTY head field (the onlyEmpty skip below
+            // still protects a filled one); a derived default can never
+            // overwrite a verified value through this fallback.
+            const overrideVal = key === 'education_status'
+              ? (headOverrides[key] ?? headRowEducationId(memberRows, targetMemberList))
+              : (headOverrides[key] ?? (headMember ? headMember[key] : undefined));
             for (const c of list) {
               if (c.vInst.disabled || c.vInst.readonly) continue;
               const currentVal = c.vInst.internalValue ?? c.vInst.lazyValue;
@@ -2117,12 +2263,6 @@
               // value even when it is already filled — but only the
               // corrected fields. Everything else stays empty-only.
               if (onlyEmpty && !forceSets.headKeys.has(key) && !isEmptyModelVal(currentVal)) continue;
-              // Education: the head member row (সদস্য page) is the source
-              // of truth — it wins over the age derivation, unless an
-              // explicit head override is set.
-              const overrideVal = key === 'education_status'
-                ? (headOverrides[key] ?? headRowEducationId(memberRows, targetMemberList))
-                : headOverrides[key];
               const choice = resolveOptionChoice(c.vInst, overrideVal, field.patternsOf(headPats), field.excludesOf(headPats), field.idsOf(headPats));
               if (choice && choice.id !== undefined) {
                 const want = String(choice.id);
@@ -2132,6 +2272,19 @@
                 triggerVeeValidate(c.wrap);
               } else {
                 unfilled.push(`Head: ${key}`);
+              }
+            }
+            // (v60) No rendered control wrote the value (its tab was
+            // never opened, or the control is disabled): a corrected
+            // value, or an explicit panel value on an empty head field,
+            // still has to land — write it straight into the head model;
+            // the select renders from the model when its tab opens. A
+            // filled head field without a correction is never touched.
+            if (forceSets.headKeys.has(key) || isEmptyModelVal(headTarget[key])) {
+              const num = Number(overrideVal);
+              if (overrideVal !== undefined && overrideVal !== null && String(overrideVal).trim() !== '' && !Number.isNaN(num)
+                  && String(headTarget[key] ?? '') !== String(num)) {
+                setReactive(vmHead, headTarget, key, num);
               }
             }
           }
@@ -4132,18 +4285,30 @@
         : '';
       const reorderNote = rowsReordered ? ' Head changed — member rows reordered to match.' : '';
       const cashNote = cashUsage.filled ? ` Cash usage: ${cashUsage.total} Tk across ${cashUsage.filled} categor${cashUsage.filled === 1 ? 'y' : 'ies'}.` : '';
+      // (v60) Correction landing: a correction counts as applied only
+      // when the form actually holds the corrected value afterwards
+      // (head form AND head/member row). The panel clears only the
+      // landed ones; a pending correction survives for the next
+      // Auto-Fill instead of being consumed by a fill that merely ran.
+      const landing = correctionLanding(correctionsHead, memberSets, headTarget, finalMemberRows, targetMemberList);
+      const pendingNote = landing.pending.length
+        ? ` Corrections pending (not landed yet — they will be retried on the next Auto-Fill): ${landing.pending.join('; ')}.`
+        : '';
       window.dispatchEvent(new CustomEvent('FC_PRO_AUTOFILL_RESULT', {
         detail: {
           version: FC_INJECT_VERSION,
           success: true,
-          correctionsApplied: correctionSets.count,
+          correctionsApplied: landing.landed.length,
+          correctionsLanded: landing.landed,
+          correctionsPending: landing.pending,
+          correctionsStale: landing.stale,
           halnagad: benefits ? benefits.halnagad : null,
           rowsReordered,
           cashUsage,
           photos: photoResults,
           message: alreadyFilled
             ? `Already filled — nothing needed. ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}].${halnagadNote}${photoNote}`
-            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}${halnagadNote}${reorderNote}${cashNote}${photoNote}`
+            : `Auto-filled ${counts.totalMembers} member(s) [Male: ${counts.maleCount}, Female: ${counts.femaleCount}, Child: ${counts.childrenUnder18}] + Islam & Post Code.${unfilledNote}${gridNote}${halnagadNote}${reorderNote}${cashNote}${photoNote}${pendingNote}`
         }
       }));
     } catch (err) {

@@ -140,7 +140,7 @@
        the chevron shows which way it goes. Tapping the header toggles. */
     #pulledCard .card-head { cursor: pointer; }
     #pulledCard.collapsed .card-head { margin-bottom: 0; }
-    #pulledCard.collapsed #formPhotoSlots, #pulledCard.collapsed #pulledPreviews { display: none; }
+    #pulledCard.collapsed #formPhotoSlots { display: none; }
     .pulled-chevron { font-size: 15px; line-height: 1; color: var(--text-sub); }
     .card-title-group { display: flex; align-items: center; gap: 8px; }
     .step-badge { width: 20px; height: 20px; border-radius: 5px; background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-main); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
@@ -621,7 +621,6 @@
         <span class="pulled-chevron" id="pulledChevron" aria-hidden="true">▸</span>
       </div>
       <div id="formPhotoSlots"></div>
-      <div class="thumb-grid" id="pulledPreviews"></div>
     </section>
 
     <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>

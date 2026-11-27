@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.94-live';
+const CURRENT_VERSION_TAG = 'v4.9.95-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1652,10 +1652,54 @@ function handleIncomingMessages(e) {
     // applied. Only clear on a report from an injector that knows
     // about corrections (v25+) — an older injector has no such field,
     // so the corrections stay for the next fill after it is updated.
+    // (v4.9.95) The v60 injector reports WHICH corrections actually
+    // landed (correctionsLanded) — clear only those, plus stale ones
+    // whose person is gone. A correction that did not land stays for
+    // the next Auto-Fill instead of being consumed by a fill that
+    // merely ran (the Sharmin case: Divorced/Unemployed picked in the
+    // panel, never landing, then gone from the corrections).
     const applied = e.data.detail && e.data.detail.correctionsApplied;
-    if (e.data.detail.success && typeof applied === 'number' && applied > 0 && state.lastExtracted && state.lastExtracted.corrections) {
-      delete state.lastExtracted.corrections;
-      saveSessionState();
+    const landed = e.data.detail && e.data.detail.correctionsLanded;
+    const stale = e.data.detail && e.data.detail.correctionsStale;
+    if (e.data.detail.success && state.lastExtracted && state.lastExtracted.corrections) {
+      if (Array.isArray(landed)) {
+        const clearKeys = landed.concat(Array.isArray(stale) ? stale : []);
+        for (const key of clearKeys) {
+          if (typeof key !== 'string') continue;
+          if (key.indexOf('head:') === 0) {
+            const k = key.slice(5);
+            if (state.lastExtracted.corrections.head) delete state.lastExtracted.corrections.head[k];
+          } else if (key.indexOf('member:') === 0) {
+            const rest = key.slice(7);
+            const sep = rest.lastIndexOf(':');
+            if (sep < 0) continue;
+            const idKey = rest.slice(0, sep), k = rest.slice(sep + 1);
+            const mem = state.lastExtracted.corrections.members && state.lastExtracted.corrections.members[idKey];
+            if (mem) {
+              delete mem[k];
+              // The marital key has two spellings (card 'marital_status'
+              // vs row 'maritial_status_id') — clear both, so a stale
+              // spelling never survives.
+              if (k === 'maritial_status_id') delete mem.marital_status;
+              if (k === 'marital_status') delete mem.maritial_status_id;
+            }
+          }
+        }
+        const c = state.lastExtracted.corrections;
+        if (c.head && !Object.keys(c.head).length) delete c.head;
+        if (c.members) {
+          for (const idKey of Object.keys(c.members)) {
+            if (!Object.keys(c.members[idKey]).length) delete c.members[idKey];
+          }
+          if (!Object.keys(c.members).length) delete c.members;
+        }
+        if (!Object.keys(c).length) delete state.lastExtracted.corrections;
+        if (clearKeys.length) saveSessionState();
+      } else if (typeof applied === 'number' && applied > 0) {
+        // Older injector (no correctionsLanded): clear all, as before.
+        delete state.lastExtracted.corrections;
+        saveSessionState();
+      }
     }
   }
   if (e.data.action === 'FC_STATUS_REPLY') {
