@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.85-live';
+const CURRENT_VERSION_TAG = 'v4.9.87-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -4800,9 +4800,14 @@ function openCropForPhotoSlot(slot, b64, name, source) {
   activeCategory = null;
   activeCropItem = null;
   activeCropName = name || (photoSlotDef(slot).name + '.jpg');
+  const titleEl = $('cropModalTitle');
+  if (titleEl) titleEl.textContent = 'Crop, Rotate & Zoom Photo';
+  updateSlotCropControls();
   rawImage = new Image();
   rawImage.onload = () => {
-    autoPickCropRatio();
+    // (v4.9.86) A slot crop uses the slot's own frame — never the
+    // orientation pick, so the photo fills the frame edge to edge.
+    pickSlotCropRatio(slot);
     const canvas = $('cropCanvas');
     applyCropCanvasSize();
     zoomLevel = 1;
@@ -5826,7 +5831,8 @@ function openCropForImage(item) {
   setRetakeLabel(item.source === 'camera');
   setPanelWide(false); // crop editor uses the normal panel width
   const titleEl = $('cropModalTitle');
-  if (titleEl) titleEl.textContent = 'Crop, Scan, Rotate & Zoom Image';
+  if (titleEl) titleEl.textContent = item.slot ? 'Crop, Rotate & Zoom Photo' : 'Crop, Scan, Rotate & Zoom Image';
+  updateSlotCropControls();
 
   // Show the crop screen immediately; the photo draws as soon as it decodes.
   $('fcViewerModal').style.display = 'none';
@@ -5834,7 +5840,11 @@ function openCropForImage(item) {
 
   rawImage = new Image();
   rawImage.onload = () => {
-    autoPickCropRatio();
+    // (v4.9.86) A form-photo slot re-crop keeps its own frame and
+    // never auto-scans; an NID photo keeps the orientation pick +
+    // upload auto-scan.
+    if (item.slot) pickSlotCropRatio(item.slot);
+    else autoPickCropRatio();
     const canvas = $('cropCanvas');
     applyCropCanvasSize();
     zoomLevel = 1;
@@ -5850,7 +5860,7 @@ function openCropForImage(item) {
     cropOriginalImage = rawImage;
     cropAutoScanned = false;
     updateUndoScanBtn();
-    if (item.source !== 'camera') autoScanCrop(false);
+    if (cropAutoScanAllowed(item)) autoScanCrop(false);
   };
   rawImage.onerror = () => {
     $('cropModal').classList.remove('open');
@@ -6280,6 +6290,48 @@ function slotFrameRect(sw, sh, slot) {
   if (h > sh * 0.92) { h = sh * 0.92; w = h * spec.w / spec.h; }
   return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
 }
+// (v4.9.86) The website's output size for a slot crop — the saved
+// photo is exactly this size (outputWidth/outputHeight, component
+// data-v-ba197eea): Applicant 180×200, Signature 200×80, House
+// 600×400. Same w/h as SLOT_FRAME_SPECS above. Pure — tested.
+function photoSlotOutputSize(slot) {
+  const spec = SLOT_FRAME_SPECS[slot];
+  if (!spec) return null;
+  return { w: spec.w, h: spec.h };
+}
+// (v4.9.86) Editor canvas size for a slot crop — same aspect as the
+// output, big enough to edit on: Applicant 675×750, Signature
+// 900×360, House 900×600. Pure — tested.
+function slotCropCanvasSize(slot) {
+  const spec = SLOT_FRAME_SPECS[slot];
+  if (!spec) return null;
+  const w = spec.w >= spec.h ? 900 : 675;
+  return { w, h: Math.round(w * spec.h / spec.w) };
+}
+// (v4.9.86) Affine map from original-image px to crop-canvas px for
+// the crop view drawCropCanvas shows — translate(centre + pan) ·
+// scale(totalScale) · rotate · drawImage centred. cover=true uses the
+// cover fit (photo fills the frame edge to edge, never letterboxed);
+// cover=false uses the fit-inside the NID flow keeps. Pure — tested
+// by tests/sidepanel_freeform_test.js: with cover=true every canvas
+// corner must inverse-map inside the source image (no black bars).
+function cropViewMatrix(imgW, imgH, cw, ch, rotationDeg, zoom, panXv, panYv, cover) {
+  const rad = ((rotationDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const boundW = imgW * Math.abs(cos) + imgH * Math.abs(sin);
+  const boundH = imgW * Math.abs(sin) + imgH * Math.abs(cos);
+  const fit = cover
+    ? Math.max(cw / boundW, ch / boundH)
+    : Math.min(cw / boundW, ch / boundH);
+  const s = fit * (zoom || 1);
+  const cx = imgW / 2, cy = imgH / 2;
+  const tx = cw / 2 + (panXv || 0), ty = ch / 2 + (panYv || 0);
+  return {
+    a: s * cos, b: s * sin, c: -s * sin, d: s * cos,
+    e: tx - s * (cos * cx - sin * cy),
+    f: ty - s * (sin * cx + cos * cy)
+  };
+}
 // Keep a Freeform box inside the canvas, at least minSize on a side.
 function clampFreeRect(r, cw, ch, minSize) {
   const m = minSize || 20;
@@ -6348,7 +6400,13 @@ function drawCropCanvas(drawBox = true) {
   const sin = Math.abs(Math.sin(rad));
   const boundW = rawImage.width * cos + rawImage.height * sin;
   const boundH = rawImage.width * sin + rawImage.height * cos;
-  const fitScale = Math.min(canvas.width / boundW, canvas.height / boundH);
+  // (v4.9.86) A slot crop COVERS the frame — the photo fills it edge
+  // to edge (drag/zoom to position, like the website's crop), so no
+  // black bars are ever baked into a slot photo. An NID crop keeps
+  // the fit-inside: the whole document stays visible.
+  const fitScale = cropSlotActive()
+    ? Math.max(canvas.width / boundW, canvas.height / boundH)
+    : Math.min(canvas.width / boundW, canvas.height / boundH);
   const totalScale = fitScale * zoomLevel;
   lastCropFit = { boundW, boundH, fitScale };
   ctx.scale(totalScale, totalScale);
@@ -6431,6 +6489,12 @@ function drawFreeCropBox() {
 // editing — so redraw the photo WITHOUT them first, or the box gets baked
 // into the saved photo as a white border.
 function freeRegionDataUrl(canvas) {
+  // (v4.9.86) A slot crop renders from the original at the slot's
+  // output size — never from the 900 px display canvas.
+  if (cropSlotActive()) {
+    const b64 = slotCropDataUrl();
+    if (b64) return b64;
+  }
   const r = freeCropRect;
   drawCropCanvas(false); // clean redraw: photo only, no box, no handles
   const out = document.createElement('canvas');
@@ -6438,6 +6502,47 @@ function freeRegionDataUrl(canvas) {
   out.height = Math.max(1, Math.round(r.h));
   const ctx = out.getContext('2d');
   ctx.drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, out.width, out.height);
+  return out.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+
+// (v4.9.86) Render the current slot crop from the ORIGINAL image,
+// once, at the website's output size (180×200 / 200×80 / 600×400) —
+// the same transform the editor shows (cover fit, pan, zoom, 90°
+// rotation), so what you see is what you save: no re-encode of the
+// display canvas, no black bars, and the small output fits the
+// 200 KB cap at quality 0.85, so compressBase64ToLimit() becomes a
+// no-op — exactly like the site. Freeform uses the boxed region,
+// mapped through the same transform. Returns null when no slot is
+// open (or the editor has no photo yet); the caller falls back to
+// the old display-canvas save.
+function slotCropDataUrl() {
+  const slot = activePhotoSlot || (activeCropItem && activeCropItem.slot);
+  const size = slot ? photoSlotOutputSize(slot) : null;
+  const canvas = $('cropCanvas');
+  if (!size || !rawImage || !canvas) return null;
+  const out = document.createElement('canvas');
+  out.width = size.w; out.height = size.h;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, size.w, size.h);
+  const rad = (rotationAngle * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+  const boundW = rawImage.width * cos + rawImage.height * sin;
+  const boundH = rawImage.width * sin + rawImage.height * cos;
+  // Cover fit, exactly as drawCropCanvas shows it.
+  const fitScale = Math.max(canvas.width / boundW, canvas.height / boundH);
+  const totalScale = fitScale * zoomLevel;
+  if (cropRatio === 'free' && freeCropRect) {
+    const r = freeCropRect;
+    ctx.scale(size.w / r.w, size.h / r.h);
+    ctx.translate(-r.x, -r.y);
+  } else {
+    ctx.scale(size.w / canvas.width, size.h / canvas.height);
+  }
+  ctx.translate(canvas.width / 2 + panX, canvas.height / 2 + panY);
+  ctx.scale(totalScale, totalScale);
+  ctx.rotate(rad);
+  ctx.drawImage(rawImage, -rawImage.width / 2, -rawImage.height / 2);
   return out.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
@@ -6666,7 +6771,49 @@ function setupBurstToggle() {
   updateBurstToggle();
 }
 
+// (v4.9.86) True while the crop editor holds a form-photo slot
+// (fresh capture via activePhotoSlot, or a pulled photo re-crop via
+// activeCropItem.slot). NID/BRN crops are never slot crops.
+function cropSlotActive() {
+  return !!(activePhotoSlot || (activeCropItem && activeCropItem.slot));
+}
+// (v4.9.86) A re-crop auto-scans only for a non-camera NID photo —
+// never for a form-photo slot: a portrait/signature/house photo is
+// not a document, and a scan can warp it like one.
+function cropAutoScanAllowed(item) {
+  return !!item && item.source !== 'camera' && !item.slot;
+}
+// (v4.9.86) Pick the slot's own crop frame ('slot:image' etc.) —
+// never the orientation pick, so the photo fills the frame edge to
+// edge. The zoom floor stays 1: at zoom 1 the photo already fills
+// the frame, zooming in only crops tighter.
+function pickSlotCropRatio(slot) {
+  if (!photoSlotDef(slot)) return;
+  cropRatio = 'slot:' + slot;
+  updateCropRatioButtons();
+  const zr = $('zoomRange');
+  if (zr) zr.min = '1';
+}
+// (v4.9.86) Crop-modal controls for a slot crop: hide the FRAME row,
+// the Scan button and the perspective toggle — a slot photo is never
+// re-framed or scanned as a document. Shown again for every NID crop.
+function updateSlotCropControls() {
+  const slot = cropSlotActive();
+  const row = $('cropRatioRow');
+  if (row) row.style.display = slot ? 'none' : '';
+  const scan = $('scanCropBtn');
+  if (scan) scan.style.display = slot ? 'none' : '';
+  const persp = $('perspectiveToggleBtn');
+  if (persp) persp.style.display = slot ? 'none' : '';
+}
+
 function cropCanvasSize() {
+  // (v4.9.86) A slot crop uses the slot's own canvas — same aspect as
+  // the website's output, so the frame fits the photo with no bars.
+  if (cropRatio && cropRatio.indexOf('slot:') === 0) {
+    const s = slotCropCanvasSize(cropRatio.slice(5));
+    if (s) return s;
+  }
   if (cropRatio === '3:4') return { w: 675, h: 900 };
   if (cropRatio === '4:3') return { w: 900, h: 675 };
   return { w: 900, h: 600 }; // free — the photo as it is
@@ -6687,6 +6834,9 @@ function updateCropRatioButtons() {
 }
 function setCropRatio(r) {
   if (!rawImage || cropRatio === r) return;
+  // (v4.9.86) A slot crop keeps its own frame — the FRAME row is
+  // hidden anyway; ignore any re-pick while a slot is open.
+  if (cropSlotActive()) return;
   cropRatio = r;
   updateCropRatioButtons();
   // The frame changed — start from a clean fit (zoom 1, centred).
@@ -6879,10 +7029,14 @@ function setupNativeCropper() {
   $('saveCropBtn').addEventListener('click', async () => {
     const canvas = $('cropCanvas');
     if (!canvas) return;
-    // Freeform: Apply saves exactly the boxed region, not the whole canvas.
-    const b64 = (cropRatio === 'free' && freeCropRect)
+    // (v4.9.86) A slot crop renders once from the original at the
+    // site's output size — no re-encode of the display canvas, no
+    // black bars, no quality drop. Any other crop keeps the old
+    // display-canvas save.
+    const slotB64 = cropSlotActive() ? slotCropDataUrl() : null;
+    const b64 = slotB64 || ((cropRatio === 'free' && freeCropRect)
       ? freeRegionDataUrl(canvas)
-      : canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+      : canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
     $('cropModal').classList.remove('open');
 
     if (activeCropItem) {
@@ -7055,17 +7209,23 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   const headDob = normalizeDob(h.dob);
   // 13-digit old NID -> 17 digits with the birth year (v4.9.47); a
   // wrong-length ID stays as typed and the card warns about it.
-  const cleanHeadId = checkIdNumber(s(h.nid), headDob, h.doc_type).value;
+  // (v4.9.87) Tolerant read: a head record that came from a member
+  // role may still carry `nid_or_brn` (makeMemberHead translates the
+  // key, but a record saved / imported before the fix may not) — read
+  // either key, never let a wrong-key record destroy the NID on
+  // rebuild. The canonical output key stays `nid`.
+  const headIdRaw = s(h.nid || h.nid_or_brn);
+  const cleanHeadId = checkIdNumber(headIdRaw, headDob, h.doc_type).value;
   // Remember a converted 13-digit NID (v4.9.49): this 17-digit value
   // is an NID, so the manual 17-digit rule must not flip it to BRN.
-  if (toEnglishDigits(s(h.nid)).replace(/\s+/g, '').length === 13 && cleanHeadId && cleanHeadId.length === 17) converted13NidValues.add(cleanHeadId);
+  if (toEnglishDigits(headIdRaw).replace(/\s+/g, '').length === 13 && cleanHeadId && cleanHeadId.length === 17) converted13NidValues.add(cleanHeadId);
   const headGender = inferGender('Wife', h.gender || 'Female', h.name_en, h.name_bn);
   const headAge = calculateAgeYears(headDob);
 
   const head = {
     // A 13-digit number is always an old NID (a BRN is 17 digits), so
     // a converted 13-digit ID stays NID even though it is 17 digits now.
-    doc_type: toEnglishDigits(s(h.nid)).replace(/\s+/g, '').length === 13 ? 'NID' : inferDocType(cleanHeadId, h.doc_type),
+    doc_type: toEnglishDigits(headIdRaw).replace(/\s+/g, '').length === 13 ? 'NID' : inferDocType(cleanHeadId, h.doc_type),
     gender: headGender,
     gender_id: GENDER_ID_MAP[headGender] || 2,
     religion: s(h.religion) || 'Islam',
@@ -7277,7 +7437,11 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
     // Skip empty ghost entries from NID back-side images
     const rawNameBn = s(m?.name_bn);
     const rawNameEn = s(m?.name_en);
-    const rawMemId = toEnglishDigits(s(m?.nid_or_brn)).replace(/\s+/g, '');
+    // (v4.9.87) Tolerant read, like the head above: a member record
+    // that came from the head role may still carry `nid` — read either
+    // key, never let a wrong-key record destroy the NID on rebuild.
+    // The canonical output key stays `nid_or_brn`.
+    const rawMemId = toEnglishDigits(s(m?.nid_or_brn || m?.nid)).replace(/\s+/g, '');
     const memDobEarly = normalizeDob(m?.dob);
     // 13-digit old NID -> 17 digits with the birth year (v4.9.47).
     const cleanMemId = checkIdNumber(rawMemId, memDobEarly, m?.doc_type).value;
@@ -8007,6 +8171,17 @@ function makeMemberHead(memberIdx) {
     const converted = livelihoodForHeadProfession(oldProf);
     if (converted !== undefined) oldHeadRec.livelihood_profession_id = converted;
   }
+  // (v4.9.87) ID key follows the role, like the profession conversion
+  // above: a head carries `nid`, a member carries `nid_or_brn`. The
+  // plain spreads above copy the number under the WRONG key (the new
+  // head's `nid_or_brn`, the old head's `nid`), so both cards went
+  // blank at once — and the next rebuild destroyed both NIDs for good.
+  // The stale other-role key is removed, so a wrong-key value never
+  // survives on the record.
+  headRec.nid = newHead.nid_or_brn || newHead.nid || newHead.brn_id || '';
+  delete headRec.nid_or_brn;
+  oldHeadRec.nid_or_brn = oldHead.nid || oldHead.nid_or_brn || oldHead.brn_id || '';
+  delete oldHeadRec.nid;
   // (v4.9.77) The household's head-only data moves to the new head —
   // mobile, MFS, address, bank, PMT picks and pulled PMT answers —
   // and off the old head's member record (it belongs to the role, not
