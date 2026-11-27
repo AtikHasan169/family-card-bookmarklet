@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.82-live';
+const CURRENT_VERSION_TAG = 'v4.9.83-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1432,6 +1432,13 @@ function initApp() {
   $('otherUpload').addEventListener('change', (e) => handleUpload(e, 'other'));
   const pulledResetBtn = $('pulledResetBtn');
   if (pulledResetBtn) pulledResetBtn.addEventListener('click', resetPulledImages);
+  // (v4.9.83) Tap the Form Photos header to expand/collapse the empty
+  // card — but a tap on the Reset button must not toggle it.
+  const pulledHead = document.querySelector('#pulledCard .card-head');
+  if (pulledHead) pulledHead.addEventListener('click', (e) => {
+    if (e.target && e.target.closest && e.target.closest('button')) return;
+    togglePulledCard();
+  });
 
   $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
@@ -1574,13 +1581,15 @@ function handleIncomingMessages(e) {
       if (s.nextId) nextId = s.nextId;
       renderPreviews('head');
       renderPreviews('other');
-      renderPulledImages();
       if (s.lastExtracted && !state.lastExtracted) {
         state.lastExtracted = normalizeOutput(s.lastExtracted, true);
         renderExtractedCards(state.lastExtracted);
         $('autofillBtn').disabled = false;
         setStatus('Restored previous session data automatically!', 'ok');
       }
+      // (v4.9.83) After lastExtracted is restored: the Form Photos
+      // gate reads it, so a photo-less restored record still opens it.
+      renderPulledImages();
     }
   }
 
@@ -4402,16 +4411,59 @@ function showPulledPhoto(item) {
   modal.style.display = 'flex';
 }
 
+// (v4.9.83) Gate for the Form Photos, Household and cash-usage
+// cards: they stay hidden while the form is still blank — no
+// extraction has landed, no pull/import has brought a real record,
+// and no photo exists anywhere. The first photo (normally the NID
+// photo for extraction) opens the gate, as does any landed record: a
+// blank form (blankFormData — empty names/NID/DOB, no members, no
+// pulled detail) keeps them hidden. This reads the record's content,
+// so hand-typed names or an imported family also open it — that is
+// the escape hatch for a photo-less manual form, which would
+// otherwise never reach the Household fields at all.
+function formCardsGateOpen(data) {
+  const anyPhoto = (state.head || []).length + (state.other || []).length + (state.pulledImages || []).length > 0;
+  if (anyPhoto) return true;
+  if (!data) return false;
+  const head = data.head || {};
+  if (String(head.name_bn || '').trim() || String(head.name_en || '').trim()
+      || String(head.nid || '').trim() || String(head.nid_or_brn || '').trim()
+      || String(head.dob || '').trim()) return true;
+  if (Array.isArray(data.family_members) && data.family_members.length > 0) return true;
+  if (Array.isArray(data.pmt_answers) && data.pmt_answers.length > 0) return true;
+  if (Array.isArray(data.program_fields) && data.program_fields.length > 0) return true;
+  if (Array.isArray(data.cash_usages) && data.cash_usages.length > 0) return true;
+  if (data.full_form_dump) return true;
+  return false;
+}
+
 function renderPulledImages() {
   const card = $('pulledCard');
   const grid = $('pulledPreviews');
   const badge = $('pulledCount');
   if (!card || !grid) return;
+  // (v4.9.83) Gate: hidden while the form is still blank — no
+  // extraction landed and no photo exists anywhere. The grid and
+  // badge are still emptied so a stale set never lingers behind it.
+  if (!formCardsGateOpen(state.lastExtracted)) {
+    card.style.display = 'none';
+    grid.replaceChildren();
+    if (badge) badge.textContent = '0 photo(s)';
+    return;
+  }
   const list = state.pulledImages || [];
-  // (v4.9.82) The card always shows now: the photo-capture rows live
-  // here, so the user can take the form photos even when nothing was
-  // pulled yet. The grid below still only fills when photos exist.
+  // (v4.9.83) The card collapses to its header when it holds no
+  // photos: the empty rows took three rows of screen on every blank
+  // form. The header stays visible (badge + Reset + chevron) and
+  // tapping it expands the empty rows, so Camera/Upload stay one tap
+  // away. With a photo the card always shows expanded; removing the
+  // last photo collapses it again.
   card.style.display = '';
+  if (list.length > 0) state.pulledCardExpanded = false;
+  const collapsed = list.length === 0 && !state.pulledCardExpanded;
+  if (collapsed) card.classList.add('collapsed'); else card.classList.remove('collapsed');
+  const chev = $('pulledChevron');
+  if (chev) chev.textContent = collapsed ? '▸' : '▾';
   if (badge) badge.textContent = `${list.length} photo(s)`;
   if (typeof renderFormPhotoSlots === 'function') renderFormPhotoSlots();
   grid.replaceChildren();
@@ -4440,6 +4492,15 @@ function renderPulledImages() {
     wrap.appendChild(bar);
     grid.appendChild(wrap);
   });
+}
+
+// (v4.9.83) Tap the Form Photos header to expand/collapse the empty
+// card. With a photo the card always shows expanded, so this is a
+// no-op then — the header tap only matters when the card is empty.
+function togglePulledCard() {
+  if ((state.pulledImages || []).length > 0) return;
+  state.pulledCardExpanded = !state.pulledCardExpanded;
+  renderPulledImages();
 }
 
 // --- Form photos: capture the applicant photo, signature and house
@@ -7954,6 +8015,9 @@ function newBlankForm() {
   renderPreviews('head');
   renderPreviews('other');
   renderExtractedCards(state.lastExtracted);
+  // (v4.9.83) Re-render the Form Photos card too, or the previous
+  // family's thumbnails stay on screen until some other render.
+  renderPulledImages();
   $('autofillBtn').disabled = false;
   saveSessionState();
   setStatus('Blank form — type every name by hand. Add members with + সদস্য যোগ করুন.', 'ok');
@@ -8104,6 +8168,12 @@ function renderExtractedCards(data) {
   $('resultsWrap').classList.add('visible');
 
   renderHouseholdSummaryCard(data);
+
+  // (v4.9.83) Gate: the Household and cash-usage cards stay hidden
+  // while the form is still blank — no extraction landed and no photo
+  // exists anywhere. The first photo opens the gate, so the
+  // fill-while-extracting flow (v4.9.81) is unchanged; the head card
+  // and the member form always show.
 
   // (v4.9.78) opts: { household: true } renders a Step 2 household
   // card (the head record's non-personal fields — mobile, MFS, PMT,
@@ -8338,10 +8408,13 @@ function renderExtractedCards(data) {
   // Socio-Economic, General, Nominee, and the pulled program/PMT
   // detail). It IS the head record, so its fields still record head
   // corrections, and the payload is unchanged.
-  if (data.head) container.appendChild(buildEditableCard(data.head, HOUSEHOLD_FIELDS, false, 0, { household: true, title: 'Household & Other Info (পরিবার ও অন্যান্য তথ্য)', tag: 'Mobile • MFS • PMT • Bank • Address', showProgramDetail: true }));
+  // (v4.9.83) Gated: hidden while the form is still blank.
+  const gateOpen = formCardsGateOpen(data);
+  if (data.head && gateOpen) container.appendChild(buildEditableCard(data.head, HOUSEHOLD_FIELDS, false, 0, { household: true, title: 'Household & Other Info (পরিবার ও অন্যান্য তথ্য)', tag: 'Mobile • MFS • PMT • Bank • Address', showProgramDetail: true }));
 
   // Cash usage — the 2500 Tk distribution (v4.9.37).
-  container.appendChild(buildCashUsageCard(data));
+  // (v4.9.83) Gated: hidden while the form is still blank.
+  if (gateOpen) container.appendChild(buildCashUsageCard(data));
 
   if (data.full_form_dump) {
     renderFullWebsiteTabs(container, data.full_form_dump);

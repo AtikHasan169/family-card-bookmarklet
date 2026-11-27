@@ -135,6 +135,13 @@
 
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; box-shadow: var(--shadow-xs); transition: border-color var(--transition); }
     .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 6px; flex-wrap: wrap; }
+    /* (v4.9.83) The Form Photos card collapses to its header when it
+       holds no photos: the header stays, the rows and grid hide, and
+       the chevron shows which way it goes. Tapping the header toggles. */
+    #pulledCard .card-head { cursor: pointer; }
+    #pulledCard.collapsed .card-head { margin-bottom: 0; }
+    #pulledCard.collapsed #formPhotoSlots, #pulledCard.collapsed #pulledPreviews { display: none; }
+    .pulled-chevron { font-size: 15px; line-height: 1; color: var(--text-sub); }
     .card-title-group { display: flex; align-items: center; gap: 8px; }
     .step-badge { width: 20px; height: 20px; border-radius: 5px; background: var(--surface-muted); border: 1px solid var(--border); color: var(--text-main); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
     .card-title { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
@@ -611,6 +618,7 @@
         </div>
         <span class="badge" id="pulledCount">0 photos</span>
         <button type="button" class="btn btn-xs" id="pulledResetBtn" title="Clear the form photos">Reset</button>
+        <span class="pulled-chevron" id="pulledChevron" aria-hidden="true">▸</span>
       </div>
       <div id="formPhotoSlots"></div>
       <div class="thumb-grid" id="pulledPreviews"></div>
