@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.89-live';
+const CURRENT_VERSION_TAG = 'v4.9.90-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1457,9 +1457,10 @@ function initApp() {
 
   $('captureHeadBtn').addEventListener('click', () => openCamera('head'));
   $('captureOtherBtn').addEventListener('click', () => openCamera('other'));
-  // (v4.9.88) Form-photo slot upload: one file per slot, saved
-  // directly — centre-cropped to the slot's size like the website,
-  // no crop editor. The camera still opens the crop editor, and a
+  // (v4.9.90) Form-photo slot upload: one file per slot — the crop
+  // editor OPENS so the user crops the picture himself; the panel
+  // never crops on its own (v4.9.88's silent centre-crop is
+  // reverted). The camera still opens the crop editor, and a
   // manual re-crop stays available from the saved photo.
   const photoSlotInput = $('photoSlotUpload');
   if (photoSlotInput) {
@@ -1477,7 +1478,7 @@ function initApp() {
       reader.onload = (evt) => {
         const b64 = String(evt.target.result || '').split(',')[1] || '';
         if (!b64) { setStatus('Could not read this photo.', 'err'); return; }
-        saveSlotUploadDirectly(slot, b64);
+        openCropForPhotoSlot(slot, b64, file.name, 'upload');
       };
       reader.onerror = () => setStatus('Could not read this photo.', 'err');
       reader.readAsDataURL(file);
@@ -4836,60 +4837,6 @@ function openCropForPhotoSlot(slot, b64, name, source) {
   };
   $('cropModal').classList.add('open');
   rawImage.src = 'data:image/jpeg;base64,' + b64;
-}
-
-// (v4.9.88) Cover centre-crop source rect: the largest rectangle of
-// the source image with the output aspect, centred — the site's Nt()
-// upload behaviour. Pure — tested.
-function centerCropRect(imgW, imgH, outW, outH) {
-  const outAspect = outW / outH;
-  const imgAspect = imgW / imgH;
-  if (imgAspect > outAspect) {
-    const sw = imgH * outAspect;
-    return { sx: (imgW - sw) / 2, sy: 0, sw, sh: imgH };
-  }
-  const sh = imgW / outAspect;
-  return { sx: 0, sy: (imgH - sh) / 2, sw: imgW, sh };
-}
-
-// (v4.9.88) Centre-crop the ORIGINAL to the slot's exact output
-// size (180×200 / 200×80 / 600×400) at JPEG 0.85, rendered once —
-// the website's upload path: no crop UI, no document detection, no
-// warp, no rotation. Returns null when the slot is unknown or the
-// photo cannot be decoded.
-function centerCropSlotUpload(slot, b64) {
-  const size = photoSlotOutputSize(slot);
-  if (!size || !b64) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const r = centerCropRect(img.width, img.height, size.w, size.h);
-      const out = document.createElement('canvas');
-      out.width = size.w; out.height = size.h;
-      out.getContext('2d').drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, size.w, size.h);
-      resolve(out.toDataURL('image/jpeg', 0.85).split(',')[1] || null);
-    };
-    img.onerror = () => resolve(null);
-    img.src = 'data:image/jpeg;base64,' + b64;
-  });
-}
-
-// (v4.9.88) Slot upload, like the website: no crop editor — the
-// uploaded photo is centre-cropped to the slot's output size, fitted
-// to the slot's byte limit, and stored through the same
-// setPulledPhoto path an Apply Crop uses, so thumbnails, the card
-// gate and Export/Import behave exactly as after a crop. Returns the
-// entry, or null when the photo could not be read. Slots only — the
-// NID/BRN upload flow never calls this.
-async function saveSlotUploadDirectly(slot, b64) {
-  const def = photoSlotDef(slot);
-  if (!def || !b64) return null;
-  const cropped = await centerCropSlotUpload(slot, b64);
-  if (!cropped) { setStatus('Could not read this photo.', 'err'); return null; }
-  const fitted = await compressBase64ToLimit(cropped, photoSlotMaxBytes(slot));
-  const entry = setPulledPhoto(slot, fitted, 'upload');
-  setStatus(`${def.name} saved — ready for Auto-Fill.`, 'ok');
-  return entry;
 }
 
 // (v38) Reset the Draft Photos (from website): the pulled photos
