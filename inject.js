@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v57';
+  const FC_INJECT_VERSION = 'v58';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -30,7 +30,9 @@
   // when the income is first guessed and then kept — so families stop
   // looking identical, but the same family always shows the same
   // number. 0-value professions stay exactly 0.
+  // (v58) Roll step is 5000 now (was 1000), so guesses read 55000/60000/65000.
   const INCOME_RANGE_PCT = 0.07;
+  const INCOME_ROLL_STEP = 5000;
   const PROFESSION_INCOME = {
     210: 60000,  // Agriculture
     211: 84000,  // Business
@@ -59,15 +61,15 @@
     const m = Number(mid) || 0;
     if (m === 0) return { low: 0, high: 0 };
     return {
-      low: Math.round(m * (1 - INCOME_RANGE_PCT) / 1000) * 1000,
-      high: Math.round(m * (1 + INCOME_RANGE_PCT) / 1000) * 1000
+      low: Math.round(m * (1 - INCOME_RANGE_PCT) / INCOME_ROLL_STEP) * INCOME_ROLL_STEP,
+      high: Math.round(m * (1 + INCOME_RANGE_PCT) / INCOME_ROLL_STEP) * INCOME_ROLL_STEP
     };
   }
   function rollIncome(mid) {
     const r = incomeRangeFor(mid);
     if (r.low === r.high) return r.low;
-    const steps = Math.round((r.high - r.low) / 1000);
-    return r.low + Math.floor(Math.random() * (steps + 1)) * 1000;
+    const steps = Math.round((r.high - r.low) / INCOME_ROLL_STEP);
+    return r.low + Math.floor(Math.random() * (steps + 1)) * INCOME_ROLL_STEP;
   }
   function incomeGuessForProfession(professionId) {
     return rollIncome(incomeForProfession(professionId));

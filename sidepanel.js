@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.90-live';
+const CURRENT_VERSION_TAG = 'v4.9.91-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -127,7 +127,9 @@ const LIVELIHOOD_OPTIONS = [
 // when the income is first guessed and then kept — so families stop
 // looking identical, but the same family always shows the same
 // number. 0-value professions stay exactly 0.
+// (v4.9.91) Roll step is 5000 now (was 1000), so guesses read 55000/60000/65000.
 const INCOME_RANGE_PCT = 0.07;
+const INCOME_ROLL_STEP = 5000;
 const PROFESSION_INCOME = {
   210: 60000,  // Agriculture
   211: 84000,  // Business
@@ -152,24 +154,24 @@ function incomeForProfession(professionId) {
   const v = PROFESSION_INCOME[Number(professionId)];
   return v === undefined ? 0 : v;
 }
-// The +/-7% range around a table value, rounded to the nearest 1000
+// The +/-7% range around a table value, rounded to the nearest 5000
 // so the number still looks like a real yearly income. 0 stays 0.
 function incomeRangeFor(mid) {
   const m = Number(mid) || 0;
   if (m === 0) return { low: 0, high: 0 };
   return {
-    low: Math.round(m * (1 - INCOME_RANGE_PCT) / 1000) * 1000,
-    high: Math.round(m * (1 + INCOME_RANGE_PCT) / 1000) * 1000
+    low: Math.round(m * (1 - INCOME_RANGE_PCT) / INCOME_ROLL_STEP) * INCOME_ROLL_STEP,
+    high: Math.round(m * (1 + INCOME_RANGE_PCT) / INCOME_ROLL_STEP) * INCOME_ROLL_STEP
   };
 }
-// Roll one multiple of 1000 inside the range. Callers roll ONCE and
+// Roll one multiple of 5000 inside the range. Callers roll ONCE and
 // store the result as the person's income — never re-roll a stored
 // value, or the panel and the form would disagree.
 function rollIncome(mid) {
   const r = incomeRangeFor(mid);
   if (r.low === r.high) return r.low;
-  const steps = Math.round((r.high - r.low) / 1000);
-  return r.low + Math.floor(Math.random() * (steps + 1)) * 1000;
+  const steps = Math.round((r.high - r.low) / INCOME_ROLL_STEP);
+  return r.low + Math.floor(Math.random() * (steps + 1)) * INCOME_ROLL_STEP;
 }
 // The rolled guess for a profession id (0 for a 0-value profession
 // or an unknown id).
