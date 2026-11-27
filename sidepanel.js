@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.83-live';
+const CURRENT_VERSION_TAG = 'v4.9.84-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1078,7 +1078,11 @@ const CASH_USAGE_OPTIONS = [
 const CASH_USAGE_CAP = 2500;
 const CASH_USAGE_OTHER_ID = 274;
 
-const state = { head: [], other: [], pulledImages: [], lastExtracted: null, halnagad: null };
+const state = { head: [], other: [], pulledImages: [], lastExtracted: null, halnagad: null,
+  // (v4.9.84) True once an extraction attempt has ENDED (success or
+  // failure) — see peopleCardsVisible. Cleared when a new photo lands
+  // (a new pending extraction) and on a fresh form.
+  extractionAttempted: false };
 let nextId = 1, activeCategory = null, activeCropName = '';
 
 const areaPresets = {
@@ -1579,6 +1583,9 @@ function handleIncomingMessages(e) {
       if (Array.isArray(s.other) && !state.other.length) state.other = s.other;
       if (Array.isArray(s.pulledImages) && !state.pulledImages.length) state.pulledImages = s.pulledImages;
       if (s.nextId) nextId = s.nextId;
+      // (v4.9.84) Restore the extraction-attempt flag with the rest
+      // of the session (see saveSessionState).
+      if (typeof s.extractionAttempted === 'boolean') state.extractionAttempted = s.extractionAttempted;
       renderPreviews('head');
       renderPreviews('other');
       if (s.lastExtracted && !state.lastExtracted) {
@@ -2129,6 +2136,10 @@ function saveSessionState() {
       other: state.other,
       pulledImages: state.pulledImages,
       lastExtracted: state.lastExtracted,
+      // (v4.9.84) Keep People visible after a reload that follows a
+      // failed extraction — without this the flag resets and the blank
+      // cards hide again with no way back except re-extracting.
+      extractionAttempted: state.extractionAttempted,
       nextId
     };
     window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: payload }, '*');
@@ -3006,6 +3017,10 @@ function addImage(category, base64, name, source) {
   // 'camera' (in-panel capture — a green lock straightens the shot on
   // Capture, so the crop editor never auto-scans it).
   state[category].push({ id: nextId++, base64, name: name || 'Card.jpg', relation: 'Auto', boundRef: null, boundRefs: [], source: source || 'upload' });
+  // (v4.9.84) A new photo starts a new pending extraction: the People
+  // cards hide again until an extraction attempt ends. (Hand-typed
+  // content keeps them visible via peopleCardsVisible.)
+  state.extractionAttempted = false;
   renderPreviews(category);
   // (v4.9.81) Fill-while-extracting: as soon as the first photo lands
   // and there is no record yet, show blank household + cash-usage
@@ -3017,7 +3032,19 @@ function addImage(category, base64, name, source) {
     state.lastExtracted = blankFormData();
     renderExtractedCards(state.lastExtracted);
     $('autofillBtn').disabled = false;
+  } else {
+    // (v4.9.84) A photo on an existing record re-opens the Household
+    // / 2500 gate and re-checks People visibility — without this the
+    // Form Photos card would show while Household / 2500 stayed
+    // hidden (or vice versa). Re-rendering only rebuilds the cards
+    // from the record; hand-typed values live in the record and are
+    // never overwritten.
+    renderExtractedCards(state.lastExtracted);
   }
+  // (v4.9.84) Re-render the Form Photos card too: the gate may have
+  // opened with this photo, and it must show exactly when Household
+  // / 2500 do — same timing, same conditions.
+  renderPulledImages();
   saveSessionState();
 }
 
@@ -3044,6 +3071,11 @@ function downscaleBase64(b64, maxDim = 1000, quality = 0.78) {
 function removeImage(category, id) {
   state[category] = state[category].filter((item) => item.id !== id);
   renderPreviews(category);
+  // (v4.9.84) Removing the last photo may close the gate again:
+  // Form Photos, Household / 2500 and People all re-evaluate, so
+  // they hide and show together.
+  if (state.lastExtracted) renderExtractedCards(state.lastExtracted);
+  renderPulledImages();
   saveSessionState();
 }
 
@@ -4437,6 +4469,24 @@ function formCardsGateOpen(data) {
   return false;
 }
 
+// (v4.9.84) People visibility: after an NID photo lands but before
+// any extraction result, the head/member cards are blank defaults with
+// no data — the user does not want to see them. They stay hidden
+// until an extraction attempt ends (success or failure), the record
+// carries real content, or there are no NID photos at all (a manual
+// New Form, where the user types names by hand). Form photos
+// (pulledImages) do not trigger the hide — only NID photos do.
+function peopleCardsVisible(data) {
+  if ((state.head || []).length + (state.other || []).length === 0) return true;
+  if (state.extractionAttempted) return true;
+  const head = (data && data.head) || {};
+  if (String(head.name_bn || '').trim() || String(head.name_en || '').trim()
+      || String(head.nid || '').trim() || String(head.nid_or_brn || '').trim()
+      || String(head.dob || '').trim()) return true;
+  if (Array.isArray(data && data.family_members) && data.family_members.length > 0) return true;
+  return false;
+}
+
 function renderPulledImages() {
   const card = $('pulledCard');
   const grid = $('pulledPreviews');
@@ -4783,6 +4833,7 @@ function clearAll() {
   state.head = [];
   state.other = [];
   state.pulledImages = [];
+  state.extractionAttempted = false;
   state.lastExtracted = null;
   window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: null }, '*');
   renderPreviews('head');
@@ -8011,6 +8062,8 @@ function newBlankForm() {
   state.head = [];
   state.other = [];
   state.pulledImages = [];
+  // (v4.9.84) Fresh start: no extraction has been attempted for this form.
+  state.extractionAttempted = false;
   state.lastExtracted = blankFormData();
   renderPreviews('head');
   renderPreviews('other');
@@ -8389,17 +8442,23 @@ function renderExtractedCards(data) {
     return card;
   };
 
-  if (data.head) container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
-  if (Array.isArray(data.family_members)) data.family_members.forEach((m, i) => container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i)));
+  // (v4.9.84) People section: hidden after an NID photo lands but
+  // before any extraction attempt ends — the head/member cards are
+  // blank defaults with no data yet. Household / 2500 below are NOT
+  // part of People and follow the formCardsGateOpen rule instead.
+  if (peopleCardsVisible(data)) {
+    if (data.head) container.appendChild(buildEditableCard(data.head, HEAD_FIELDS, false));
+    if (Array.isArray(data.family_members)) data.family_members.forEach((m, i) => container.appendChild(buildEditableCard(m, MEMBER_FIELDS, true, i)));
 
-  // Manual entry (v4.9.37): add as many blank member cards as needed.
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'btn';
-  addBtn.textContent = '+ সদস্য যোগ করুন (Add Member)';
-  addBtn.style.cssText = 'width:100%; margin:6px 0 2px; padding:8px; font-weight:700;';
-  addBtn.addEventListener('click', addManualMember);
-  container.appendChild(addBtn);
+    // Manual entry (v4.9.37): add as many blank member cards as needed.
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn';
+    addBtn.textContent = '+ সদস্য যোগ করুন (Add Member)';
+    addBtn.style.cssText = 'width:100%; margin:6px 0 2px; padding:8px; font-weight:700;';
+    addBtn.addEventListener('click', addManualMember);
+    container.appendChild(addBtn);
+  }
 
   // Household / other info (v4.9.78): Step 2 — everything that is
   // NOT one person's personal info, on the head record, in the user's
@@ -8421,6 +8480,12 @@ function renderExtractedCards(data) {
   }
 
   bindExtractedDataToThumbnails(data);
+  // (v4.9.84) The Form Photos card re-evaluates with every cards
+  // render, so it can never drift from Household / 2500: extraction
+  // landing, import, viewer close and every other render site all
+  // re-check its gate here. renderPulledImages only builds DOM and
+  // attaches handlers — it never calls back here, so no cycle.
+  renderPulledImages();
   syncJsonOutput();
 }
 
@@ -8661,11 +8726,18 @@ async function runExtraction() {
   $('stopExtractBtn').style.display = 'inline-flex';
   setStatus(`Extracting with ${model}... — you can fill Household & Cash Usage below meanwhile`, 'loading');
 
+  // (v4.9.84) A new attempt is pending: the People cards hide until
+  // it ends (success or failure), unless the record already carries
+  // real content.
+  state.extractionAttempted = false;
+  if (state.lastExtracted) renderExtractedCards(state.lastExtracted);
+
   extractionController = new AbortController();
   // (v4.9.81) 120 s timeout: a hung call on a slow network ends with
   // an error instead of waiting forever. It aborts through the same
   // controller the Stop button uses.
   let extractionTimedOut = false;
+  let landed = false;
   const extractionTimeout = setTimeout(() => {
     extractionTimedOut = true;
     extractionController.abort();
@@ -8793,6 +8865,11 @@ async function runExtraction() {
 
     const normalized = normalizeOutput(parsed, false, state.lastExtracted);
     state.lastExtracted = normalized;
+    // (v4.9.84) The attempt ended with a result: People shows with
+    // the extracted data. Set before rendering, so even an empty-head
+    // result shows its cards.
+    state.extractionAttempted = true;
+    landed = true;
 
     renderExtractedCards(normalized);
     $('autofillBtn').disabled = false;
@@ -8811,6 +8888,10 @@ async function runExtraction() {
     $('extractBtn').style.display = 'inline-flex';
     $('stopExtractBtn').style.display = 'none';
     extractionController = null;
+    // (v4.9.84) The attempt ended without a result (failure, timeout
+    // or Stop): People comes back blank for hand entry.
+    state.extractionAttempted = true;
+    if (!landed && state.lastExtracted) renderExtractedCards(state.lastExtracted);
   }
 }
 
