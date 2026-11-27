@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.91-live';
+const CURRENT_VERSION_TAG = 'v4.9.92-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -5098,11 +5098,14 @@ function drawCameraGuide() {
 
 // The white frame in the viewfinder, in stage (display) px. Landscape
 // 4:3 fills the stage; portrait 3:4 is a centred upright rectangle.
-// Capture crops to exactly this rect, so the photo matches the frame.
+// (v4.9.92) For the NID/BRN camera Capture still crops to exactly
+// this rect. For a form-photo slot camera the frame is an aiming
+// guide only — Capture saves the full video frame (see
+// grabCameraFrame) and the user positions the photo in the slot
+// frame in the crop editor afterwards.
 // (v4.9.85) A form-photo slot camera frames to the website's per-slot
-// guide shape instead — Capture then saves exactly that shape, so the
-// applicant photo comes out portrait, the signature a wide strip and
-// the house photo 3:2, like the site's own camera.
+// guide shape instead — applicant photo portrait, signature a wide
+// strip, house photo 3:2, like the site's own camera.
 function cameraFrameRect() {
   const video = $('cameraVideo');
   const sw = video ? video.clientWidth : 0;
@@ -5117,12 +5120,12 @@ function cameraFrameRect() {
 
 function frameHintText() {
   // (v4.9.85) A form-photo slot camera frames to the website's
-  // per-slot guide shape — say what belongs inside it.
+  // per-slot guide shape — (v4.9.92) the frame is a guide only: the
+  // whole photo is saved, and the user positions it in the slot
+  // frame in the crop editor afterwards.
   if (panelCameraPhotoSlot) {
     const def = photoSlotDef(panelCameraPhotoSlot);
-    const what = panelCameraPhotoSlot === 'image' ? 'the face'
-      : panelCameraPhotoSlot === 'signature' ? 'the signature' : 'the house';
-    return (def ? def.name : 'Photo') + ' — fit ' + what + ' inside the dashed frame.';
+    return (def ? def.name : 'Photo') + ' — the dashed frame shows the photo shape; the whole photo is saved, crop it in the editor.';
   }
   return cameraFramePortrait ? 'Portrait frame — the white frame is the photo.' : 'Perspective is off — the white frame is the photo.';
 }
@@ -5166,7 +5169,8 @@ function drawCameraFrame() {
   // (v4.9.85) A form-photo slot camera draws the website's guide
   // frame instead of the generic one: a dashed white border with the
   // area outside dimmed, and no centre cross — the site's frame is
-  // clean. Capture saves exactly this rect (see cameraFrameRect).
+  // clean. (v4.9.92) The frame is a guide only; Capture saves the
+  // full video frame, not this rect (see grabCameraFrame).
   if (panelCameraPhotoSlot) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(0, 0, sw, sh);
@@ -5492,8 +5496,12 @@ let burstSelected = 0;
 
 // One frame from the live video, exactly as Capture used to take it:
 // straightened when the green lock is fresh, else the white frame's
-// crop. Returns { b64, sharp } — sharp is the Laplacian score of the
-// shot (0 when it could not be scored).
+// crop. (v4.9.92) A form-photo slot capture saves the FULL video
+// frame instead — full native resolution, JPEG 0.92, like the
+// website's snap(). The dashed guide frame is an aiming aid only;
+// the crop editor opens after and the user positions the photo in
+// the slot frame himself. Returns { b64, sharp } — sharp is the
+// Laplacian score of the shot (0 when it could not be scored).
 function grabCameraFrame() {
   const video = $('cameraVideo');
   if (!video || !video.videoWidth) return { b64: '', sharp: 0 };
@@ -5503,10 +5511,23 @@ function grabCameraFrame() {
   // the crop editor then opens on an already-straight photo.
   let b64 = '';
   let shotCanvas = null;
-  // (v4.9.85) Never warp a form-photo slot shot: the green lock is a
-  // document straightener, and a face/signature/house must keep the
-  // slot frame's crop instead. (The detector never sets a quad during
-  // a slot session, but the guard keeps the slot path independent.)
+  // (v4.9.92) A form-photo slot saves the full frame — never the
+  // guide frame's crop and never a warp. The user tested live v4.9.90
+  // and the camera was still cropping: Capture saved only what was
+  // inside the frame (v4.9.85), while the website captures the whole
+  // photo. The frame stays on screen as a guide only.
+  if (panelCameraPhotoSlot) {
+    cv.width = video.videoWidth;
+    cv.height = video.videoHeight;
+    cv.getContext('2d').drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+    b64 = cv.toDataURL('image/jpeg', 0.92).split(',')[1] || '';
+    if (b64) shotCanvas = cv;
+  }
+  // (v4.9.85, kept) Never warp a form-photo slot shot: the green
+  // lock is a document straightener, and a face/signature/house is
+  // not a document. A slot capture already saved the full frame
+  // above (v4.9.92), so the quad is null here in any case; the guard
+  // keeps the slot path independent of the detector.
   const quad = panelCameraPhotoSlot ? null
     : (panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null);
   if (quad) {
@@ -5522,10 +5543,11 @@ function grabCameraFrame() {
     } catch (_) { b64 = ''; }
   }
   if (!b64) {
-    // No green lock: save exactly what the white frame showed — the
-    // frame's crop of the video (4:3 landscape, or 3:4 portrait) — so
-    // the photo has less background outside the card instead of the
-    // full wide video frame.
+    // No green lock (NID/BRN only — a slot capture already saved the
+    // full frame above, v4.9.92): save exactly what the white frame
+    // showed — the frame's crop of the video (4:3 landscape, or 3:4
+    // portrait) — so the photo has less background outside the card
+    // instead of the full wide video frame.
     const m = scanCoverMap(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight);
     const fr = cameraFrameRect();
     let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
