@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.84-live';
+const CURRENT_VERSION_TAG = 'v4.9.85-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1082,7 +1082,13 @@ const state = { head: [], other: [], pulledImages: [], lastExtracted: null, haln
   // (v4.9.84) True once an extraction attempt has ENDED (success or
   // failure) — see peopleCardsVisible. Cleared when a new photo lands
   // (a new pending extraction) and on a fresh form.
-  extractionAttempted: false };
+  extractionAttempted: false,
+  // (v4.9.85) True when the current form was started explicitly with
+  // New Form — a manual form. The Form Photos / Household / 2500 gate
+  // stays open for it from the start (see formCardsGateOpen), so all
+  // four cards show on a fresh New Form: Photo, Members, Household
+  // and 2500. Saved in the session, so a reload keeps them visible.
+  manualNewForm: false };
 let nextId = 1, activeCategory = null, activeCropName = '';
 
 const areaPresets = {
@@ -1586,6 +1592,9 @@ function handleIncomingMessages(e) {
       // (v4.9.84) Restore the extraction-attempt flag with the rest
       // of the session (see saveSessionState).
       if (typeof s.extractionAttempted === 'boolean') state.extractionAttempted = s.extractionAttempted;
+      // (v4.9.85) Restore the manual-New-Form flag the same way, so
+      // a reloaded blank form keeps all four cards visible.
+      if (typeof s.manualNewForm === 'boolean') state.manualNewForm = s.manualNewForm;
       renderPreviews('head');
       renderPreviews('other');
       if (s.lastExtracted && !state.lastExtracted) {
@@ -2140,6 +2149,10 @@ function saveSessionState() {
       // failed extraction — without this the flag resets and the blank
       // cards hide again with no way back except re-extracting.
       extractionAttempted: state.extractionAttempted,
+      // (v4.9.85) Keep a manual New Form's cards visible after a
+      // reload — without this the gate would close again on the
+      // restored blank form.
+      manualNewForm: state.manualNewForm,
       nextId
     };
     window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: payload }, '*');
@@ -4454,6 +4467,10 @@ function showPulledPhoto(item) {
 // the escape hatch for a photo-less manual form, which would
 // otherwise never reach the Household fields at all.
 function formCardsGateOpen(data) {
+  // (v4.9.85) A manual New Form shows all four cards from the start
+  // (Photo, Members, Household, 2500) — the user types everything by
+  // hand there, so the gate never hides them for it.
+  if (state.manualNewForm) return true;
   const anyPhoto = (state.head || []).length + (state.other || []).length + (state.pulledImages || []).length > 0;
   if (anyPhoto) return true;
   if (!data) return false;
@@ -4834,6 +4851,7 @@ function clearAll() {
   state.other = [];
   state.pulledImages = [];
   state.extractionAttempted = false;
+  state.manualNewForm = false;
   state.lastExtracted = null;
   window.parent.postMessage({ action: 'FC_SAVE_SESSION', sessionData: null }, '*');
   renderPreviews('head');
@@ -4991,6 +5009,11 @@ function stopPanelCamera() {
   burstRunId++; // cancel a burst in progress (e.g. Cancel mid-burst)
   hideBurstPicker();
   stopPanelCameraTracks();
+  // (v4.9.85) Clear the slot target on every camera close: Cancel
+  // used to leave it set, so the next NID camera would draw a slot
+  // frame and route its shot to the crop editor as a form photo.
+  panelCameraPhotoSlot = null;
+  updateFrameButton();
   setPanelWide(false); // back to the normal panel width
   const modal = $('cameraModal');
   if (modal) modal.classList.remove('open');
@@ -5061,21 +5084,41 @@ function drawCameraGuide() {
 // The white frame in the viewfinder, in stage (display) px. Landscape
 // 4:3 fills the stage; portrait 3:4 is a centred upright rectangle.
 // Capture crops to exactly this rect, so the photo matches the frame.
+// (v4.9.85) A form-photo slot camera frames to the website's per-slot
+// guide shape instead — Capture then saves exactly that shape, so the
+// applicant photo comes out portrait, the signature a wide strip and
+// the house photo 3:2, like the site's own camera.
 function cameraFrameRect() {
   const video = $('cameraVideo');
   const sw = video ? video.clientWidth : 0;
   const sh = video ? video.clientHeight : 0;
   if (!sw || !sh) return null;
+  if (panelCameraPhotoSlot) {
+    const fr = slotFrameRect(sw, sh, panelCameraPhotoSlot);
+    if (fr) return fr;
+  }
   return fitFrameRect(sw, sh, cameraFramePortrait);
 }
 
 function frameHintText() {
+  // (v4.9.85) A form-photo slot camera frames to the website's
+  // per-slot guide shape — say what belongs inside it.
+  if (panelCameraPhotoSlot) {
+    const def = photoSlotDef(panelCameraPhotoSlot);
+    const what = panelCameraPhotoSlot === 'image' ? 'the face'
+      : panelCameraPhotoSlot === 'signature' ? 'the signature' : 'the house';
+    return (def ? def.name : 'Photo') + ' — fit ' + what + ' inside the dashed frame.';
+  }
   return cameraFramePortrait ? 'Portrait frame — the white frame is the photo.' : 'Perspective is off — the white frame is the photo.';
 }
 
 function updateFrameButton() {
   const btn = $('frameRotateBtn');
   if (!btn) return;
+  // (v4.9.85) A form-photo slot camera has a fixed per-slot frame —
+  // the 4:3/3:4 toggle would do nothing, so it hides while a slot
+  // camera is open.
+  btn.style.display = panelCameraPhotoSlot ? 'none' : '';
   const label = btn.querySelector('.frame-state');
   if (label) label.textContent = cameraFramePortrait ? '3:4' : '4:3';
   btn.title = cameraFramePortrait ? 'Photo frame: portrait 3:4 — tap for landscape 4:3' : 'Photo frame: landscape 4:3 — tap for portrait 3:4';
@@ -5105,6 +5148,29 @@ function drawCameraFrame() {
   ctx.clearRect(0, 0, sw, sh);
   const fr = cameraFrameRect();
   if (!fr) return;
+  // (v4.9.85) A form-photo slot camera draws the website's guide
+  // frame instead of the generic one: a dashed white border with the
+  // area outside dimmed, and no centre cross — the site's frame is
+  // clean. Capture saves exactly this rect (see cameraFrameRect).
+  if (panelCameraPhotoSlot) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, sw, sh);
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(fr.x, fr.y, fr.w, fr.h, 16); else ctx.rect(fr.x, fr.y, fr.w, fr.h);
+    ctx.fill();
+    ctx.restore();
+    ctx.setLineDash([8, 6]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(fr.x, fr.y, fr.w, fr.h, 16); else ctx.rect(fr.x, fr.y, fr.w, fr.h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }
   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 2.5;
   ctx.lineJoin = 'round';
@@ -5137,6 +5203,10 @@ function setCameraHint(text, kind) {
 }
 
 function runCameraEdgeDetect() {
+  // (v4.9.85) A form-photo slot camera never runs document detection
+  // — a face, signature or house is not a document, and the website
+  // has no equivalent. Just draw the slot guide frame.
+  if (panelCameraPhotoSlot) { drawCameraFrame(); setCameraHint(frameHintText(), ''); return; }
   if (!perspectiveEnabled) { drawCameraFrame(); return; } // perspective off: show the 4:3 frame Capture will save
   const video = $('cameraVideo');
   const modal = $('cameraModal');
@@ -5309,6 +5379,9 @@ async function startPanelCamera() {
     setCameraHint(frameHintText(), '');
     drawCameraFrame();
   }
+  // (v4.9.85) A slot camera hides the 4:3/3:4 toggle (fixed frame);
+  // an NID camera shows it again.
+  updateFrameButton();
   if (panelCameraDetectTimer) clearInterval(panelCameraDetectTimer);
   panelCameraDetectTimer = setInterval(runCameraEdgeDetect, 400);
 }
@@ -5415,7 +5488,12 @@ function grabCameraFrame() {
   // the crop editor then opens on an already-straight photo.
   let b64 = '';
   let shotCanvas = null;
-  const quad = panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null;
+  // (v4.9.85) Never warp a form-photo slot shot: the green lock is a
+  // document straightener, and a face/signature/house must keep the
+  // slot frame's crop instead. (The detector never sets a quad during
+  // a slot session, but the guard keeps the slot path independent.)
+  const quad = panelCameraPhotoSlot ? null
+    : (panelCameraQuad && (Date.now() - panelCameraQuad.at < 1500) ? panelCameraQuad.points : null);
   if (quad) {
     const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
     cv.width = Math.max(1, Math.round(video.videoWidth * scale));
@@ -6178,6 +6256,28 @@ function fitFrameRect(sw, sh, portrait) {
   }
   let w = sw * S, h = w * 3 / 4;
   if (h > sh * S) { h = sh * S; w = h * 4 / 3; }
+  return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
+}
+// Form-photo slot guide frames (v4.9.85): the website's own camera
+// guide (verified in its app.js, component data-v-ba197eea) — a
+// dashed white frame with the outside dimmed, one shape per slot:
+// Applicant photo portrait 180:200, Signature a wide 200:80 strip,
+// House photo 3:2 landscape (600:400). Width is min(frac% of the
+// stage, cap px), exactly the site's guideFrameStyle numbers.
+const SLOT_FRAME_SPECS = {
+  image: { frac: 0.56, cap: 280, w: 180, h: 200 },
+  signature: { frac: 0.85, cap: 360, w: 200, h: 80 },
+  house_image: { frac: 0.92, cap: 560, w: 600, h: 400 }
+};
+// The slot guide rect in stage px, centred — clamped to fit the
+// stage height (same 92% rule as fitFrameRect). Pure — tested by
+// tests/sidepanel_freeform_test.js. Returns null for an unknown slot.
+function slotFrameRect(sw, sh, slot) {
+  const spec = SLOT_FRAME_SPECS[slot];
+  if (!spec || !sw || !sh) return null;
+  let w = Math.min(sw * spec.frac, spec.cap);
+  let h = w * spec.h / spec.w;
+  if (h > sh * 0.92) { h = sh * 0.92; w = h * spec.w / spec.h; }
   return { x: (sw - w) / 2, y: (sh - h) / 2, w, h };
 }
 // Keep a Freeform box inside the canvas, at least minSize on a side.
@@ -8064,6 +8164,9 @@ function newBlankForm() {
   state.pulledImages = [];
   // (v4.9.84) Fresh start: no extraction has been attempted for this form.
   state.extractionAttempted = false;
+  // (v4.9.85) A manual New Form: the Form Photos / Household / 2500
+  // gate stays open from the start, so all four cards show.
+  state.manualNewForm = true;
   state.lastExtracted = blankFormData();
   renderPreviews('head');
   renderPreviews('other');
