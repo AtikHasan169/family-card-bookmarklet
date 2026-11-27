@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.88-live';
+const CURRENT_VERSION_TAG = 'v4.9.89-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -1137,6 +1137,11 @@ let panY = 0;
 let isDragging = false;
 let startX = 0;
 let startY = 0;
+// (v4.9.89) Two-finger pinch in progress in the crop editor:
+// { dist, zoom, panX, panY, cx, cy } — the finger distance, the zoom
+// and pan it started from, and the canvas centre (client px, the
+// space the drag handler already uses). Null when not pinching.
+let pinchStart = null;
 let activeCropItem = null;
 // Retake in progress: the state item the next capture/upload replaces
 // (same place in the list, same person binding). Cleared on capture,
@@ -6436,6 +6441,28 @@ function resizeFreeRect(r, handle, dx, dy, cw, ch, minSize) {
   if (handle === 'sw' || handle === 'se' || handle === 's') { h += dy; }
   return clampFreeRect({ x, y, w, h }, cw, ch, m);
 }
+// (v4.9.89) One step of a two-finger pinch zoom in the crop
+// editor — pure. s is the pinch state the previous move left
+// ({ dist, zoom, panX, panY, cx, cy }); p1/p2 are the two current
+// touch points in the same units pan uses (client px, the space the
+// drag handler already works in). The zoom follows the
+// finger-distance ratio, snapped to the slider step (0.05) and
+// clamped to the slider's live min/max, and pan moves so the photo
+// point under the fingers' midpoint stays put. Pure — tested by
+// tests/sidepanel_freeform_test.js.
+function pinchStep(s, p1, p2, minZoom, maxZoom) {
+  const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (!dist || !s.dist || !s.zoom) return s;
+  const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
+  let zoom = s.zoom * (dist / s.dist);
+  zoom = Math.round(zoom / 0.05) * 0.05;
+  zoom = Math.round(zoom * 100) / 100;
+  zoom = Math.max(minZoom, Math.min(maxZoom, zoom));
+  const k = zoom / s.zoom;
+  const panX = midX - s.cx - k * (midX - s.cx - s.panX);
+  const panY = midY - s.cy - k * (midY - s.cy - s.panY);
+  return { dist, zoom, panX, panY, cx: s.cx, cy: s.cy };
+}
 // --- end freeform crop box pure helpers ---
 
 function drawCropCanvas(drawBox = true) {
@@ -7006,6 +7033,22 @@ function setupNativeCropper() {
     window.addEventListener('mouseup', () => { isDragging = false; freeDrag = null; });
 
     canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        // (v4.9.89) Two-finger pinch: take over the gesture — cancel
+        // any one-finger drag and track the finger distance from here.
+        // The camera is out of scope: this is the crop canvas only.
+        e.preventDefault();
+        isDragging = false;
+        freeDrag = null;
+        const r = canvas.getBoundingClientRect();
+        pinchStart = {
+          dist: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY),
+          zoom: zoomLevel,
+          panX, panY,
+          cx: r.left + r.width / 2, cy: r.top + r.height / 2
+        };
+        return;
+      }
       if (e.touches.length === 1) {
         e.preventDefault();
         if (cropRatio === 'free' && freeCropRect) {
@@ -7025,6 +7068,27 @@ function setupNativeCropper() {
     }, { passive: false });
 
     window.addEventListener('touchmove', (e) => {
+      if (pinchStart && e.touches.length === 2) {
+        // (v4.9.89) Pinch zoom: two fingers drive the same zoom the
+        // slider uses (clamped to the slider's live min/max), so
+        // slider, buttons and pinch never disagree — and the slider
+        // value follows, so the two always show the same zoom.
+        e.preventDefault();
+        const zr = $('zoomRange');
+        const minZ = zr ? (parseFloat(zr.min) || 0.5) : 0.5;
+        const maxZ = zr ? (parseFloat(zr.max) || 3.5) : 3.5;
+        const next = pinchStep(pinchStart,
+          { x: e.touches[0].clientX, y: e.touches[0].clientY },
+          { x: e.touches[1].clientX, y: e.touches[1].clientY },
+          minZ, maxZ);
+        pinchStart = next;
+        zoomLevel = next.zoom;
+        panX = next.panX;
+        panY = next.panY;
+        if (zr) zr.value = zoomLevel;
+        drawCropCanvas();
+        return;
+      }
       if (freeDrag && e.touches.length === 1) {
         const p = cropCanvasPoint(e.touches[0].clientX, e.touches[0].clientY);
         const cv = $('cropCanvas');
@@ -7038,9 +7102,44 @@ function setupNativeCropper() {
       panX = e.touches[0].clientX - startX;
       panY = e.touches[0].clientY - startY;
       drawCropCanvas();
-    }, { passive: true });
+    }, { passive: false }); // (v4.9.89) not passive: the pinch branch above must preventDefault, or the page itself pinch-zooms/scrolls while pinching the photo. The one-finger path never prevents default, so it behaves exactly as before.
 
-    window.addEventListener('touchend', () => { isDragging = false; freeDrag = null; });
+    window.addEventListener('touchend', (e) => {
+      if (pinchStart) {
+        // (v4.9.89) Pinch over: with two fingers left (a third finger
+        // came and went), re-baseline from the two that remain so the
+        // next move does not jump; with one finger left, hand the drag
+        // back to it from its current spot, so the photo does not jump.
+        if (e.touches.length === 2) {
+          const cv = $('cropCanvas');
+          const r = cv ? cv.getBoundingClientRect() : null;
+          pinchStart = {
+            dist: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY),
+            zoom: zoomLevel,
+            panX, panY,
+            cx: r ? r.left + r.width / 2 : 0, cy: r ? r.top + r.height / 2 : 0
+          };
+        } else if (e.touches.length === 1) {
+          pinchStart = null;
+          isDragging = true;
+          startX = e.touches[0].clientX - panX;
+          startY = e.touches[0].clientY - panY;
+        } else {
+          pinchStart = null;
+          isDragging = false;
+          freeDrag = null;
+        }
+        return;
+      }
+      isDragging = false; freeDrag = null;
+    });
+    window.addEventListener('touchcancel', () => { pinchStart = null; isDragging = false; freeDrag = null; });
+
+    // (v4.9.89) iOS Safari: stop its own pinch-zoom gesture on the
+    // crop canvas (the CSS touch-action: none already covers modern
+    // browsers; this is the belt for older Safari).
+    canvas.addEventListener('gesturestart', (e) => e.preventDefault());
+    canvas.addEventListener('gesturechange', (e) => e.preventDefault());
   }
 
   $('cancelCropBtn').addEventListener('click', () => {
