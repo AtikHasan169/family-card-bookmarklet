@@ -9,7 +9,7 @@
   // newly uploaded inject.js actually loaded. Bump on every release.
   // v50 was built (address cascade by name) and set aside by the user
   // without ever deploying — the next live version is v51.
-  const FC_INJECT_VERSION = 'v60';
+  const FC_INJECT_VERSION = 'v61';
   window.FC_INJECT_VERSION = FC_INJECT_VERSION;
 
   // --- Profession income table (v52) ---
@@ -4060,7 +4060,12 @@
           // a member row — the only mobile on the form is data.mobile
           // on the head form, filled above. v4.9.50.)
 
-          setReactive(vmMembers, row, 'is_member_disabled', Number(m.is_disabled) === 1 ? 1 : 0);
+          // (v61) A type in the payload implies disabled — a member
+          // carrying a disability_type_id but no is_disabled flag must
+          // still fill the type; the syncOptionSelects guard would
+          // otherwise skip it.
+          const memberHasDisabilityType = m.disability_type_id !== undefined && m.disability_type_id !== null && String(m.disability_type_id).trim() !== '';
+          setReactive(vmMembers, row, 'is_member_disabled', (Number(m.is_disabled) === 1 || memberHasDisabilityType) ? 1 : 0);
           setReactive(vmMembers, row, 'is_gov_job_holder', 0);
 
           // Yes/No radios whose values are known (0/1). The option sync pass

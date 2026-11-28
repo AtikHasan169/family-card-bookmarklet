@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.96-live';
+const CURRENT_VERSION_TAG = 'v4.9.97-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -3210,6 +3210,28 @@ function toggleWarning(el) {
   else el.classList.remove('field-warning');
 }
 
+// Disability type ask (v4.9.97): Disabled Yes with no type picked
+// warns on the type select and shows a "pick the type" hint under
+// the row — the site requires the type for a disabled member, so a
+// blank type must not sit unnoticed. Clears the moment a type is
+// picked (disability_select change) or Disabled is toggled off.
+// Called from the is_disabled change handler, the type change
+// handler, and the card render loop (a card loading with Disabled
+// Yes and no type).
+function refreshDisabilityTypeAsk(cardContainer, targetObj) {
+  if (!cardContainer || !targetObj) return;
+  const typeSel = cardContainer.querySelector('[data-field="disability_type_id"]');
+  const hint = cardContainer.querySelector('[data-disability-type-hint="1"]');
+  const needsType = (targetObj.is_disabled === 1 || targetObj.is_disabled === '1')
+    && (targetObj.disability_type_id === undefined || targetObj.disability_type_id === null || String(targetObj.disability_type_id).trim() === '');
+  if (typeSel) {
+    if (needsType) typeSel.classList.add('field-warning');
+    else typeSel.classList.remove('field-warning');
+    typeSel.title = needsType ? 'প্রতিবন্ধিতার ধরণ বাছুন' : '';
+  }
+  if (hint) hint.style.display = needsType ? '' : 'none';
+}
+
 // NID/BRN digit warning (v4.9.47): the site rejects a wrong-length
 // ID, so the card flags it — amber + a Bangla reason on hover —
 // instead of failing silently on the form. Runs after toggleWarning,
@@ -3632,6 +3654,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
             hSel.value = '203';
           }
         }
+        // (v4.9.97) Disabled Yes with no type picked asks for the
+        // type (warn + hint); toggling off clears the ask.
+        refreshDisabilityTypeAsk(cardContainer, targetObj);
       }
       toggleWarning(inputEl);
       if (onUpdateMeta) onUpdateMeta();
@@ -3684,6 +3709,9 @@ function createFieldControl(f, targetObj, onUpdateMeta, cardContainer, onChange)
       const v = e.target.value;
       targetObj.disability_type_id = v === '' ? undefined : Number(v);
       toggleWarning(inputEl);
+      // (v4.9.97) Picking a type clears the ask (warn + hint); clearing
+      // it back to blank while Disabled is Yes brings the ask back.
+      refreshDisabilityTypeAsk(cardContainer, targetObj);
       if (onUpdateMeta) onUpdateMeta();
       syncJsonOutput();
       notifyChange('disability_type_id', v === '' ? null : Number(v));
@@ -7556,6 +7584,11 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
   } else if (headPrev && headPrev.disability_type_id !== undefined && headPrev.disability_type_id !== null && String(headPrev.disability_type_id).trim() !== '') {
     head.disability_type_id = Number(headPrev.disability_type_id);
   }
+  // (v4.9.97) A stored type implies Disabled — an import carrying a
+  // type but no flag must not hide the type row or skip the fill.
+  if (head.disability_type_id !== undefined && head.disability_type_id !== null && String(head.disability_type_id).trim() !== '' && head.is_disabled !== 1) {
+    head.is_disabled = 1;
+  }
   if (h.health_condition_id !== undefined && h.health_condition_id !== null && String(h.health_condition_id).trim() !== '') {
     head.health_condition_id = Number(h.health_condition_id);
   } else if (headPrev && headPrev.health_condition_id !== undefined && headPrev.health_condition_id !== null && String(headPrev.health_condition_id).trim() !== '') {
@@ -7726,6 +7759,11 @@ function normalizeOutput(raw, preserveOrder = false, prev = null) {
       entry.disability_type_id = Number(m.disability_type_id);
     } else if (prevM2 && prevM2.disability_type_id !== undefined && prevM2.disability_type_id !== null && String(prevM2.disability_type_id).trim() !== '') {
       entry.disability_type_id = Number(prevM2.disability_type_id);
+    }
+    // (v4.9.97) A stored type implies Disabled — an import carrying a
+    // type but no flag must not hide the type row or skip the fill.
+    if (entry.disability_type_id !== undefined && entry.disability_type_id !== null && String(entry.disability_type_id).trim() !== '' && entry.is_disabled !== 1) {
+      entry.is_disabled = 1;
     }
     // (No member mobile: the form never renders a mobile input on a
     // member row — the only mobile on the form is data.mobile on the
@@ -8848,9 +8886,25 @@ function renderExtractedCards(data) {
       if (f.key === 'facilities_ids' && targetObj.is_ssnp_covered !== 1 && targetObj.is_ssnp_covered !== '1') {
         r.style.display = 'none';
       }
-      // Disability (v4.9.49): the type row only shows when Disabled is Yes.
-      if (f.key === 'disability_type_id' && targetObj.is_disabled !== 1 && targetObj.is_disabled !== '1') {
+      // Disability (v4.9.49, v4.9.97): the type row shows when
+      // Disabled is Yes — or when a type is already stored (an import
+      // may carry a type with no flag; the type itself proves the
+      // member is disabled).
+      const hasDisabilityType = targetObj.disability_type_id !== undefined && targetObj.disability_type_id !== null && String(targetObj.disability_type_id).trim() !== '';
+      if (f.key === 'disability_type_id' && targetObj.is_disabled !== 1 && targetObj.is_disabled !== '1' && !hasDisabilityType) {
         r.style.display = 'none';
+      }
+      // Disability type ask (v4.9.97): the hint is created once per
+      // card here; refreshDisabilityTypeAsk owns its visibility (and
+      // the select's warning) — shown only while Disabled is Yes and
+      // no type is picked, including on a card that loads that way.
+      if (f.key === 'disability_type_id') {
+        const typeHint = document.createElement('div');
+        typeHint.dataset.disabilityTypeHint = '1';
+        typeHint.style.cssText = 'font-size:11px; color:var(--danger); padding:0 0 2px 105px;';
+        typeHint.textContent = 'প্রতিবন্ধিতার ধরণ বাছুন';
+        body.appendChild(typeHint);
+        refreshDisabilityTypeAsk(body, targetObj);
       }
       // PMT fallback (v4.9.69): the separate floor/wall/roof rows only
       // show when the home combination is "other" — a combo pick sets
