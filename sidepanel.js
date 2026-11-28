@@ -7,7 +7,7 @@ const STORAGE_PROVIDER = 'fc_pro_api_provider';
 const STORAGE_CUSTOM_URL = 'fc_pro_custom_url';
 const STORAGE_CUSTOM_BEARER = 'fc_pro_custom_bearer';
 const STORAGE_CUSTOM_THINKING = 'fc_pro_custom_thinking';
-const CURRENT_VERSION_TAG = 'v4.9.95-live';
+const CURRENT_VERSION_TAG = 'v4.9.96-live';
 
 const RELATION_OPTIONS = [
   { value: 'Auto', label: 'Auto (Son / Daughter)', id: null, gender: null },
@@ -332,6 +332,13 @@ const PMT_LAND_OPTIONS = [
   { id: 407, label: '১.৫ একর বা তার বেশি' },
   { id: 408, label: 'কোন জমি নেই' }
 ];
+const PMT_OWNERSHIP_OPTIONS = [
+  { id: 572, label: 'নিজস্ব' },
+  { id: 573, label: 'ভাড়া (একক)' },
+  { id: 574, label: 'ভাড়া (সাবলেট)' },
+  { id: 575, label: 'বিনা ভাড়া' },
+  { id: 605, label: 'সরকারী খাস জমি/ আশ্রয়ন' }
+];
 const PMT_OCCUPATION_OPTIONS = [
   { id: 402, label: 'কৃষি খাতে শ্রম' },
   { id: 403, label: 'অকৃষি খাতে শ্রম' },
@@ -437,7 +444,7 @@ const PMT_ASSET_DEFAULT_IDS = [559, 563, 435, 591];
 // room is uncommon), land 0.50 acre or less (most common), diesel
 // 0 kg, LPG 0 kg when the fuel is not LPG. Occupation and rooms
 // have no default — picked by hand.
-const PMT_PICK_DEFAULTS = { kitchen: 297, dining: 292, land: 405, diesel: 596, lpg: 590 };
+const PMT_PICK_DEFAULTS = { kitchen: 297, dining: 292, land: 405, diesel: 596, lpg: 590, ownership: 572 };
 // PMT scores, non-zero options only (from getApplicationPageData).
 // The running total is the sum of the picked answers' scores:
 // -95 (poorest) to +237 (best-off). It is NOT the government's
@@ -577,6 +584,7 @@ function resolveHeadPmtPicks(rawHead, prevHead, stickyCombo, fuelId, importedAss
     pmt_kitchen: pick('pmt_kitchen', 36, PMT_PICK_DEFAULTS.kitchen),
     pmt_dining: pick('pmt_dining', 33, PMT_PICK_DEFAULTS.dining),
     pmt_land: pick('pmt_land', 25, PMT_PICK_DEFAULTS.land),
+    pmt_ownership: pick('pmt_ownership', 571, PMT_PICK_DEFAULTS.ownership),
     pmt_occupation: pick('pmt_occupation', 22, undefined),
     pmt_lpg: pick('pmt_lpg', 579, Number(fuelId) === 556 ? undefined : PMT_PICK_DEFAULTS.lpg),
     pmt_diesel: pick('pmt_diesel', 595, PMT_PICK_DEFAULTS.diesel),
@@ -634,6 +642,7 @@ function pmtOverridesFromHead(head) {
   set(36, h.pmt_kitchen);
   set(33, h.pmt_dining);
   set(25, h.pmt_land);
+  set(571, h.pmt_ownership);
   set(22, h.pmt_occupation);
   set(500, h.no_of_room);
   set(579, h.pmt_lpg);
@@ -867,6 +876,7 @@ const HOUSEHOLD_FIELDS = [
   { key: 'pmt_kitchen', label: 'খানায় কি পৃথক রান্নাঘর আছে?', type: 'pmt_option_select', options: PMT_KITCHEN_OPTIONS },
   { key: 'pmt_dining', label: 'খানায় কি পৃথক খাবার ঘর/কক্ষ আছে?', type: 'pmt_option_select', options: PMT_DINING_OPTIONS },
   { key: 'pmt_land', label: 'খানার সকল সদস্যের মালিকানাধীন মোট জমির পরিমাণ কত?', type: 'pmt_option_select', options: PMT_LAND_OPTIONS },
+  { key: 'pmt_ownership', label: 'ভূমির বা বসতঘরের মালিকানা ধরণ', type: 'pmt_option_select', options: PMT_OWNERSHIP_OPTIONS },
   { key: 'pmt_occupation', label: 'খানার কোন সদস্য কি কৃষি অথবা অকৃষি শ্রমিক হিসেবে নিয়োজিত আছেন?', type: 'pmt_option_select', options: PMT_OCCUPATION_OPTIONS },
   { key: 'no_of_room', label: 'খানায় মোট রুম/কক্ষ সংখ্যা', type: 'pmt_option_select', options: PMT_ROOMS_OPTIONS },
   { key: 'pmt_lpg', label: 'খানায় রান্নার জ্বালানির প্রধান উপকরণ এলপিজি গ্যাস হলে প্রতিমাসে এলপিজি গ্যাস ব্যবহারের পরিমান', type: 'pmt_option_select', options: PMT_LPG_OPTIONS },
@@ -8180,7 +8190,7 @@ function livelihoodForHeadProfession(professionId) {
 // resolveHeadPmtPicks.
 const HEAD_ONLY_KEYS = [
   'mobile_number', 'mfs_provider_id', 'mfs_number',
-  'pmt_kitchen', 'pmt_dining', 'pmt_land', 'pmt_occupation', 'pmt_lpg', 'pmt_diesel', 'pmt_assets', 'home_combo', 'pmt_floor', 'pmt_wall', 'pmt_roof', 'pmt_answers', 'program_fields',
+  'pmt_kitchen', 'pmt_dining', 'pmt_land', 'pmt_ownership', 'pmt_occupation', 'pmt_lpg', 'pmt_diesel', 'pmt_assets', 'home_combo', 'pmt_floor', 'pmt_wall', 'pmt_roof', 'pmt_answers', 'program_fields',
   'spouse_name_bn', 'spouse_name_en', 'identification_mark', 'nationality', 'email', 'account_name', 'account_number', 'address_text', 'address_post_code', 'permanent_address_text', 'permanent_address_post_code', 'nominee_en', 'nominee_bn', 'nominee_verification_number', 'nominee_date_of_birth', 'nominee_address', 'nominee_relation_with_beneficiary', 'nominee_nationality', 'mobile_operator', 'account_type_label', 'bank_name', 'branch_name', 'bank_division_name', 'bank_district_name', 'account_owner', 'address_division_name', 'address_district_name', 'address_thana_name', 'address_union_name', 'address_pouro_name', 'address_city_name', 'address_city_thana_name', 'address_district_pouro_name', 'address_ward_name', 'address_location_type_name', 'address_ward_key', 'permanent_address_division_name', 'permanent_address_district_name', 'permanent_address_thana_name', 'permanent_address_union_name', 'permanent_address_pouro_name', 'permanent_address_city_name', 'permanent_address_city_thana_name', 'permanent_address_district_pouro_name', 'permanent_address_ward_name', 'permanent_address_location_type_name', 'permanent_address_ward_key', 'house_size', 'no_of_room_name',
   'mobile_operator_id', 'disability_id', 'account_type', 'bank_name_id', 'branch_name_id', 'bank_division_id', 'bank_district_id', 'account_owner_id', 'address_division_id', 'address_district_id', 'address_thana_id', 'address_union_id', 'address_pouro_id', 'address_city_id', 'address_city_thana_id', 'address_district_pouro_id', 'address_ward_id', 'address_location_type_id', 'address_sub_location_type_id', 'permanent_address_division_id', 'permanent_address_district_id', 'permanent_address_thana_id', 'permanent_address_union_id', 'permanent_address_pouro_id', 'permanent_address_city_id', 'permanent_address_city_thana_id', 'permanent_address_district_pouro_id', 'permanent_address_ward_id', 'permanent_address_location_type_id', 'permanent_address_sub_location_type_id', 'no_of_room', 'program_male', 'program_female', 'program_hijra', 'program_abroad_male', 'program_abroad_female', 'program_abroad_hijra'
 ];
@@ -8484,7 +8494,7 @@ function blankFormData() {
       is_currently_student: 0,
       is_ssnp_covered: 0, facilities_ids: [],
       is_dss_training_or_financial_benefit: 0,
-      pmt_kitchen: 297, pmt_dining: 292, pmt_land: 405, pmt_diesel: 596, pmt_lpg: 590,
+      pmt_kitchen: 297, pmt_dining: 292, pmt_land: 405, pmt_diesel: 596, pmt_lpg: 590, pmt_ownership: 572,
       pmt_assets: [559, 563, 435, 591],
       home_combo: sticky === null ? undefined : sticky,
       pmt_floor: comboParts ? comboParts.floor : undefined,
